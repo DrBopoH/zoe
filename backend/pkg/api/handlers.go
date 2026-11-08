@@ -29,10 +29,27 @@ func NewServer(storage *db.Storage, monoClient *mono.Client) *Server {
 	}
 }
 
+func (s *Server) updateStatus(msg string) {
+	s.syncMutex.Lock()
+	s.syncStatus = msg
+	s.syncMutex.Unlock()
+	log.Printf("[Sync Status] %s", msg)
+}
+
+// Человекочитаемое форматирование даты N (день) name (месяц) YYYY
+var ruMonthsShort = []string{
+	"", "янв.", "февр.", "марта", "апр.", "мая", "июня",
+	"июля", "авг.", "сент.", "окт.", "нояб.", "декабря",
+}
+
+func formatHumanDate(t time.Time) string {
+	return fmt.Sprintf("%d %s %d", t.Day(), ruMonthsShort[t.Month()], t.Year())
+}
+
 func (s *Server) EnableCORS(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Token")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
@@ -40,6 +57,265 @@ func (s *Server) EnableCORS(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+func (s *Server) runFullCrawler() {
+	defer func() {
+		s.syncMutex.Lock()
+		s.isSyncing = false
+		s.syncStatus = "COMPLETED"
+		s.syncMutex.Unlock()
+	}()
+
+	info, err := s.monoClient.GetClientInfo()
+	if err != nil {
+		log.Printf("[Sync Error] GetClientInfo: %v", err)
+		s.updateStatus("Ошибка авторизации API")
+		return
+	}
+
+	_ = s.storage.SaveAccounts(info.Accounts, info.Name)
+
+	if len(info.Accounts) == 0 {
+		s.updateStatus("Счета не найдены")
+		return
+	}
+
+	minHistoricalDate := time.Date(2017, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	for accIndex, acc := range info.Accounts {
+		s.updateStatus(fmt.Sprintf("Сбор аккаунта %d/%d (%s)", accIndex+1, len(info.Accounts), acc.Type))
+
+		to := time.Now()
+		emptyWindowsCount := 0
+
+		for {
+			from := to.AddDate(0, 0, -30)
+
+			if from.Before(minHistoricalDate) {
+				log.Printf("[Sync] Достигнут лимит глубины истории (2017 год) для счета %s", acc.ID)
+				break
+			}
+
+			s.updateStatus(fmt.Sprintf("[%s] Окно %s — %s",
+				acc.Type,
+				formatHumanDate(from),
+				formatHumanDate(to),
+			))
+
+			statement, err := s.monoClient.GetStatement(acc.ID, from, to)
+
+			if _, isRateErr := err.(*mono.RateLimitError); isRateErr {
+				s.updateStatus("Превышен лимит API (429). Ожидание 65 секунд...")
+				time.Sleep(65 * time.Second)
+				continue
+			}
+
+			// Обработка 400 Bad Request — дошли до даты открытия счета
+			if _, isBadRequest := err.(*mono.BadRequestError); isBadRequest {
+				log.Printf("[Sync] Достигнута дата открытия счета %s (HTTP 400). История заполнена полностью.", acc.ID)
+				s.updateStatus(fmt.Sprintf("[%s] Вся история успешного сбора затянута", acc.Type))
+				break
+			}
+
+			if err != nil {
+				log.Printf("[Sync Error] Statement err: %v", err)
+				s.updateStatus("Ошибка запроса выписки")
+				break
+			}
+
+			if len(statement) == 0 {
+				emptyWindowsCount++
+				log.Printf("[Sync] Окно %s — %s пустое (%d подряд). Шагаем дальше...",
+					formatHumanDate(from), formatHumanDate(to), emptyWindowsCount)
+
+				if emptyWindowsCount >= 12 {
+					log.Printf("[Sync] 12 месяцев тишины. Завершаем сбор счета %s", acc.ID)
+					break
+				}
+
+				to = from.Add(-1 * time.Second)
+				time.Sleep(61 * time.Second)
+				continue
+			}
+
+			emptyWindowsCount = 0
+
+			if err := s.storage.SaveTransactions(acc.ID, statement); err != nil {
+				log.Printf("[Sync Error] DB Save: %v", err)
+				break
+			}
+
+			oldestUnix := statement[len(statement)-1].Time
+			to = time.Unix(oldestUnix, 0).Add(-1 * time.Second)
+
+			s.updateStatus(fmt.Sprintf("Загружено %d транзакций. Кулдаун 61с...", len(statement)))
+			time.Sleep(61 * time.Second)
+		}
+	}
+}
+
+// --- USERS HANDLERS (FULL CRUD) ---
+
+func (s *Server) HandleUsers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		users, err := s.storage.GetUsers()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(users)
+
+	case http.MethodPost:
+		var u db.User
+		if err := json.NewDecoder(r.Body).Decode(&u); err != nil {
+			http.Error(w, "Invalid payload", http.StatusBadRequest)
+			return
+		}
+		if u.ID == "" {
+			u.ID = fmt.Sprintf("user_%d", time.Now().UnixNano())
+		}
+		if err := s.storage.CreateUser(u); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(u)
+
+	case http.MethodPut:
+		var u db.User
+		if err := json.NewDecoder(r.Body).Decode(&u); err != nil {
+			http.Error(w, "Invalid payload", http.StatusBadRequest)
+			return
+		}
+		if err := s.storage.UpdateUser(u); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+
+	case http.MethodDelete:
+		id := r.URL.Query().Get("id")
+		if id == "" {
+			http.Error(w, "Missing id", http.StatusBadRequest)
+			return
+		}
+		if err := s.storage.DeleteUser(id); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+type AliasRequest struct {
+	UserID string `json:"user_id"`
+	Alias  string `json:"alias"`
+}
+
+func (s *Server) HandleAddAlias(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodPost {
+		var req AliasRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid payload", http.StatusBadRequest)
+			return
+		}
+		if err := s.storage.AddUserAlias(req.UserID, req.Alias); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+		return
+	}
+
+	if r.Method == http.MethodDelete {
+		alias := r.URL.Query().Get("alias")
+		if alias == "" {
+			http.Error(w, "Missing alias", http.StatusBadRequest)
+			return
+		}
+		if err := s.storage.RemoveUserAlias(alias); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+		return
+	}
+
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+type LinkIBANRequest struct {
+	UserID            string `json:"user_id"`
+	AccountIdentifier string `json:"account_identifier"`
+	Note              string `json:"note"`
+}
+
+func (s *Server) HandleLinkAccount(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodPost {
+		var req LinkIBANRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid payload", http.StatusBadRequest)
+			return
+		}
+		if err := s.storage.LinkAccountToUser(req.UserID, req.AccountIdentifier, req.Note); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+		return
+	}
+
+	if r.Method == http.MethodDelete {
+		identifier := r.URL.Query().Get("identifier")
+		if identifier == "" {
+			http.Error(w, "Missing identifier", http.StatusBadRequest)
+			return
+		}
+		if err := s.storage.UnlinkAccountFromUser(identifier); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+		return
+	}
+
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+type UpdateAccountManualRequest struct {
+	AccountID   string  `json:"account_id"`
+	IBAN        string  `json:"iban"`
+	CardNumber  string  `json:"card_number"`
+	CreditLimit float64 `json:"credit_limit"`
+}
+
+func (s *Server) HandleUpdateAccountManual(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req UpdateAccountManualRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.storage.UpdateAccountManualDetails(req.AccountID, req.IBAN, req.CardNumber, req.CreditLimit); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }
 
 func (s *Server) HandleGetAccounts(w http.ResponseWriter, r *http.Request) {
@@ -101,82 +377,6 @@ func (s *Server) HandleFullHistoricalSync(w http.ResponseWriter, r *http.Request
 		"status":  "started",
 		"message": "Полная историческая синхронизация запущена.",
 	})
-}
-
-func (s *Server) runFullCrawler() {
-	defer func() {
-		s.syncMutex.Lock()
-		s.isSyncing = false
-		s.syncStatus = "COMPLETED"
-		s.syncMutex.Unlock()
-	}()
-
-	info, err := s.monoClient.GetClientInfo()
-	if err != nil {
-		log.Printf("[Sync Error] GetClientInfo: %v", err)
-		s.updateStatus("Ошибка авторизации API")
-		return
-	}
-
-	_ = s.storage.SaveAccounts(info.Accounts, info.Name)
-
-	if len(info.Accounts) == 0 {
-		s.updateStatus("Счета не найдены")
-		return
-	}
-
-	for accIndex, acc := range info.Accounts {
-		s.updateStatus(fmt.Sprintf("Сбор аккаунта %d/%d (%s)", accIndex+1, len(info.Accounts), acc.Type))
-
-		to := time.Now()
-
-		for {
-			from := to.AddDate(0, 0, -30)
-
-			s.updateStatus(fmt.Sprintf("[%s] Запрос окна %s — %s",
-				acc.Type,
-				from.Format("02.01.2006"),
-				to.Format("02.01.2006"),
-			))
-
-			statement, err := s.monoClient.GetStatement(acc.ID, from, to)
-
-			if _, isRateErr := err.(*mono.RateLimitError); isRateErr {
-				s.updateStatus("Превышен лимит API (429). Ожидание 65 секунд...")
-				time.Sleep(65 * time.Second)
-				continue
-			}
-
-			if err != nil {
-				log.Printf("[Sync Error] Statement err: %v", err)
-				s.updateStatus("Ошибка запроса выписки")
-				break
-			}
-
-			if len(statement) == 0 {
-				log.Printf("[Sync] Достигнут конец истории для счета %s", acc.ID)
-				break
-			}
-
-			if err := s.storage.SaveTransactions(acc.ID, statement); err != nil {
-				log.Printf("[Sync Error] DB Save: %v", err)
-				break
-			}
-
-			oldestUnix := statement[len(statement)-1].Time
-			to = time.Unix(oldestUnix, 0).Add(-1 * time.Second)
-
-			s.updateStatus(fmt.Sprintf("Загружено %d транзакций. Кулдаун 61с...", len(statement)))
-			time.Sleep(61 * time.Second)
-		}
-	}
-}
-
-func (s *Server) updateStatus(msg string) {
-	s.syncMutex.Lock()
-	s.syncStatus = msg
-	s.syncMutex.Unlock()
-	log.Printf("[Sync Progress] %s", msg)
 }
 
 type UpdateCreditLimitRequest struct {

@@ -32,6 +32,7 @@ type AccountDTO struct {
 	CurrencyCode int      `json:"currencyCode"`
 	CashbackType string   `json:"cashbackType"`
 	MaskedPan    []string `json:"maskedPan"`
+	IBAN         string   `json:"iban"`
 }
 
 type UserInfoDTO struct {
@@ -44,6 +45,10 @@ type StatementItemDTO struct {
 	ID              string `json:"id"`
 	Time            int64  `json:"time"`
 	Description     string `json:"description"`
+	Comment         string `json:"comment"`
+	CounterEdrpou   string `json:"counterEdrpou"`
+	CounterIban     string `json:"counterIban"`
+	CounterName     string `json:"counterName"`
 	MCC             int    `json:"mcc"`
 	OriginalMCC     int    `json:"originalMcc"`
 	Amount          int64  `json:"amount"`
@@ -60,12 +65,17 @@ func (e *RateLimitError) Error() string {
 	return "rate limit 429: mono api limits to 1 req / 60 sec"
 }
 
+type BadRequestError struct{}
+
+func (e *BadRequestError) Error() string {
+	return "bad request 400: reached account creation limit"
+}
+
 func (c *Client) GetClientInfo() (*UserInfoDTO, error) {
-	req, err := http.NewRequest("GET", BaseURL+"/personal/client-info", nil)
+	req, err := c.newRequest("GET", BaseURL+"/personal/client-info")
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("X-Token", c.token)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -90,11 +100,10 @@ func (c *Client) GetClientInfo() (*UserInfoDTO, error) {
 
 func (c *Client) GetStatement(accountID string, from, to time.Time) ([]StatementItemDTO, error) {
 	url := fmt.Sprintf("%s/personal/statement/%s/%d/%d", BaseURL, accountID, from.Unix(), to.Unix())
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := c.newRequest("GET", url)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("X-Token", c.token)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -104,6 +113,9 @@ func (c *Client) GetStatement(accountID string, from, to time.Time) ([]Statement
 
 	if resp.StatusCode == 429 {
 		return nil, &RateLimitError{}
+	}
+	if resp.StatusCode == 400 {
+		return nil, &BadRequestError{}
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("mono statement status: %d", resp.StatusCode)
@@ -115,4 +127,13 @@ func (c *Client) GetStatement(accountID string, from, to time.Time) ([]Statement
 	}
 
 	return items, nil
+}
+
+func (c *Client) newRequest(method, url string) (*http.Request, error) {
+	req, err := http.NewRequest(method, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Token", c.token)
+	return req, nil
 }

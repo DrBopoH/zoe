@@ -40,11 +40,20 @@ func main() {
 	monoClient := mono.NewClient(monoToken)
 	server := api.NewServer(storage, monoClient)
 
+	// API Роуты Счетов и Транзакций
 	http.HandleFunc("/api/accounts", server.EnableCORS(server.HandleGetAccounts))
+	http.HandleFunc("/api/accounts/update", server.EnableCORS(server.HandleUpdateAccountManual))
+	http.HandleFunc("/api/accounts/credit-limit", server.EnableCORS(server.HandleUpdateCreditLimit))
 	http.HandleFunc("/api/transactions", server.EnableCORS(server.HandleGetTransactions))
+	
+	// API Роуты Синхронизации
 	http.HandleFunc("/api/sync/status", server.EnableCORS(server.HandleGetStatus))
 	http.HandleFunc("/api/sync/full", server.EnableCORS(server.HandleFullHistoricalSync))
-	http.HandleFunc("/api/accounts/credit-limit", server.EnableCORS(server.HandleUpdateCreditLimit))
+
+	// API Роуты Сущностей и Связей (Пользователи / IBAN / Алиасы)
+	http.HandleFunc("/api/users", server.EnableCORS(server.HandleUsers))
+	http.HandleFunc("/api/users/alias", server.EnableCORS(server.HandleAddAlias))
+	http.HandleFunc("/api/users/link-account", server.EnableCORS(server.HandleLinkAccount))
 
 	log.Printf("Backend server running on http://localhost:%s\n", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
