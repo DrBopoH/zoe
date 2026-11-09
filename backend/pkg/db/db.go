@@ -10,20 +10,32 @@ import (
 )
 
 type Storage struct {
-	db *sql.DB
+	cacheDB *sql.DB // Банковский кэш (accounts, transactions)
+	coreDB  *sql.DB // Ручные графы (users, user_accounts, user_aliases)
 }
 
-func NewStorage(dbPath string) (*Storage, error) {
-	db, err := sql.Open("sqlite", dbPath)
+func NewStorage(cacheDBPath, coreDBPath string) (*Storage, error) {
+	cacheDB, err := sql.Open("sqlite", cacheDBPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to open cache db: %w", err)
+	}
+	if err := cacheDB.Ping(); err != nil {
+		return nil, fmt.Errorf("failed to ping cache db: %w", err)
 	}
 
-	if err := db.Ping(); err != nil {
-		return nil, err
+	coreDB, err := sql.Open("sqlite", coreDBPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open core db: %w", err)
+	}
+	if err := coreDB.Ping(); err != nil {
+		return nil, fmt.Errorf("failed to ping core db: %w", err)
 	}
 
-	s := &Storage{db: db}
+	s := &Storage{
+		cacheDB: cacheDB,
+		coreDB:  coreDB,
+	}
+
 	if err := s.initTables(); err != nil {
 		return nil, err
 	}
@@ -32,7 +44,8 @@ func NewStorage(dbPath string) (*Storage, error) {
 }
 
 func (s *Storage) initTables() error {
-	queries := []string{
+	// КЭШ И ВЫПИСКИ
+	cacheQueries := []string{
 		`CREATE TABLE IF NOT EXISTS accounts (
 			id TEXT PRIMARY KEY,
 			name TEXT,
@@ -62,6 +75,16 @@ func (s *Storage) initTables() error {
 			is_hold BOOLEAN,
 			resolved_user_id TEXT
 		);`,
+	}
+
+	for _, q := range cacheQueries {
+		if _, err := s.cacheDB.Exec(q); err != nil {
+			return fmt.Errorf("cache db table init err: %w", err)
+		}
+	}
+
+	// ЯДРО СВЯЗЕЙ И ЛИЦ
+	coreQueries := []string{
 		`CREATE TABLE IF NOT EXISTS users (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
@@ -81,9 +104,9 @@ func (s *Storage) initTables() error {
 		);`,
 	}
 
-	for _, q := range queries {
-		if _, err := s.db.Exec(q); err != nil {
-			return err
+	for _, q := range coreQueries {
+		if _, err := s.coreDB.Exec(q); err != nil {
+			return fmt.Errorf("core db table init err: %w", err)
 		}
 	}
 
@@ -124,8 +147,18 @@ type Transaction struct {
 	ResolvedUserID string  `json:"resolved_user_id,omitempty"`
 }
 
+// WipeCache очищает только кэш-базу, не затрагивая coreDB
+func (s *Storage) WipeCache() error {
+	_, err1 := s.cacheDB.Exec("DELETE FROM transactions;")
+	_, err2 := s.cacheDB.Exec("DELETE FROM accounts;")
+	if err1 != nil {
+		return err1
+	}
+	return err2
+}
+
 func (s *Storage) SaveAccounts(accounts []mono.AccountDTO, ownerName string) error {
-	tx, err := s.db.Begin()
+	tx, err := s.cacheDB.Begin()
 	if err != nil {
 		return err
 	}
@@ -175,12 +208,12 @@ func (s *Storage) SaveAccounts(accounts []mono.AccountDTO, ownerName string) err
 }
 
 func (s *Storage) UpdateCreditLimit(accID string, creditLimit float64) error {
-	_, err := s.db.Exec("UPDATE accounts SET credit_limit = ? WHERE id = ?", creditLimit, accID)
+	_, err := s.cacheDB.Exec("UPDATE accounts SET credit_limit = ? WHERE id = ?", creditLimit, accID)
 	return err
 }
 
 func (s *Storage) UpdateAccountManualDetails(accID, iban, cardNumber string, creditLimit float64) error {
-	_, err := s.db.Exec(`
+	_, err := s.cacheDB.Exec(`
 		UPDATE accounts 
 		SET iban = CASE WHEN ? != '' THEN ? ELSE iban END,
 		    masked_pan = CASE WHEN ? != '' THEN ? ELSE masked_pan END,
@@ -191,7 +224,7 @@ func (s *Storage) UpdateAccountManualDetails(accID, iban, cardNumber string, cre
 }
 
 func (s *Storage) SaveTransactions(accID string, items []mono.StatementItemDTO) error {
-	tx, err := s.db.Begin()
+	tx, err := s.cacheDB.Begin()
 	if err != nil {
 		return err
 	}
@@ -246,32 +279,47 @@ func (s *Storage) SaveTransactions(accID string, items []mono.StatementItemDTO) 
 }
 
 func (s *Storage) AutoResolveTransactions() {
-	s.db.Exec(`
-		UPDATE transactions
-		SET resolved_user_id = (
-			SELECT ua.user_id 
-			FROM user_accounts ua 
-			WHERE LOWER(transactions.counter_iban) = LOWER(ua.account_identifier)
-			LIMIT 1
-		)
-		WHERE counter_iban IS NOT NULL AND counter_iban != '' AND resolved_user_id IS NULL;
-	`)
+	users, err := s.GetUsers()
+	if err != nil || len(users) == 0 {
+		return
+	}
 
-	s.db.Exec(`
-		UPDATE transactions
-		SET resolved_user_id = (
-			SELECT ual.user_id 
-			FROM user_aliases ual 
-			WHERE LOWER(transactions.counter_name) LIKE '%' || LOWER(ual.alias) || '%'
-			   OR LOWER(transactions.description) LIKE '%' || LOWER(ual.alias) || '%'
-			LIMIT 1
-		)
-		WHERE resolved_user_id IS NULL;
-	`)
+	tx, err := s.cacheDB.Begin()
+	if err != nil {
+		return
+	}
+	defer tx.Rollback()
+
+	for _, u := range users {
+		for _, iban := range u.IBANs {
+			if iban == "" {
+				continue
+			}
+			_, _ = tx.Exec(`
+				UPDATE transactions 
+				SET resolved_user_id = ?
+				WHERE counter_iban IS NOT NULL AND counter_iban != '' AND LOWER(counter_iban) = LOWER(?)
+			`, u.ID, iban)
+		}
+
+		for _, alias := range u.Aliases {
+			if alias == "" {
+				continue
+			}
+			_, _ = tx.Exec(`
+				UPDATE transactions
+				SET resolved_user_id = ?
+				WHERE (resolved_user_id IS NULL OR resolved_user_id = '')
+				  AND (LOWER(counter_name) LIKE '%' || LOWER(?) || '%' OR LOWER(description) LIKE '%' || LOWER(?) || '%')
+			`, u.ID, alias, alias)
+		}
+	}
+
+	_ = tx.Commit()
 }
 
 func (s *Storage) GetUsers() ([]User, error) {
-	rows, err := s.db.Query("SELECT id, name, role, COALESCE(avatar_url, '') FROM users ORDER BY name ASC")
+	rows, err := s.coreDB.Query("SELECT id, name, role, COALESCE(avatar_url, '') FROM users ORDER BY name ASC")
 	if err != nil {
 		return nil, err
 	}
@@ -291,7 +339,7 @@ func (s *Storage) GetUsers() ([]User, error) {
 }
 
 func (s *Storage) getUserIBANs(userID string) []string {
-	rows, err := s.db.Query("SELECT account_identifier FROM user_accounts WHERE user_id = ?", userID)
+	rows, err := s.coreDB.Query("SELECT account_identifier FROM user_accounts WHERE user_id = ?", userID)
 	if err != nil {
 		return []string{}
 	}
@@ -307,7 +355,7 @@ func (s *Storage) getUserIBANs(userID string) []string {
 }
 
 func (s *Storage) getUserAliases(userID string) []string {
-	rows, err := s.db.Query("SELECT alias FROM user_aliases WHERE user_id = ?", userID)
+	rows, err := s.coreDB.Query("SELECT alias FROM user_aliases WHERE user_id = ?", userID)
 	if err != nil {
 		return []string{}
 	}
@@ -323,22 +371,22 @@ func (s *Storage) getUserAliases(userID string) []string {
 }
 
 func (s *Storage) CreateUser(u User) error {
-	_, err := s.db.Exec("INSERT INTO users (id, name, role, avatar_url) VALUES (?, ?, ?, ?)", u.ID, u.Name, u.Role, u.AvatarURL)
+	_, err := s.coreDB.Exec("INSERT INTO users (id, name, role, avatar_url) VALUES (?, ?, ?, ?)", u.ID, u.Name, u.Role, u.AvatarURL)
 	return err
 }
 
 func (s *Storage) UpdateUser(u User) error {
-	_, err := s.db.Exec("UPDATE users SET name = ?, role = ?, avatar_url = ? WHERE id = ?", u.Name, u.Role, u.AvatarURL, u.ID)
+	_, err := s.coreDB.Exec("UPDATE users SET name = ?, role = ?, avatar_url = ? WHERE id = ?", u.Name, u.Role, u.AvatarURL, u.ID)
 	return err
 }
 
 func (s *Storage) DeleteUser(id string) error {
-	_, err := s.db.Exec("DELETE FROM users WHERE id = ?", id)
+	_, err := s.coreDB.Exec("DELETE FROM users WHERE id = ?", id)
 	return err
 }
 
 func (s *Storage) LinkAccountToUser(userID, identifier, note string) error {
-	_, err := s.db.Exec(`
+	_, err := s.coreDB.Exec(`
 		INSERT INTO user_accounts (user_id, account_identifier, note) VALUES (?, ?, ?)
 		ON CONFLICT(account_identifier) DO UPDATE SET user_id = excluded.user_id, note = excluded.note
 	`, userID, identifier, note)
@@ -349,15 +397,15 @@ func (s *Storage) LinkAccountToUser(userID, identifier, note string) error {
 }
 
 func (s *Storage) UnlinkAccountFromUser(identifier string) error {
-	_, err := s.db.Exec("DELETE FROM user_accounts WHERE account_identifier = ?", identifier)
+	_, err := s.coreDB.Exec("DELETE FROM user_accounts WHERE account_identifier = ?", identifier)
 	if err == nil {
-		s.db.Exec("UPDATE transactions SET resolved_user_id = NULL WHERE counter_iban = ?", identifier)
+		s.cacheDB.Exec("UPDATE transactions SET resolved_user_id = NULL WHERE counter_iban = ?", identifier)
 	}
 	return err
 }
 
 func (s *Storage) AddUserAlias(userID, alias string) error {
-	_, err := s.db.Exec(`
+	_, err := s.coreDB.Exec(`
 		INSERT INTO user_aliases (user_id, alias) VALUES (?, ?)
 		ON CONFLICT(alias) DO UPDATE SET user_id = excluded.user_id
 	`, userID, alias)
@@ -368,15 +416,15 @@ func (s *Storage) AddUserAlias(userID, alias string) error {
 }
 
 func (s *Storage) RemoveUserAlias(alias string) error {
-	_, err := s.db.Exec("DELETE FROM user_aliases WHERE alias = ?", alias)
+	_, err := s.coreDB.Exec("DELETE FROM user_aliases WHERE alias = ?", alias)
 	if err == nil {
-		s.db.Exec("UPDATE transactions SET resolved_user_id = NULL WHERE counter_name LIKE '%' || ? || '%' OR description LIKE '%' || ? || '%'", alias, alias)
+		s.cacheDB.Exec("UPDATE transactions SET resolved_user_id = NULL WHERE counter_name LIKE '%' || ? || '%' OR description LIKE '%' || ? || '%'", alias, alias)
 	}
 	return err
 }
 
 func (s *Storage) GetAccounts() ([]Account, error) {
-	rows, err := s.db.Query("SELECT id, name, balance, credit_limit, type, currency_code, COALESCE(iban, ''), COALESCE(masked_pan, '') FROM accounts")
+	rows, err := s.cacheDB.Query("SELECT id, name, balance, credit_limit, type, currency_code, COALESCE(iban, ''), COALESCE(masked_pan, '') FROM accounts")
 	if err != nil {
 		return nil, err
 	}
@@ -394,7 +442,7 @@ func (s *Storage) GetAccounts() ([]Account, error) {
 }
 
 func (s *Storage) GetTransactions(limit int) ([]Transaction, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.cacheDB.Query(`
 		SELECT id, account_id, time, COALESCE(description, ''), COALESCE(comment, ''),
 		       COALESCE(counter_iban, ''), COALESCE(counter_name, ''), mcc, amount, currency_code,
 		       COALESCE(resolved_user_id, '')
@@ -422,10 +470,10 @@ func (s *Storage) GetTransactions(limit int) ([]Transaction, error) {
 
 func (s *Storage) GetSyncStats() (map[string]interface{}, error) {
 	var total int
-	_ = s.db.QueryRow("SELECT COUNT(*) FROM transactions").Scan(&total)
+	_ = s.cacheDB.QueryRow("SELECT COUNT(*) FROM transactions").Scan(&total)
 
 	var oldestUnix, newestUnix sql.NullInt64
-	_ = s.db.QueryRow("SELECT MIN(time), MAX(time) FROM transactions").Scan(&oldestUnix, &newestUnix)
+	_ = s.cacheDB.QueryRow("SELECT MIN(time), MAX(time) FROM transactions").Scan(&oldestUnix, &newestUnix)
 
 	oldestStr := "—"
 	newestStr := "—"

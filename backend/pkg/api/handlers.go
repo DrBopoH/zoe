@@ -63,28 +63,28 @@ func (s *Server) runFullCrawler() {
 	defer func() {
 		s.syncMutex.Lock()
 		s.isSyncing = false
-		s.syncStatus = "COMPLETED"
+		s.syncStatus = "СНЯТО"
 		s.syncMutex.Unlock()
 	}()
 
 	info, err := s.monoClient.GetClientInfo()
 	if err != nil {
 		log.Printf("[Sync Error] GetClientInfo: %v", err)
-		s.updateStatus("Ошибка авторизации API")
+		s.updateStatus("ОТКАЗ КЛЮЧА API")
 		return
 	}
 
 	_ = s.storage.SaveAccounts(info.Accounts, info.Name)
 
 	if len(info.Accounts) == 0 {
-		s.updateStatus("Счета не найдены")
+		s.updateStatus("СЧЕТА ПУСТЫ")
 		return
 	}
 
 	minHistoricalDate := time.Date(2017, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	for accIndex, acc := range info.Accounts {
-		s.updateStatus(fmt.Sprintf("Сбор аккаунта %d/%d (%s)", accIndex+1, len(info.Accounts), acc.Type))
+		s.updateStatus(fmt.Sprintf("СЧЕТ %d/%d (%s)", accIndex+1, len(info.Accounts), acc.Type))
 
 		to := time.Now()
 		emptyWindowsCount := 0
@@ -93,48 +93,38 @@ func (s *Server) runFullCrawler() {
 			from := to.AddDate(0, 0, -30)
 
 			if from.Before(minHistoricalDate) {
-				log.Printf("[Sync] Достигнут лимит глубины истории (2017 год) для счета %s", acc.ID)
+				log.Printf("[Sync] Достигнут лимит истории (2017)")
 				break
 			}
-
-			s.updateStatus(fmt.Sprintf("[%s] Окно %s — %s",
-				acc.Type,
-				formatHumanDate(from),
-				formatHumanDate(to),
-			))
 
 			statement, err := s.monoClient.GetStatement(acc.ID, from, to)
 
 			if _, isRateErr := err.(*mono.RateLimitError); isRateErr {
-				s.updateStatus("Превышен лимит API (429). Ожидание 65 секунд...")
+				s.updateStatus("ЛИМИТ БАНКА (429) · ОХЛАЖДЕНИЕ 65С")
 				time.Sleep(65 * time.Second)
 				continue
 			}
 
-			// Обработка 400 Bad Request — дошли до даты открытия счета
 			if _, isBadRequest := err.(*mono.BadRequestError); isBadRequest {
-				log.Printf("[Sync] Достигнута дата открытия счета %s (HTTP 400). История заполнена полностью.", acc.ID)
-				s.updateStatus(fmt.Sprintf("[%s] Вся история успешного сбора затянута", acc.Type))
+				log.Printf("[Sync] Финиш истории счета %s", acc.ID)
+				s.updateStatus(fmt.Sprintf("[%s] ИСТОРИЯ ПОЛНАЯ", acc.Type))
 				break
 			}
 
 			if err != nil {
 				log.Printf("[Sync Error] Statement err: %v", err)
-				s.updateStatus("Ошибка запроса выписки")
+				s.updateStatus("СБОЙ ВЫПИСКИ")
 				break
 			}
 
+			// ПУСТОЕ ОКНО — Явно выводим статус с кулдауном перед сном
 			if len(statement) == 0 {
 				emptyWindowsCount++
-				log.Printf("[Sync] Окно %s — %s пустое (%d подряд). Шагаем дальше...",
-					formatHumanDate(from), formatHumanDate(to), emptyWindowsCount)
-
 				if emptyWindowsCount >= 12 {
-					log.Printf("[Sync] 12 месяцев тишины. Завершаем сбор счета %s", acc.ID)
 					break
 				}
-
 				to = from.Add(-1 * time.Second)
+				s.updateStatus(fmt.Sprintf("[%s] %s — %s · ОХЛАЖДЕНИЕ 61С", acc.Type, formatHumanDate(from), formatHumanDate(to)))
 				time.Sleep(61 * time.Second)
 				continue
 			}
@@ -149,7 +139,7 @@ func (s *Server) runFullCrawler() {
 			oldestUnix := statement[len(statement)-1].Time
 			to = time.Unix(oldestUnix, 0).Add(-1 * time.Second)
 
-			s.updateStatus(fmt.Sprintf("Загружено %d транзакций. Кулдаун 61с...", len(statement)))
+			s.updateStatus(fmt.Sprintf("СНЯТО %d ТРАНШЕЙ · ОХЛАЖДЕНИЕ 61С", len(statement)))
 			time.Sleep(61 * time.Second)
 		}
 	}
@@ -403,4 +393,22 @@ func (s *Server) HandleUpdateCreditLimit(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+}
+
+func (s *Server) HandleWipeCache(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := s.storage.WipeCache(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Кэш выписок очищен. База графа и лиц (core.db) в полной сохранности.",
+	})
 }

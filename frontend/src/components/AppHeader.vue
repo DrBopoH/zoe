@@ -50,7 +50,7 @@ const emit = defineEmits(['update:activeTab', 'sync'])
         :disabled="isSyncing"
         class="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold text-xs px-4 py-1.5 rounded transition-all cursor-pointer uppercase"
       >
-        {{ isSyncing ? 'SYNCING...' : 'SYNC' }}
+        {{ isSyncing ? 'РАЗВЕДЫВАЮ...' : 'РАЗВЕДАТЬ' }}
       </button>
     </div>
   </header>

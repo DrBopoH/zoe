@@ -12,10 +12,20 @@ const activeTab = ref('dashboard')
 const accounts = ref([])
 const transactions = ref([])
 const isSyncing = ref(false)
-const syncStatusMsg = ref('IDLE')
+
+const rawSyncStatusMsg = ref('ГОТОВ')
+const countdownSeconds = ref(0)
 const errorMsg = ref('')
 
 let pollTimer = null
+let countdownTimer = null
+
+const formattedStatusMsg = computed(() => {
+  if (countdownSeconds.value > 0) {
+    return rawSyncStatusMsg.value.replace(/\d+\s*С/i, `${countdownSeconds.value}С`)
+  }
+  return rawSyncStatusMsg.value
+})
 
 const personsCount = computed(() => {
   const set = new Set()
@@ -33,7 +43,18 @@ const fetchStatus = async () => {
     if (res.ok) {
       const data = await res.json()
       isSyncing.value = data.running
-      syncStatusMsg.value = data.status
+      const newStatus = data.status || 'ГОТОВ'
+
+      const match = newStatus.match(/(\d+)\s*С/i)
+      const newSec = match ? parseInt(match[1], 10) : 0
+
+      if (newStatus !== rawSyncStatusMsg.value) {
+        rawSyncStatusMsg.value = newStatus
+        // Задаем таймер, если пришла свежая метка отсчета
+        if (newSec > 0 && (countdownSeconds.value === 0 || Math.abs(newSec - countdownSeconds.value) > 4)) {
+          countdownSeconds.value = newSec
+        }
+      }
     }
   } catch (err) {
     console.error('Status fetch error:', err)
@@ -67,14 +88,22 @@ const startFullSync = async () => {
 
 onMounted(() => {
   fetchData()
+
   pollTimer = setInterval(() => {
     fetchStatus()
     fetchData()
   }, 3000)
+
+  countdownTimer = setInterval(() => {
+    if (countdownSeconds.value > 0) {
+      countdownSeconds.value--
+    }
+  }, 1000)
 })
 
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
+  if (countdownTimer) clearInterval(countdownTimer)
 })
 </script>
 
@@ -84,7 +113,7 @@ onUnmounted(() => {
       <AppHeader
         v-model:activeTab="activeTab"
         :is-syncing="isSyncing"
-        :sync-status-msg="syncStatusMsg"
+        :sync-status-msg="formattedStatusMsg"
         :persons-count="personsCount"
         @sync="startFullSync"
       />
@@ -95,7 +124,7 @@ onUnmounted(() => {
 
       <SmetaView v-if="activeTab === 'dashboard'" :accounts="accounts" :transactions="transactions" />
       <OperationalView v-if="activeTab === 'accounts'" :accounts="accounts" />
-      <PersonsView v-if="activeTab === 'entities'" :transactions="transactions" />
+      <PersonsView v-if="activeTab === 'entities'" :transactions="transactions" :accounts="accounts" @refresh="fetchData" />
     </div>
   </div>
 </template>
