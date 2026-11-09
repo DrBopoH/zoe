@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import AppHeader from './components/AppHeader.vue'
 import SmetaView from './views/SmetaView.vue'
 import OperationalView from './views/OperationalView.vue'
@@ -7,8 +7,21 @@ import PersonsView from './views/PersonsView.vue'
 import { cleanPersonName, isP2PTransaction } from './utils/formatters.js'
 
 const API_BASE = 'http://localhost:8080/api'
+const STORAGE_ACTIVE_TAB = 'economic_active_tab'
 
-const activeTab = ref('dashboard')
+// Восстановление сохраненной вкладки или дефолт 'dashboard'
+const savedTab = localStorage.getItem(STORAGE_ACTIVE_TAB)
+const activeTab = ref(savedTab || 'dashboard')
+
+// Персистентность при смене вкладки
+watch(activeTab, (newTab) => {
+  try {
+    localStorage.setItem(STORAGE_ACTIVE_TAB, newTab)
+  } catch (err) {
+    console.error('Save active tab error:', err)
+  }
+})
+
 const accounts = ref([])
 const transactions = ref([])
 const isSyncing = ref(false)
@@ -50,7 +63,6 @@ const fetchStatus = async () => {
 
       if (newStatus !== rawSyncStatusMsg.value) {
         rawSyncStatusMsg.value = newStatus
-        // Задаем таймер, если пришла свежая метка отсчета
         if (newSec > 0 && (countdownSeconds.value === 0 || Math.abs(newSec - countdownSeconds.value) > 4)) {
           countdownSeconds.value = newSec
         }
