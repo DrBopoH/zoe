@@ -44,7 +44,8 @@ export const cleanAccountName = (name) => {
 export const cleanPersonName = (raw) => {
   if (!raw) return ''
   let s = raw.trim()
-  s = s.replace(/^(від:|переказ\s+від:|переказ\s+на:|переказ:|для:|з\s+карти|на\s+карту)/i, '').trim()
+  // «Від Іван» (виписка Райфа без двокрапки) і «Від: Іван» — обидва префікси
+  s = s.replace(/^(від[:\s]|переказ\s+від[:\s]|переказ\s+на:|переказ:|для:|з\s+карти|на\s+карту)/i, '').trim()
   if (/^[\d\*\s]+$/.test(s)) return ''
   return s
 }
@@ -52,7 +53,7 @@ export const cleanPersonName = (raw) => {
 export const isP2PTransaction = (t) => {
   if (t.counter_name && t.counter_name.trim() !== '') return true
   const desc = (t.description || '').toLowerCase()
-  if (desc.includes('переказ') || desc.includes('від:') || desc.includes('з картки') || desc.includes('на картку')) {
+  if (desc.includes('переказ') || desc.includes('від:') || desc.startsWith('від ') || desc.includes('з картки') || desc.includes('на картку')) {
     return true
   }
   const transferMCCs = [4829, 6538, 6536, 6537, 6012, 6011]

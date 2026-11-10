@@ -26,11 +26,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   </button>
 
   <Transition name="fade">
-    <div v-if="isOpen" class="ui-drawer-backdrop" @click="isOpen = false"></div>
+    <div v-if="isOpen" class="ui-drawer-backdrop" data-modal @click="isOpen = false"></div>
   </Transition>
 
   <Transition name="drawer">
-    <aside v-if="isOpen" class="ui-drawer">
+    <aside v-if="isOpen" class="ui-drawer" data-modal>
       <div class="flex items-center justify-between px-4 py-3 border-b border-slate-800">
         <span class="text-[11px] font-bold tracking-wider text-slate-300 uppercase">Разделы</span>
         <UiIconButton icon="close" title="Закрыть" @click="isOpen = false" />

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, nextTick, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { toLocalDateStr, formatMoney, formatDateLong, formatShortDateName, formatMonthName } from '../utils/formatters.js'
 
 const props = defineProps({
@@ -165,23 +165,94 @@ const candleScales = computed(() => {
   return { min: minVal, max: maxVal, candles, ticks, monthBoundaries, step }
 })
 
+// Колесо — масштаб (якорь — свеча под курсором, как на биржах); горизонтальное колесо / Shift+колесо — сдвиг.
 const handleWheel = (e) => {
+  const container = chartContainerRef.value
+  if (!container) return
+  stopInertia()
+
+  const horizontal = e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)
+  if (horizontal) {
+    container.scrollLeft += e.deltaX || e.deltaY
+    return
+  }
+
   // множитель вместо фиксированного шага: на малых значениях зум остаётся плавным
   const factor = e.deltaY < 0 ? 1.18 : 1 / 1.18
   const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoomLevel.value * factor))
+  if (newZoom === zoomLevel.value) return
 
-  if (chartContainerRef.value) {
-    const container = chartContainerRef.value
-    const scrollRatio = (container.scrollLeft + container.clientWidth / 2) / container.scrollWidth
-    zoomLevel.value = newZoom
+  const rect = container.getBoundingClientRect()
+  const mouseX = e.clientX - rect.left
+  const ratio = (container.scrollLeft + mouseX) / container.scrollWidth
+  zoomLevel.value = newZoom
 
-    nextTick(() => {
-      container.scrollLeft = scrollRatio * container.scrollWidth - container.clientWidth / 2
-    })
-  } else {
-    zoomLevel.value = newZoom
-  }
+  nextTick(() => {
+    container.scrollLeft = ratio * container.scrollWidth - mouseX
+  })
 }
+
+// ── Перетаскивание: вся область — «рукоятка», слайдера внизу нет (как на биржах). С инерцией после отпускания.
+const isDragging = ref(false)
+let dragStartX = 0
+let dragStartScroll = 0
+let lastX = 0
+let lastT = 0
+let velocity = 0 // px/мс
+let inertiaRaf = 0
+
+const stopInertia = () => {
+  cancelAnimationFrame(inertiaRaf)
+  inertiaRaf = 0
+}
+
+const onPointerDown = (e) => {
+  if (e.pointerType === 'mouse' && e.button !== 0) return
+  const container = chartContainerRef.value
+  if (!container) return
+  stopInertia()
+  isDragging.value = true
+  hoveredCandle.value = null
+  dragStartX = lastX = e.clientX
+  dragStartScroll = container.scrollLeft
+  lastT = performance.now()
+  velocity = 0
+  container.setPointerCapture?.(e.pointerId)
+}
+
+const onPointerMove = (e) => {
+  if (!isDragging.value) return
+  const container = chartContainerRef.value
+  container.scrollLeft = dragStartScroll - (e.clientX - dragStartX)
+
+  const now = performance.now()
+  const dt = now - lastT
+  if (dt > 0) velocity = 0.8 * velocity + 0.2 * ((lastX - e.clientX) / dt)
+  lastX = e.clientX
+  lastT = now
+}
+
+const onPointerUp = (e) => {
+  if (!isDragging.value) return
+  isDragging.value = false
+  chartContainerRef.value?.releasePointerCapture?.(e.pointerId)
+  // палец/мышь остановились перед отпусканием — инерции нет
+  if (performance.now() - lastT > 80) return
+
+  let prev = performance.now()
+  const step = (t) => {
+    const container = chartContainerRef.value
+    if (!container) return
+    const dt = t - prev
+    prev = t
+    container.scrollLeft += velocity * dt
+    velocity *= Math.pow(0.95, dt / 16)
+    if (Math.abs(velocity) > 0.02) inertiaRaf = requestAnimationFrame(step)
+  }
+  inertiaRaf = requestAnimationFrame(step)
+}
+
+onBeforeUnmount(stopInertia)
 
 const resetZoom = () => {
   zoomLevel.value = 1.0
@@ -201,6 +272,15 @@ const scrollToEnd = (force = false) => {
 
 onMounted(() => {
   scrollToEnd()
+})
+
+// Данные приходят после монтирования: когда свечи впервые появились — встаём на свежий край
+let scrolledWithData = false
+watch(() => dailyCandles.value.length, (n) => {
+  if (n > 0 && !scrolledWithData) {
+    scrolledWithData = true
+    scrollToEnd(true)
+  }
 })
 </script>
 
@@ -226,13 +306,19 @@ onMounted(() => {
         <span class="text-slate-500">Мин: <strong class="text-rose-400">{{ formatMoney(hoveredCandle.low) }}</strong></span>
         <span class="text-slate-500">Закр: <strong class="text-slate-200">{{ formatMoney(hoveredCandle.close) }}</strong></span>
       </div>
-      <div v-else class="text-[10px] text-slate-600 uppercase">Колесико — Zoom, Скролл — Навигация</div>
+      <div v-else class="text-[10px] text-slate-600 uppercase">Колесико — Zoom, Перетаскивание — Навигация</div>
     </div>
 
     <div
       ref="chartContainerRef"
+      data-wheel="own"
       @wheel.prevent="handleWheel"
-      class="w-full overflow-x-auto scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent"
+      @pointerdown="onPointerDown"
+      @pointermove="onPointerMove"
+      @pointerup="onPointerUp"
+      @pointercancel="onPointerUp"
+      class="chart-pan w-full overflow-x-auto"
+      :class="isDragging ? 'cursor-grabbing' : 'cursor-grab'"
     >
       <svg
         v-if="candleScales.candles.length > 0"
@@ -292,9 +378,8 @@ onMounted(() => {
         <g
           v-for="c in candleScales.candles"
           :key="c.date"
-          @mouseenter="hoveredCandle = c"
+          @mouseenter="!isDragging && (hoveredCandle = c)"
           @mouseleave="hoveredCandle = null"
-          class="cursor-pointer"
         >
           <rect
             :x="c.x - candleScales.step / 2"
@@ -347,3 +432,15 @@ onMounted(() => {
     </div>
   </section>
 </template>
+
+<style scoped>
+/* Слайдера внизу нет: двигаем перетаскиванием. Полосу прокрутки прячем, жест pan-y оставляет вертикальный скролл страницы на таче. */
+.chart-pan {
+  scrollbar-width: none;
+  touch-action: pan-y;
+  user-select: none;
+}
+.chart-pan::-webkit-scrollbar {
+  display: none;
+}
+</style>

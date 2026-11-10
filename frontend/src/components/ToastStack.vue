@@ -1,4 +1,5 @@
 <script setup>
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { toasts, dismissToast } from '../composables/useToasts.js'
 import SyncPanel from './SyncPanel.vue'
 import UiIcon from './ui/UiIcon.vue'
@@ -7,11 +8,28 @@ import UiIcon from './ui/UiIcon.vue'
 //   processing — главное окно, висит, пока идёт синк
 //   error      — то же окно, красное, не пропадает само
 //   push       — «Снято»: появляется и исчезает по таймеру
-defineProps({
+//   lost       — нет ответа от бэкенда: синк мог продолжать работу, статус вернётся вместе со связью
+const props = defineProps({
   progress: { type: Object, default: null },
-  panelState: { type: String, default: null } // null | processing | error
+  panelState: { type: String, default: null }, // null | processing | error
+  lostSince: { type: Number, default: null }   // ms, когда пропал ответ бэкенда
 })
 const emit = defineEmits(['close-panel'])
+
+const now = ref(Date.now())
+let timer = 0
+watch(() => props.lostSince, (v) => {
+  clearInterval(timer)
+  if (v) { now.value = Date.now(); timer = setInterval(() => { now.value = Date.now() }, 1000) }
+}, { immediate: true })
+onBeforeUnmount(() => clearInterval(timer))
+
+const dismissedLost = ref(null) // какой разрыв связи закрыт крестиком
+const showLost = computed(() => !!props.lostSince && dismissedLost.value !== props.lostSince)
+const lostFor = computed(() => {
+  const s = Math.max(0, Math.round((now.value - props.lostSince) / 1000))
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+})
 </script>
 
 <template>
@@ -22,8 +40,21 @@ const emit = defineEmits(['close-panel'])
         key="panel"
         :progress="progress"
         :state="panelState"
+        :class="lostSince && 'opacity-60'"
         @close="emit('close-panel')"
       />
+
+      <div v-if="showLost" key="lost" class="ui-push ui-push--warn">
+        <div class="flex items-start justify-between gap-3">
+          <div class="space-y-1 min-w-0">
+            <div class="text-xs font-bold uppercase tracking-wider text-amber-300">Нет ответа от бэкенда · {{ lostFor }}</div>
+            <div class="text-[10px] text-slate-300 break-words">Синк мог продолжить работу на своей стороне — статус обновится сам, когда связь вернётся.</div>
+          </div>
+          <button type="button" class="text-slate-400 hover:text-white cursor-pointer shrink-0" aria-label="Скрыть" @click="dismissedLost = lostSince">
+            <UiIcon name="close" size="sm" />
+          </button>
+        </div>
+      </div>
 
       <div
         v-for="t in toasts"

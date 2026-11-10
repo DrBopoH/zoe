@@ -46,7 +46,8 @@ const emit = defineEmits([
   'delete-user',
   'unlink-alias',
   'click-iban',
-  'open-link-editor'
+  'open-link-editor',
+  'open-alias-drum'
 ])
 
 const TILES_PER_ROW = 3
@@ -186,6 +187,7 @@ const onPasteName = () => pasteFromClipboard('paste-name')
             :name="item.alias"
             :cached="isSignatureInCache(item.alias)"
             loose
+            @open="emit('open-alias-drum', item.alias)"
             @edit="emit('open-link-editor', item.alias, user.id, item.accounts)"
             @unlink="emit('unlink-alias', user, item.alias)"
           />
@@ -208,7 +210,8 @@ const onPasteName = () => pasteFromClipboard('paste-name')
                 :key="item.alias"
                 :name="item.alias"
                 :cached="isSignatureInCache(item.alias)"
-                @edit="emit('open-link-editor', item.alias, user.id, item.accounts)"
+                @open="emit('open-alias-drum', item.alias)"
+            @edit="emit('open-link-editor', item.alias, user.id, item.accounts)"
                 @unlink="emit('unlink-alias', user, item.alias)"
               />
             </div>
@@ -220,7 +223,8 @@ const onPasteName = () => pasteFromClipboard('paste-name')
                 :name="item.alias"
                 :cached="isSignatureInCache(item.alias)"
                 sub
-                @edit="emit('open-link-editor', item.alias, user.id, item.accounts)"
+                @open="emit('open-alias-drum', item.alias)"
+            @edit="emit('open-link-editor', item.alias, user.id, item.accounts)"
                 @unlink="emit('unlink-alias', user, item.alias)"
               />
             </div>
@@ -234,7 +238,7 @@ const onPasteName = () => pasteFromClipboard('paste-name')
               v-for="tile in row"
               :key="tile.key"
               class="w-[145px] aspect-[85.6/54] rounded-lg p-2.5 border shadow-md flex flex-col justify-between relative overflow-hidden shrink-0"
-              :class="[tile.theme.tile, tile.cacheAcc?.is_closed && 'ui-closed']"
+              :class="[tile.theme.tile, tile.cacheAcc?.is_closed && 'ui-closed', !tile.iban && 'border-dashed']"
               :title="lifeSpan(tile.cacheAcc) || undefined"
             >
               <button
@@ -259,7 +263,7 @@ const onPasteName = () => pasteFromClipboard('paste-name')
                   </span>
                   <span v-if="copiedIban === tile.iban" class="text-emerald-400 shrink-0">✓</span>
                 </div>
-                <span v-else></span>
+                <span v-else class="text-[8px] font-bold tracking-widest opacity-50 select-none">КАРТА</span>
 
                 <span v-if="tile.cacheAcc?.is_closed" class="ui-closed-tag shrink-0">Закр.</span>
                 <span v-else-if="tile.theme.tag" class="text-[8px] font-bold tracking-widest opacity-60 shrink-0">

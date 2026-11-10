@@ -8,7 +8,7 @@ const emit = defineEmits(['close'])
 
 <template>
   <Transition name="fade">
-    <div v-if="isOpen" class="ui-overlay" @click.self="emit('close')">
+    <div v-if="isOpen" class="ui-overlay" data-modal @click.self="emit('close')">
       <div class="ui-panel" :class="maxWidth">
         <slot />
       </div>

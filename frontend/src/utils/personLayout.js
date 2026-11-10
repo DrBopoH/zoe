@@ -84,8 +84,8 @@ export const detectBankKey = (ibanStr, cacheAcc, pans = []) => {
 // У Privat (PDF) counter_name заполнен и у магазинов (WOG, EKVATOR…), поэтому «есть counter_name» — не признак человека.
 // Человек = есть IBAN контрагента, ИЛИ MCC перевода, ИЛИ в описании признак перевода,
 // ИЛИ имя есть, а описания нет вовсе (источник дал только имя).
-const TRANSFER_MCC = new Set([4829, 6538, 6536, 6537, 6012, 6011])
-const TRANSFER_RE = /(^|[\s,.;:])(переказ|перекази|зарахування\s+переказу|поповнення|від:|з\s+картки|на\s+картку|p2p)/i
+export const TRANSFER_MCC = new Set([4829, 6538, 6536, 6537, 6012, 6011])
+const TRANSFER_RE = /(^|[\s,.;:])(переказ|перекази|зарахування\s+переказу|поповнення|від[:\s]|з\s+картки|на\s+картку|p2p)/i
 
 // Контакт из описания («Від: Іван», «Переказ: drbopoh raif»): только если префикс перевода реально был срезан
 // и остаток похож на имя, а не на «Перекази, УКРАЇНА, термінал CP980…»
@@ -110,8 +110,24 @@ export const plainNameFromDescription = (t) => {
 }
 
 // Единое «имя контрагента» операции: counter_name → контакт после префикса → имя-описание P2P
+// Контрагент без имени, известный только по карте («отримувач -, 487407****44, банк отримувача JSC UNIVERSAL BANK»):
+// имя-алиас «487407****44 · Monobank». Зеркало pseudoCounterName в Go (util.go).
+const BANK_LABEL = { mono: 'Monobank', privat: 'PrivatBank', raif: 'Raiffeisen' }
+export const pseudoCounterName = (t) => {
+  const c = String(t?.counter_iban || '').trim()
+  if (!c || !isPanLike(c)) return ''
+  let bank = BANK_LABEL[detectBankKey('', null, [c])] || ''
+  if (!bank) {
+    const m = /банк\s+(?:отримувача|платника)\s+(.+?)(?:,|$)/i.exec(String(t.description || ''))
+    bank = m ? m[1].trim() : ''
+    if (bank === '-') bank = ''
+  }
+  return bank ? `${c} · ${bank}` : c
+}
+
+// Единое «имя контрагента» операции: counter_name → контакт после префикса → имя-описание P2P → карта · банк
 export const counterpartyName = (t) =>
-  cleanPersonName(t?.counter_name) || contactFromDescription(t?.description) || plainNameFromDescription(t)
+  cleanPersonName(t?.counter_name) || contactFromDescription(t?.description) || plainNameFromDescription(t) || pseudoCounterName(t)
 
 export const isPersonTransaction = (t) => {
   if (!t) return false
@@ -418,9 +434,9 @@ export const buildPersonLayout = (user, graph) => {
   //  1) кэш знает, к какому IBAN карта относится (реальная топология, перевыпуск и т.п.);
   //  2) статика помнит родителя;
   //  3) родитель неизвестен нигде, а у владельцев карты ровно один IBAN → карта его;
-  //  4) иначе «карты без IBAN» в банке владельцев (а не в банке, угаданном по первой цифре карты).
+  //  4) иначе карта без IBAN — своя отдельная плитка (по одной на PAN) в банке владельцев,
+  //     а не общая куча «карт без счёта» в банке, угаданном по первой цифре.
   const tileOfPan = new Map()
-  const looseByBank = new Map() // bankKey → tile без IBAN
   entries.forEach(en => {
     if (isIbanLike(en.id)) return
     const cacheParent = cache.ibanByPan.get(en.key)
@@ -435,12 +451,8 @@ export const buildPersonLayout = (user, graph) => {
     if (!tile) {
       const banks = new Set([...candidates].map(c => detectBankKey(c.iban, c.cacheAcc, c.pans)))
       const bank = banks.size === 1 ? [...banks][0] : detectBankKey(en.id)
-      tile = looseByBank.get(bank)
-      if (!tile) {
-        tile = { key: 'pans:' + bank, iban: null, norm: '', pans: [], aliasKeys: new Set(), cacheAcc: null, type: '', masterKey: '', forcedBank: bank }
-        looseByBank.set(bank, tile)
-        tiles.push(tile)
-      }
+      tile = { key: 'pan:' + en.key, iban: null, norm: '', pans: [], aliasKeys: new Set(), cacheAcc: null, type: '', masterKey: '', forcedBank: bank }
+      tiles.push(tile)
     }
     tile.pans.push(en.id)
     tileOfPan.set(en.key, tile)

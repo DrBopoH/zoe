@@ -5,6 +5,7 @@ import SideMenu from './components/SideMenu.vue'
 import ScrollJumpButtons from './components/ScrollJumpButtons.vue'
 import ToastStack from './components/ToastStack.vue'
 import { pushToast } from './composables/useToasts.js'
+import { useWheelScroll } from './composables/useWheelScroll.js'
 import SmetaView from './views/SmetaView.vue'
 import OperationalView from './views/OperationalView.vue'
 import PersonsView from './views/PersonsView.vue'
@@ -23,6 +24,8 @@ watch(activeTab, (newTab) => {
     console.error('Save active tab error:', err)
   }
 })
+
+useWheelScroll() // колесо над слайдерами и горизонтальными областями
 
 const accounts = ref([])
 const transactions = ref([])
@@ -73,24 +76,29 @@ const personsCount = computed(() => {
   return set.size
 })
 
+// Связь с бэкендом пропала (нет ответа на /sync/status). Это НЕ «синк упал»: обход на бэкенде мог продолжать работу,
+// поэтому состояние синка не трогаем (кнопка заблокирована, окно процессинга остаётся) и показываем отдельное предупреждение.
+const connLostSince = ref(null) // ms, null — связь есть
+
 const fetchStatus = async () => {
   try {
     const res = await fetch(`${API_BASE}/sync/status`)
-    if (res.ok) {
-      const data = await res.json()
-      isSyncing.value = !!data.running
-      progress.value = data.progress || null
-      if (lastFinishedAt === null && !data.progress?.last) lastFinishedAt = 0
-      notifyResult(data.progress?.last)
+    if (!res.ok) throw new Error(`status ${res.status}`)
+    const data = await res.json()
+    connLostSince.value = null
+    isSyncing.value = !!data.running
+    progress.value = data.progress || null
+    if (lastFinishedAt === null && !data.progress?.last) lastFinishedAt = 0
+    notifyResult(data.progress?.last)
 
-      const ver = data.stats?.data_version
-      if (typeof ver === 'number' && ver !== dataVersion.value) {
-        dataVersion.value = ver
-        await loadData()
-      }
+    const ver = data.stats?.data_version
+    if (typeof ver === 'number' && ver !== dataVersion.value) {
+      dataVersion.value = ver
+      await loadData()
     }
   } catch (err) {
     console.error('Status fetch error:', err)
+    if (connLostSince.value === null) connLostSince.value = Date.now()
   }
 }
 
@@ -144,7 +152,7 @@ onUnmounted(() => {
   <div class="min-h-screen bg-slate-950 text-slate-100 font-mono flex flex-col p-6 pt-24 sm:pt-20 select-none">
     <SideMenu @refresh="fetchData" />
     <ScrollJumpButtons />
-    <ToastStack :progress="progress" :panel-state="panelState" @close-panel="closePanel" />
+    <ToastStack :progress="progress" :panel-state="panelState" :lost-since="connLostSince" @close-panel="closePanel" />
 
     <!-- Шапка прибита к верху экрана: страница скроллится под ней -->
     <div class="app-bar">

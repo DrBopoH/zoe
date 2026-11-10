@@ -1,7 +1,10 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { formatMaskedIBAN, validateAndCleanAccount, isMaskedPan } from '../utils/formatters.js'
-import { isIbanLike, idKey } from '../utils/personLayout.js'
+import { isIbanLike, idKey, detectBankKey } from '../utils/personLayout.js'
+import { prepareAccount } from '../utils/accountView.js'
+import { bankTheme } from '../utils/bankTheme.js'
+import AccountPanel from './AccountPanel.vue'
 import { readClipboardText } from '../utils/clipboard.js'
 import UiModal from './ui/UiModal.vue'
 import UiIcon from './ui/UiIcon.vue'
@@ -13,6 +16,7 @@ const props = defineProps({
   isOpen: { type: Boolean, default: false },
   aliasData: { type: Object, default: null },
   users: { type: Array, default: () => [] },
+  accounts: { type: Array, default: () => [] },
   isSignatureInCache: { type: Function, required: true }
 })
 
@@ -199,6 +203,18 @@ const pasteFromClipboard = async (isChild = false) => {
   }
 }
 
+// Цветная карта вместо текстовой строки: счёт из кэша — как в плитках Лиц (банк, баланс), иначе плитка по IBAN/BIN.
+// Список карт на плитке — именно карты дерева (в том же порядке), чтобы × убирал нужную.
+const cardOf = (iban, pans) => {
+  const key = idKey(iban)
+  const acc = iban ? props.accounts.find(a => idKey(a.iban || a.account_identifier) === key) : null
+  const base = acc
+    ? prepareAccount(acc)
+    : { displayIban: iban ? formatMaskedIBAN(iban) : 'КАРТА', balance: null, theme: bankTheme(detectBankKey(iban || '', null, pans), '') }
+  return { ...base, pans: pans.map(formatMaskedIBAN) }
+}
+const looseCard = (pan) => ({ displayIban: 'КАРТА', balance: null, pans: [formatMaskedIBAN(pan)], theme: bankTheme(detectBankKey('', null, [pan]), '') })
+
 // Цвет строки счёта: зелёный — подтверждён кэшем, жёлтый — только в памяти
 const rowTone = (id) =>
   props.isSignatureInCache(id) ? 'border-emerald-500/40 text-emerald-300' : 'border-amber-500/40 text-amber-300'
@@ -284,20 +300,18 @@ const handleSave = () => {
         </span>
       </div>
 
-      <div class="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+      <div class="space-y-2 max-h-80 overflow-y-auto pr-1">
         <template v-for="[parentIban, children] in treeEntries" :key="parentIban || '__loose__'">
-          <!-- Корневой IBAN -->
-          <div
-            v-if="parentIban"
-            class="flex items-center justify-between px-3 py-1.5 rounded border transition-colors bg-slate-950"
-            :class="rowTone(parentIban)"
-          >
-            <div class="flex items-center gap-2 min-w-0">
-              <UiDot :cached="isSignatureInCache(parentIban)" />
-              <span class="font-mono text-xs truncate">{{ formatMaskedIBAN(parentIban) }}</span>
-            </div>
-
-            <div class="flex items-center gap-1.5">
+          <!-- IBAN: цветная карта + управление -->
+          <div v-if="parentIban" class="relative">
+            <AccountPanel
+              :card="cardOf(parentIban, children)"
+              :cached="isSignatureInCache(parentIban)"
+              compact
+              removable-pans
+              @remove-pan="removeAccount(children[$event], parentIban)"
+            />
+            <div class="absolute right-2 bottom-2 flex items-center gap-1.5 z-20">
               <UiButton
                 :variant="activeParentIban === parentIban ? 'cancel' : 'outline'"
                 size="sm"
@@ -306,7 +320,6 @@ const handleSave = () => {
               >
                 {{ activeParentIban === parentIban ? 'Отмена' : 'Добавить' }}
               </UiButton>
-
               <UiIconButton icon="close" tone="danger" title="Удалить счет" @click="removeAccount(parentIban)" />
             </div>
           </div>
@@ -330,21 +343,18 @@ const handleSave = () => {
             <UiButton variant="primary" size="sm" :disabled="!isChildInputValid" @click="addChildAccount(parentIban)">ОК</UiButton>
           </div>
 
-          <!-- Карты (PAN) -->
-          <div
-            v-for="child in children"
-            :key="child"
-            class="ml-5 flex items-center justify-between px-3 py-1 rounded border transition-colors bg-slate-950/80"
-            :class="rowTone(child)"
-          >
-            <div class="flex items-center gap-2 min-w-0">
-              <span class="text-slate-500 font-bold select-none text-xs">└─</span>
-              <UiDot :cached="isSignatureInCache(child)" />
-              <span class="font-mono text-xs truncate">{{ formatMaskedIBAN(child) }}</span>
-            </div>
-
-            <UiIconButton icon="close" tone="danger" title="Отвязать карту" @click="removeAccount(child, parentIban)" />
-          </div>
+          <!-- Карты без IBAN: каждая своей плиткой -->
+          <template v-if="!parentIban">
+            <AccountPanel
+              v-for="child in children"
+              :key="child"
+              :card="looseCard(child)"
+              :cached="isSignatureInCache(child)"
+              compact
+              removable-pans
+              @remove-pan="removeAccount(child, parentIban)"
+            />
+          </template>
         </template>
 
         <div

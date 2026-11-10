@@ -5,6 +5,7 @@ import { useDragAutoScroll } from '../composables/useDragAutoScroll.js'
 import DragEdgeZones from '../components/DragEdgeZones.vue'
 import PersonCard from '../components/PersonCard.vue'
 import OrphanTable from '../components/OrphanTable.vue'
+import AliasDrumModal from '../components/AliasDrumModal.vue'
 import LinkEditorModal from '../components/LinkEditorModal.vue'
 import UiButton from '../components/ui/UiButton.vue'
 
@@ -18,6 +19,7 @@ const props = defineProps({
 const emit = defineEmits(['refresh'])
 
 const dragGhostRef = ref(null)
+const drumAlias = ref('') // алиас, открытый в модалке-барабане
 
 const {
   users,
@@ -99,11 +101,23 @@ const onDragEnd = () => {
 	  :is-open="isModalOpen"
 	  :alias-data="modalAliasData"
 	  :users="users"
+	  :accounts="accounts"
 	  :is-signature-in-cache="isSignatureInCache"
 	  @close="closeLinkEditor"
 	  @save-link="saveLinkEditorData"
 	  @quick-create-user="quickCreateUser"
 	/>
+
+    <AliasDrumModal
+      :is-open="!!drumAlias"
+      :alias="drumAlias"
+      :cached="isSignatureInCache(drumAlias)"
+      :graph="graph"
+      :accounts="accounts"
+      :transactions="transactions"
+      @close="drumAlias = ''"
+      @changed="fetchUsers"
+    />
 
     <DragEdgeZones :edge="edge" />
 
@@ -151,6 +165,7 @@ const onDragEnd = () => {
         @unlink-alias="unlinkAlias"
         @click-iban="handleIbanClick"
         @open-link-editor="openLinkEditor"
+        @open-alias-drum="drumAlias = $event"
       />
 
       <!-- GHOST-ПЛИТКА БЫСТРОГО СОЗДАНИЯ -->

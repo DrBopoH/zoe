@@ -153,6 +153,7 @@
   }
   .ui-push--ok { @apply border-emerald-500/50 bg-emerald-950/90; }
   .ui-push--err { @apply border-rose-500/50 bg-rose-950/90; }
+  .ui-push--warn { @apply border-amber-500/50 bg-amber-950/90; }
 
   /* ── Общий бар: бегущие косые полосы (в процессе) / сплошной (готово) ── */
   .ui-bar {

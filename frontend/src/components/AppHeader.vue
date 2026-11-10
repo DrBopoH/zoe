@@ -21,7 +21,7 @@ const TABS = [
     <div class="flex items-center gap-6">
       <div class="flex items-center gap-2">
         <span class="w-2.5 h-2.5 rounded-full bg-emerald-500" :class="{ 'animate-pulse': isSyncing }"></span>
-        <span class="text-sm font-bold tracking-wider text-white">Ζωή</span>
+        <span class="text-sm font-bold tracking-wider text-white">ECONOMIC</span>
       </div>
 
       <nav class="flex items-center gap-1 border-l border-slate-800 pl-6 text-xs">

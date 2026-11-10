@@ -7,12 +7,14 @@ defineProps({
   sub: { type: Boolean, default: false },   // «другой» алиас: контакт, делящий счёт с главным
   loose: { type: Boolean, default: false }  // алиас без счетов
 })
-const emit = defineEmits(['edit', 'unlink'])
+const emit = defineEmits(['edit', 'unlink', 'open'])
 </script>
 
 <template>
   <span
-    class="ui-chip"
+    class="ui-chip cursor-pointer"
+    title="Открыть связи карт"
+    @click="emit('open')"
     :class="[
       cached ? 'ui-chip--cached' : 'ui-chip--static',
       loose && 'ui-chip--loose',
