@@ -207,18 +207,25 @@ func TestFlow(t *testing.T) {
 		t.Fatal("pan must come back after re-attach")
 	}
 
-	// Снос структуры БЕЗ кеша → просто удаляется, бана нет; кеш вернёт при перенакате
+	// Карта известна глобально (iban_pans), поэтому ручной снос держится даже без кеша
+	// и не воскресает после перенакатки; ручное добавление возвращает её.
 	_ = s.WipeCache()
 	if err := s.UnlinkAccount("Іваненко Петро", "444111******2222"); err != nil {
 		t.Fatal(err)
 	}
 	u = user(t, s)
-	if len(u.AliasBans) != 0 {
-		t.Fatalf("no ban without cache: %+v", u.AliasBans)
+	if len(u.AliasBans) == 0 {
+		t.Fatal("explicit unlink of a globally-known card must stick")
 	}
 	fillCache(t, s)
+	if _, ok := links(user(t, s), "Іваненко Петро")[idKey("444111******2222")]; ok {
+		t.Fatal("banned card resurrected by cache")
+	}
+	if err := s.LinkAccount("u1", "Іваненко Петро", "444111******2222", ibMono); err != nil {
+		t.Fatal(err)
+	}
 	if _, ok := links(user(t, s), "Іваненко Петро")[idKey("444111******2222")]; !ok {
-		t.Fatal("cache must restore structure when not banned")
+		t.Fatal("manual relink must restore the card")
 	}
 
 	// Снос IBAN каскадом уносит его PAN

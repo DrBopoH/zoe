@@ -8,7 +8,7 @@ import (
 var (
 	reNonAlnum     = regexp.MustCompile(`[^a-zA-Z0-9]`)
 	reIBAN         = regexp.MustCompile(`^[A-Z]{2}\d{2}`)
-	rePersonPrefix = regexp.MustCompile(`(?i)^(від:|переказ\s+від:|переказ\s+на:|переказ:|для:|з\s+карти|на\s+карту)`)
+	rePersonPrefix = regexp.MustCompile(`(?i)^(від[:\s]|переказ\s+від[:\s]|переказ\s+на:|переказ:|для:|з\s+карти|на\s+карту)`)
 	reMaskOnly     = regexp.MustCompile(`^[\d\*\s]+$`)
 	reParen        = regexp.MustCompile(`\s*\([^)]*\)`)
 )
@@ -142,3 +142,34 @@ func digitsOnly(s string) string {
 
 // isMaskedID: номер карты со скрытой серединой (414951******5262)
 func isMaskedID(s string) bool { return strings.ContainsAny(s, "*•") }
+
+var reRecvBank = regexp.MustCompile(`(?i)банк\s+(?:отримувача|платника)\s+(.+?)(?:,|$)`)
+
+// pseudoCounterName — имя-алиас для контрагента без имени, известного только по карте
+// («отримувач -, 487407****44, банк отримувача JSC UNIVERSAL BANK» → «487407****44 · Monobank»).
+// Зеркало pseudoCounterName во фронте (personLayout.js).
+func pseudoCounterName(counter, desc string) string {
+	c := strings.TrimSpace(counter)
+	if !isPanLike(c) {
+		return ""
+	}
+	n := normID(c)
+	bank := ""
+	switch {
+	case strings.HasPrefix(n, "5375"), strings.HasPrefix(n, "4441"), strings.HasPrefix(n, "4874"):
+		bank = "Monobank"
+	case strings.HasPrefix(n, "5168"), strings.HasPrefix(n, "5457"), strings.HasPrefix(n, "4149"):
+		bank = "PrivatBank"
+	default:
+		if m := reRecvBank.FindStringSubmatch(desc); m != nil {
+			bank = strings.TrimSpace(m[1])
+			if bank == "-" {
+				bank = ""
+			}
+		}
+	}
+	if bank == "" {
+		return c
+	}
+	return c + " · " + bank
+}

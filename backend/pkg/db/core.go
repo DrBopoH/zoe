@@ -225,6 +225,7 @@ func (s *Storage) GetAliasStructures() ([]AliasStructure, error) {
 	defer rows.Close()
 	out := []AliasStructure{}
 	pos := map[string]int{}
+	global := s.globalPans(idx)
 	for rows.Next() {
 		var k, alias, id, parent, uid string
 		if rows.Scan(&k, &alias, &id, &parent, &uid) != nil {
@@ -236,9 +237,51 @@ func (s *Storage) GetAliasStructures() ([]AliasStructure, error) {
 			pos[k] = i
 			out = append(out, AliasStructure{Alias: alias, UserID: uid, Accounts: []AliasLink{}})
 		}
+		if parent == "" && !isIBANLike(id) {
+			parent = idx.parentFor(id)
+		}
 		out[i].Accounts = append(out[i].Accounts, AliasLink{alias, id, parent, idx.confirms(k, id)})
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	rows.Close()
+
+	// IBAN в алиасе тянет за собой все свои карты (глобальный факт), кроме снятых вручную (баны)
+	bans := map[string]map[string]bool{}
+	if br, err := s.coreDB.Query(`SELECT alias_key, account_identifier FROM alias_bans`); err == nil {
+		for br.Next() {
+			var k, id string
+			if br.Scan(&k, &id) == nil {
+				if bans[k] == nil {
+					bans[k] = map[string]bool{}
+				}
+				bans[k][idKey(id)] = true
+			}
+		}
+		br.Close()
+	}
+	for k, i := range pos {
+		have := map[string]bool{}
+		for _, l := range out[i].Accounts {
+			have[idKey(l.AccountIdentifier)] = true
+		}
+		cur := out[i].Accounts
+		for _, l := range cur {
+			if !isIBANLike(l.AccountIdentifier) {
+				continue
+			}
+			for _, p := range global[normID(l.AccountIdentifier)] {
+				pk := idKey(p)
+				if have[pk] || bans[k][pk] {
+					continue
+				}
+				have[pk] = true
+				out[i].Accounts = append(out[i].Accounts, AliasLink{out[i].Alias, p, l.AccountIdentifier, idx.confirms(k, p)})
+			}
+		}
+	}
+	return out, nil
 }
 
 // ───────────────────────── алиасы ─────────────────────────
@@ -333,6 +376,7 @@ func (s *Storage) LinkAccount(userID, alias, identifier, parent string) error {
 		parent = p
 	}
 
+	global := s.globalPans(idx) // до транзакции: читает core.db
 	s.coreMu.Lock()
 	defer s.coreMu.Unlock()
 	tx, err := s.coreDB.Begin()
@@ -390,6 +434,28 @@ func (s *Storage) LinkAccount(userID, alias, identifier, parent string) error {
 	}
 	if err := deleteBansTx(tx, k, identifier); err != nil {
 		return err
+	}
+	// добавили IBAN вручную — его карты снова наши: снимаем и их баны (UnlinkAccount банит карты каскадом вместе с IBAN)
+	if isIBANLike(identifier) {
+		for _, p := range global[normID(identifier)] {
+			if err := deleteBansTx(tx, k, p); err != nil {
+				return err
+			}
+		}
+	}
+	// глобальный факт: карта → IBAN (для всех алиасов сразу)
+	if parent != "" && !isIBANLike(identifier) {
+		if err := learnIbanPan(tx, identifier, parent); err != nil {
+			return err
+		}
+	}
+	// добавили IBAN — сохраняем его известные кешу карты, чтобы они пережили очистку кеша
+	if isIBANLike(identifier) {
+		for _, p := range idx.pansByIBAN[normID(identifier)] {
+			if err := learnIbanPan(tx, p, identifier); err != nil {
+				return err
+			}
+		}
 	}
 	return tx.Commit()
 }
@@ -457,6 +523,7 @@ func (s *Storage) UnlinkAccount(alias, identifier string) error {
 		rows.Close()
 	}
 
+	global := s.globalPans(idx)
 	target := idKey(identifier)
 	isIBAN := isIBANLike(identifier)
 	hit := func(id, parent string) bool {
@@ -495,8 +562,23 @@ func (s *Storage) UnlinkAccount(alias, identifier string) error {
 			if _, err := tx.Exec(`DELETE FROM alias_accounts WHERE alias_key=? AND account_identifier=?`, k, r.id); err != nil {
 				return err
 			}
-			if attached && idx.confirms(k, r.id) {
+			derived := !isIBANLike(r.id) && r.parent != "" && globalHas(global, r.parent, r.id)
+			if (attached && idx.confirms(k, r.id)) || derived {
 				if err := ban(r.id); err != nil {
+					return err
+				}
+			}
+		}
+		// карта, которую алиас получает глобально через свой IBAN (своей строки нет) — тоже под бан
+		if !isIBAN {
+			var ibans []string
+			for _, ex := range existingIDs(tx, k) {
+				if isIBANLike(ex) && globalHas(global, ex, identifier) {
+					ibans = append(ibans, ex)
+				}
+			}
+			if len(ibans) > 0 {
+				if err := ban(identifier); err != nil {
 					return err
 				}
 			}
@@ -658,4 +740,29 @@ func (s *Storage) SetAccountLife(accID string, opened, closed int64) error {
 		ON CONFLICT(account_id) DO UPDATE SET opened_at = excluded.opened_at, closed_at = excluded.closed_at`,
 		accID, nul(opened), nul(closed))
 	return err
+}
+
+func globalHas(g map[string][]string, iban, pan string) bool {
+	for _, p := range g[normID(iban)] {
+		if idKey(p) == idKey(pan) {
+			return true
+		}
+	}
+	return false
+}
+
+func existingIDs(tx *sql.Tx, k string) []string {
+	rows, err := tx.Query(`SELECT account_identifier FROM alias_accounts WHERE alias_key=?`, k)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			out = append(out, id)
+		}
+	}
+	return out
 }

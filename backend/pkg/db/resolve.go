@@ -7,8 +7,9 @@ import "log"
 type cacheLink struct{ ID, Parent string }
 
 type cacheIndex struct {
-	byAlias   map[string][]cacheLink // alias_key → структура, подтверждённая кешем
-	ibanByPAN map[string]string      // idKey(PAN) → IBAN счёта-владельца
+	byAlias    map[string][]cacheLink // alias_key → структура, подтверждённая кешем
+	ibanByPAN  map[string]string      // idKey(PAN) → IBAN счёта-владельца
+	pansByIBAN map[string][]string    // normID(IBAN) → PAN счёта (как в кеше)
 }
 
 // confirms — подтверждает ли кеш связь «алиас → идентификатор» прямо сейчас.
@@ -43,7 +44,7 @@ func (s *Storage) loadCacheIndex() (*cacheIndex, error) {
 	if err != nil {
 		return nil, err
 	}
-	idx := &cacheIndex{byAlias: map[string][]cacheLink{}, ibanByPAN: map[string]string{}}
+	idx := &cacheIndex{byAlias: map[string][]cacheLink{}, ibanByPAN: map[string]string{}, pansByIBAN: map[string][]string{}}
 	add := func(key string, l cacheLink) {
 		if key == "" || l.ID == "" {
 			return
@@ -83,6 +84,7 @@ func (s *Storage) loadCacheIndex() (*cacheIndex, error) {
 		for _, p := range a.Pans {
 			if a.IBAN != "" {
 				idx.ibanByPAN[idKey(p)] = a.IBAN
+				idx.pansByIBAN[normID(a.IBAN)] = append(idx.pansByIBAN[normID(a.IBAN)], p)
 			}
 		}
 		key := aliasKey(cleanAccountName(a.Name))
@@ -125,6 +127,9 @@ func (s *Storage) loadCacheIndex() (*cacheIndex, error) {
 		if key == "" {
 			key = aliasKey(cleanPersonName(desc))
 		}
+		if key == "" {
+			key = aliasKey(pseudoCounterName(iban, desc))
+		}
 		if isPanLike(iban) {
 			// контрагент указан номером карты (парсер ПриватБанка): если карта наша — тянем весь счёт
 			if a, ok := ownByPAN(iban); ok && a.IBAN != "" {
@@ -156,6 +161,8 @@ type resolver struct {
 }
 
 func (s *Storage) buildResolver() *resolver {
+	idx, _ := s.loadCacheIndex()
+	global := s.globalPans(idx)
 	r := &resolver{byID: map[string]string{}, byLoose: map[string]string{}, byAlias: map[string]string{}}
 	looseOwner := map[string]string{}
 	looseAmbiguous := map[string]bool{}
@@ -173,6 +180,13 @@ func (s *Storage) buildResolver() *resolver {
 			continue
 		}
 		r.byAlias[ak] = uid
+		if id != "" && isIBANLike(id) {
+			for _, p := range global[normID(id)] {
+				if _, taken := r.byID[idKey(p)]; !taken {
+					r.byID[idKey(p)] = uid
+				}
+			}
+		}
 		if id != "" {
 			r.byID[idKey(id)] = uid
 			if lk := looseKey(id); lk != "" {
@@ -205,6 +219,9 @@ func (r *resolver) resolve(counterIBAN, counterName, description string) string 
 	key := aliasKey(cleanPersonName(counterName))
 	if key == "" {
 		key = aliasKey(cleanPersonName(description))
+	}
+	if key == "" {
+		key = aliasKey(pseudoCounterName(counterIBAN, description))
 	}
 	return r.byAlias[key] // "" если не найдено
 }

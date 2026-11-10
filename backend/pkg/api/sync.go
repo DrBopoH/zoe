@@ -1,8 +1,10 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"log"
+	"net"
 	"time"
 
 	"economic/pkg/db"
@@ -16,7 +18,17 @@ const (
 	errFatal      errKind = iota // прервать этот счёт
 	errRetry                     // лимит запросов: подождать и повторить то же окно
 	errHistoryEnd                // банк сказал «раньше ничего нет»
+	errNetwork                   // нет связи с банком (обрыв сети, DNS, таймаут): дальше долбить бессмысленно
 )
+
+// errOffline — обход остановлен из-за сети. Оставшиеся счета ключа не опрашиваем и не ждём паузы между запросами.
+var errOffline = errors.New("нет связи с банком")
+
+// isNetworkErr — ошибка транспорта (сам запрос не дошёл), а не ответ банка.
+func isNetworkErr(err error) bool {
+	var ne net.Error
+	return errors.As(err, &ne)
+}
 
 // walkCfg — всё, что отличает Mono от Raif (и что подменяется в тестах).
 type walkCfg struct {
@@ -38,6 +50,9 @@ const (
 	walkTipMargin  = 6 * time.Hour // свежий край не считаем снятым: банк мог провести операцию с опозданием
 	walkMaxEmpty   = 12            // столько пустых окон подряд (≈ год) — считаем, что история закончилась
 	walkMaxRetries = 20
+
+	walkNetWait       = 30 * time.Second // пауза перед повтором при обрыве сети
+	walkMaxNetRetries = 20               // ≈ 10 минут без связи — сдаёмся и останавливаем ключ
 )
 
 type walkStats struct {
@@ -144,6 +159,8 @@ func (s *Server) walkAccount(accID string, cfg walkCfg) (walkStats, error) {
 			_ = s.storage.MarkHistoryComplete(accID, to)
 			s.finish(accID, &st)
 			return st, nil
+		case errors.Is(err, errOffline):
+			return st, err
 		default:
 			return st, err
 		}
@@ -189,14 +206,29 @@ func (s *Server) walkAccount(accID string, cfg walkCfg) (walkStats, error) {
 }
 
 func (s *Server) fetchWithRetry(cfg walkCfg, from, to int64) ([]mono.StatementItemDTO, error) {
-	for attempt := 0; ; attempt++ {
+	rate, net := 0, 0
+	for {
 		items, err := cfg.fetch(time.Unix(from, 0), time.Unix(to, 0))
-		if err != nil && cfg.classify(err) == errRetry && attempt < walkMaxRetries {
+		if err == nil {
+			return items, nil
+		}
+		switch kind := cfg.classify(err); {
+		case kind == errRetry && rate < walkMaxRetries:
+			rate++
 			cfg.status(fmt.Sprintf("%s · 429 ЛИМИТ · ОХЛАЖДЕНИЕ %dС", cfg.label, int(cfg.retryWait/time.Second)))
 			cfg.sleep(cfg.retryWait)
-			continue
+		case kind == errNetwork:
+			// Сеть пропала: окно не теряем — ждём и повторяем то же самое. Пропадёт надолго — сдаёмся.
+			net++
+			if net > walkMaxNetRetries {
+				log.Printf("[Sync] %s: нет связи с банком %d попыток подряд: %v", cfg.label, net-1, err)
+				return nil, errOffline
+			}
+			cfg.status(fmt.Sprintf("%s · НЕТ СВЯЗИ · ПОВТОР ЧЕРЕЗ %dС (%d/%d)", cfg.label, int(walkNetWait/time.Second), net, walkMaxNetRetries))
+			cfg.sleep(walkNetWait)
+		default:
+			return items, err
 		}
-		return items, err
 	}
 }
 

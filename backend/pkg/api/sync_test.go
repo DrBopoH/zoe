@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"fmt"
+	"net"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -457,5 +458,57 @@ func TestProgressETARemaining(t *testing.T) {
 	av := e.s.progressSnapshot().Clients[0].Accounts[0]
 	if av.remaining < 3 || av.remaining > 6 {
 		t.Fatalf("remaining=%d, want about 4-5 (12 - 8 empty windows already covered + tip)", av.remaining)
+	}
+}
+
+// Обрыв сети: окно не теряется — обход ждёт и повторяет то же окно, пока связь не вернётся.
+func TestNetworkOutageRecovers(t *testing.T) {
+	e := newEnv(t)
+	down := 3
+	slept := 0
+	netErr := &net.OpError{Op: "dial", Err: errors.New("no such host")}
+	inner := e.bank.fetch
+	_, err := e.s.walkAccount("acc", walkCfg{
+		label: "test", pageLimit: 500, pause: 61 * time.Second, retryWait: time.Second,
+		classify: func(err error) errKind {
+			if isNetworkErr(err) {
+				return errNetwork
+			}
+			if _, ok := err.(*mono.BadRequestError); ok {
+				return errHistoryEnd
+			}
+			return errFatal
+		},
+		fetch: func(from, to time.Time) ([]mono.StatementItemDTO, error) {
+			if down > 0 {
+				down--
+				return nil, netErr
+			}
+			return inner(from, to)
+		},
+		sleep: func(time.Duration) { slept++ }, pace: func() {},
+		now: func() time.Time { return e.now }, status: func(string) {},
+	})
+	if err != nil || slept != 3 {
+		t.Fatalf("err=%v slept=%d", err, slept)
+	}
+}
+
+// Связи нет слишком долго: ключ останавливается с errOffline, а не висит вечно.
+func TestNetworkOutageGivesUp(t *testing.T) {
+	e := newEnv(t)
+	calls := 0
+	_, err := e.s.walkAccount("acc", walkCfg{
+		label: "test", pageLimit: 500, pause: 61 * time.Second, retryWait: time.Second,
+		classify: func(err error) errKind { return errNetwork },
+		fetch: func(from, to time.Time) ([]mono.StatementItemDTO, error) {
+			calls++
+			return nil, &net.OpError{Op: "dial", Err: errors.New("down")}
+		},
+		sleep: func(time.Duration) {}, pace: func() {},
+		now: func() time.Time { return e.now }, status: func(string) {},
+	})
+	if !errors.Is(err, errOffline) || calls != walkMaxNetRetries+1 {
+		t.Fatalf("err=%v calls=%d", err, calls)
 	}
 }

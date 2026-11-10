@@ -75,6 +75,7 @@ func NewStorage(cacheDBPath, coreDBPath string) (*Storage, error) {
 	if err := s.initCore(); err != nil {
 		return nil, err
 	}
+	s.backfillIbanPans()
 	s.syncAliases(nil)
 	return s, nil
 }
@@ -226,6 +227,12 @@ CREATE TABLE IF NOT EXISTS alias_bans (
 	alias_key TEXT NOT NULL,
 	account_identifier TEXT NOT NULL,
 	PRIMARY KEY (alias_key, account_identifier)
+);
+-- Глобальный факт «эта карта принадлежит этому IBAN» — един для всех алиасов и лиц.
+CREATE TABLE IF NOT EXISTS iban_pans (
+	pan_key TEXT PRIMARY KEY,
+	pan     TEXT NOT NULL,
+	iban    TEXT NOT NULL
 );
 -- Ручные правки счёта (лимит, IBAN, PAN) — это пользовательские данные, им не место в кеше.
 CREATE TABLE IF NOT EXISTS account_overrides (

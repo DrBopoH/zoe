@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -163,7 +164,7 @@ func (s *Server) crawlClient(client *mono.Client, clientNum, totalClients int) {
 	if err != nil {
 		log.Printf("[Sync Error] Mono Client %d GetClientInfo: %v", clientNum, err)
 		s.updateStatus(fmt.Sprintf("MONO %d/%d: ОТКАЗ API", clientNum, totalClients))
-		s.prog.clientError(s.prog.client(fmt.Sprintf("Mono %d", clientNum), "mono", 61*time.Second), "банк отказал: "+err.Error())
+		s.prog.clientError(s.prog.client(fmt.Sprintf("Mono %d", clientNum), "mono", 61*time.Second), bankErrText(err))
 		return
 	}
 
@@ -212,6 +213,9 @@ func (s *Server) crawlClient(client *mono.Client, clientNum, totalClients int) {
 				case *mono.BadRequestError:
 					return errHistoryEnd
 				}
+				if isNetworkErr(err) {
+					return errNetwork
+				}
 				return errFatal
 			},
 			fetch: func(from, to time.Time) ([]mono.StatementItemDTO, error) {
@@ -224,6 +228,10 @@ func (s *Server) crawlClient(client *mono.Client, clientNum, totalClients int) {
 			status:   s.updateStatus,
 		})
 		s.prog.accDone(cur, st, err)
+		if errors.Is(err, errOffline) {
+			s.abortOffline(progs, accIndex+1)
+			break
+		}
 		if err != nil {
 			log.Printf("[Sync Error] [%s] счёт %s: %v", ownerName, acc.ID, err)
 			s.updateStatus(fmt.Sprintf("[%s] СБОЙ ВЫПИСКИ", acc.Type))
@@ -238,7 +246,7 @@ func (s *Server) crawlRaifClient(client *raif.Client, clientNum, totalClients in
 	if err != nil {
 		log.Printf("[Sync Error] Raif Client %d GetUserInfo: %v", clientNum, err)
 		s.updateStatus(fmt.Sprintf("RAIF %d/%d: ОТКАЗ API", clientNum, totalClients))
-		s.prog.clientError(s.prog.client(fmt.Sprintf("Raif %d", clientNum), "raif", 30*time.Second), "банк отказал: "+err.Error())
+		s.prog.clientError(s.prog.client(fmt.Sprintf("Raif %d", clientNum), "raif", 30*time.Second), bankErrText(err))
 		return
 	}
 
@@ -280,7 +288,12 @@ func (s *Server) crawlRaifClient(client *raif.Client, clientNum, totalClients in
 			pageLimit: 0, // лимит ответа Raif неизвестен — считаем осторожно
 			pause:     30 * time.Second,
 			retryWait: 30 * time.Second,
-			classify:  func(error) errKind { return errFatal },
+			classify: func(err error) errKind {
+				if isNetworkErr(err) {
+					return errNetwork
+				}
+				return errFatal
+			},
 			fetch: func(from, to time.Time) ([]mono.StatementItemDTO, error) {
 				return client.GetStatement(accID, from, to)
 			},
@@ -291,6 +304,10 @@ func (s *Server) crawlRaifClient(client *raif.Client, clientNum, totalClients in
 			status:   s.updateStatus,
 		})
 		s.prog.accDone(rcur, st, err)
+		if errors.Is(err, errOffline) {
+			s.abortOffline(rprogs, accIndex+1)
+			break
+		}
 		if err != nil {
 			log.Printf("[Sync Error] [%s] Raif счёт %s: %v", ownerName, acc.ID, err)
 			s.updateStatus(fmt.Sprintf("[%s] СБОЙ ВЫПИСКИ RAIF", acc.Type))
@@ -762,4 +779,19 @@ func (s *Server) HandleWipeCache(w http.ResponseWriter, r *http.Request) {
 		"status":  "success",
 		"message": "Кэш выписок очищен. База графа и лиц (core.db) в полной сохранности.",
 	})
+}
+
+// bankErrText — текст ошибки для панели: сеть и отказ банка различаем.
+func bankErrText(err error) string {
+	if isNetworkErr(err) {
+		return errOffline.Error()
+	}
+	return "банк отказал: " + err.Error()
+}
+
+// abortOffline — сеть пропала: остальные счета ключа помечаем ошибкой и не опрашиваем.
+func (s *Server) abortOffline(progs []*accProg, from int) {
+	for j := from; j < len(progs); j++ {
+		s.prog.accDone(progs[j], walkStats{}, errOffline)
+	}
 }
