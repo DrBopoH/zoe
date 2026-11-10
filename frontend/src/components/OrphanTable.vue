@@ -1,26 +1,24 @@
 <script setup>
+import { formatMaskedIBAN } from '../utils/formatters.js'
+import UiIconButton from './ui/UiIconButton.vue'
+import UiButton from './ui/UiButton.vue'
+
 defineProps({
   orphanSignatures: { type: Array, required: true },
   users: { type: Array, required: true },
   draggedItem: { type: Object, default: null },
-  editingIbanItemId: { type: String, default: null },
-  orphanIbanInputs: { type: Object, required: true },
   activeSelectIndex: { type: Number, default: null },
   searchPersonQuery: { type: String, default: '' },
-  validateAndCleanAccount: { type: Function, required: true }
+  isSignatureInCache: { type: Function, required: true }
 })
 
 const emit = defineEmits([
   'update:searchPersonQuery',
   'drag-start',
   'drag-end',
-  'paste-iban-save',
-  'cancel-orphan-iban',
-  'save-orphan-iban',
-  'remove-orphan-iban',
-  'start-edit-orphan-iban',
   'link-signature',
-  'update:activeSelectIndex'
+  'update:activeSelectIndex',
+  'open-link-editor'
 ])
 </script>
 
@@ -40,7 +38,7 @@ const emit = defineEmits([
           @input="emit('update:searchPersonQuery', $event.target.value)"
           type="text"
           placeholder="Поиск..."
-          class="w-full bg-slate-900 border border-slate-800 rounded px-3 py-1.5 text-xs text-white outline-none focus:border-emerald-500 font-mono"
+          class="ui-input !bg-slate-900"
         />
       </div>
     </div>
@@ -79,92 +77,33 @@ const emit = defineEmits([
                 <span class="inline-block tracking-tighter text-[11px] font-mono select-none">⠿</span>
               </td>
 
+              <!-- СТОЛБЕЦ «АЛИАСЫ» С КАРАНДАШИКОМ -->
               <td class="p-3 font-bold text-slate-200">
-                {{ item.name }}
+                <div class="flex items-center gap-2">
+                  <span>{{ item.name }}</span>
+                  <UiIconButton
+                    icon="edit"
+                    tone="accent"
+                    size="sm"
+                    title="Открыть редактор связей"
+                    @click.stop="emit('open-link-editor', item.name, '', item.accounts)"
+                  />
+                </div>
               </td>
 
               <!-- СТОЛБЕЦ «СЧЕТА» -->
               <td class="p-3 font-mono">
-                <div v-if="editingIbanItemId === item.id" class="flex items-center gap-1.5" @click.stop @mousedown.stop>
-                  <div class="relative flex items-center">
-                    <input
-                      v-model="orphanIbanInputs[item.id]"
-                      type="text"
-                      placeholder="Карта или IBAN..."
-                      @contextmenu.prevent.stop
-                      class="bg-slate-950 border text-xs rounded px-2.5 py-1 text-white outline-none font-mono pr-7 w-48 transition-colors"
-                      :class="[
-                        orphanIbanInputs[item.id] && !validateAndCleanAccount(orphanIbanInputs[item.id])
-                          ? 'border-rose-500/80 focus:border-rose-400'
-                          : 'border-slate-700 focus:border-emerald-500'
-                      ]"
-                    />
-                    <button
-                      type="button"
-                      @mousedown.prevent.stop
-                      @contextmenu.prevent.stop
-                      @click.prevent.stop="emit('paste-iban-save', item, $event)"
-                      class="absolute right-1 text-slate-400 hover:text-emerald-400 p-1 cursor-pointer transition-colors"
-                      title="Хот-вставка из буфера с авто-сохранением"
-                    >
-                      <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2" />
-                        <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-                      </svg>
-                    </button>
-                  </div>
-
-                  <button
-                    type="button"
-                    @click.stop="emit('cancel-orphan-iban', item.id)"
-                    class="bg-rose-600 hover:bg-rose-500 text-white text-[10px] uppercase font-bold px-2.5 py-1 rounded transition-all cursor-pointer shadow-sm"
+                <div v-if="item.ibansArray && item.ibansArray.length > 0" class="flex flex-wrap items-center gap-1.5">
+                  <span
+                    v-for="iban in item.ibansArray"
+                    :key="iban"
+                    class="text-[10px] px-2 py-0.5 rounded border border-slate-800 bg-slate-950 font-mono select-none transition-colors"
+                    :class="isSignatureInCache(iban) ? 'text-slate-300' : 'text-amber-400 border-amber-500/30'"
                   >
-                    Отмена
-                  </button>
-
-                  <button
-                    type="button"
-                    @click.stop="emit('save-orphan-iban', item)"
-                    :disabled="!validateAndCleanAccount(orphanIbanInputs[item.id])"
-                    class="text-[10px] uppercase font-bold px-2.5 py-1 rounded transition-all shadow-sm"
-                    :class="[
-                      !validateAndCleanAccount(orphanIbanInputs[item.id])
-                        ? 'bg-slate-800 text-slate-500 border border-slate-700/60 cursor-not-allowed' 
-                        : 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer'
-                    ]"
-                  >
-                    Сохранить
-                  </button>
+                    💳 {{ formatMaskedIBAN(iban) }}
+                  </span>
                 </div>
-
-                <div v-else class="flex flex-wrap items-center gap-1.5">
-                  <template v-if="item.ibansArray && item.ibansArray.length > 0">
-                    <span
-                      v-for="iban in item.ibansArray"
-                      :key="iban"
-                      class="text-[10px] px-2 py-0.5 rounded border border-slate-800 bg-slate-950 text-slate-300 font-mono flex items-center gap-1.5 transition-colors hover:border-slate-700 select-none"
-                    >
-                      <span>{{ iban }}</span>
-                      <button
-                        type="button"
-                        @click.stop="emit('remove-orphan-iban', item.id, iban)"
-                        class="text-slate-500 hover:text-rose-400 font-bold cursor-pointer transition-colors"
-                        title="Стереть счет"
-                      >
-                        ✕
-                      </button>
-                    </span>
-                  </template>
-
-                  <button
-                    type="button"
-                    @click.stop="emit('start-edit-orphan-iban', item.id)"
-                    class="text-slate-500 hover:text-emerald-400 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 rounded w-5 h-5 flex items-center justify-center text-xs transition-all font-bold cursor-pointer shrink-0"
-                    title="Добавить счет"
-                  >
-                    +
-                  </button>
-                </div>
+                <span v-else class="text-slate-600 font-bold select-none">—</span>
               </td>
 
               <td class="p-3 text-center text-slate-400 font-bold">
@@ -175,26 +114,17 @@ const emit = defineEmits([
                 <div v-if="activeSelectIndex === idx" class="flex items-center justify-end gap-1">
                   <select
                     @change="emit('link-signature', users.find(u => u.id === $event.target.value), item)"
-                    class="bg-slate-950 border border-slate-700 text-xs rounded px-2 py-1 text-white outline-none focus:border-emerald-500 font-mono"
+                    class="ui-select !w-auto !px-2 !py-1 !border-slate-700"
                   >
-                    <option value="" disabled selected>Выберите лицо...</option>
-                    <option v-for="u in users" :key="u.id" :value="u.id">{{ u.name }}</option>
+                    <option value="" disabled selected class="bg-slate-950 text-slate-400 py-1">Нет</option>
+                    <option v-for="u in users" :key="u.id" :value="u.id" class="bg-slate-950 text-slate-200 py-1">{{ u.name }}</option>
                   </select>
-                  <button
-                    @click="emit('update:activeSelectIndex', null)"
-                    class="text-slate-500 hover:text-slate-300 text-[10px] uppercase px-1 cursor-pointer"
-                  >
-                    ✕
-                  </button>
+
+                  <!-- ВЕКТОРНЫЙ КРЕСТИК СБРОСА ВЫБОРА -->
+                  <UiIconButton icon="close" title="Отмена" @click="emit('update:activeSelectIndex', null)" />
                 </div>
 
-                <button
-                  v-else
-                  @click="emit('update:activeSelectIndex', idx)"
-                  class="bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 font-bold text-[10px] px-2.5 py-1 rounded transition-colors uppercase cursor-pointer"
-                >
-                  Привязать
-                </button>
+                <UiButton v-else variant="subtle" size="sm" @click="emit('update:activeSelectIndex', idx)">Привязать</UiButton>
               </td>
             </template>
           </tr>

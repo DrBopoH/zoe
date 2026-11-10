@@ -12,14 +12,21 @@ const now = new Date()
 const currentYear = now.getFullYear()
 const currentMonth = now.getMonth()
 
+const uahAccounts = computed(() => props.accounts.filter(a => a.currency_code === 980))
+
 const totalValueUAH = computed(() => {
-  return props.accounts
-    .filter(a => a.currency_code === 980)
-    .reduce((sum, a) => sum + a.balance, 0)
+  return uahAccounts.value.reduce((sum, a) => sum + a.balance, 0)
+})
+
+// Капитал считается по гривневым счетам, значит и динамика/месячные итоги — только по их транзакциям
+// (иначе валютные операции искажают свечи относительно текущего баланса)
+const uahTransactions = computed(() => {
+  const ids = new Set(uahAccounts.value.map(a => a.id))
+  return props.transactions.filter(t => ids.has(t.account_id))
 })
 
 const currentMonthTransactions = computed(() => {
-  return props.transactions.filter(t => {
+  return uahTransactions.value.filter(t => {
     if (!t.time) return false
     const d = new Date(t.time)
     return d.getFullYear() === currentYear && d.getMonth() === currentMonth
@@ -60,6 +67,6 @@ const monthlyDelta = computed(() => {
       </div>
     </section>
 
-    <CandleChart :transactions="transactions" :total-value-u-a-h="totalValueUAH" />
+    <CandleChart :transactions="uahTransactions" :total-value-u-a-h="totalValueUAH" />
   </main>
 </template>

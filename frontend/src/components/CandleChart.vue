@@ -89,7 +89,10 @@ const dailyCandles = computed(() => {
   return result
 })
 
-const pxPerCandle = computed(() => Math.max(8, 22 * zoomLevel.value))
+// Границы зума: ниже ~7% свеча уже тоньше 2px, дальше смысла нет. Раньше пол в 8px/свечу глушил отдаление на 40%.
+const MIN_ZOOM = 0.07
+const MAX_ZOOM = 4.0
+const pxPerCandle = computed(() => Math.max(1.5, 22 * zoomLevel.value))
 
 const svgWidth = computed(() => {
   const calculated = dailyCandles.value.length * pxPerCandle.value + paddingX * 2
@@ -106,7 +109,7 @@ const candleScales = computed(() => {
 
   const count = dailyCandles.value.length
   const step = (svgWidth.value - paddingX * 2) / Math.max(count, 1)
-  const candleWidth = Math.max(3, Math.min(24, step * 0.65))
+  const candleWidth = Math.max(1, Math.min(24, step * 0.65))
 
   const getY = (val) => {
     return svgHeight - paddingY - ((val - minVal) / range) * (svgHeight - paddingY * 2)
@@ -163,8 +166,9 @@ const candleScales = computed(() => {
 })
 
 const handleWheel = (e) => {
-  const delta = e.deltaY < 0 ? 0.15 : -0.15
-  const newZoom = Math.min(4.0, Math.max(0.4, zoomLevel.value + delta))
+  // множитель вместо фиксированного шага: на малых значениях зум остаётся плавным
+  const factor = e.deltaY < 0 ? 1.18 : 1 / 1.18
+  const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoomLevel.value * factor))
 
   if (chartContainerRef.value) {
     const container = chartContainerRef.value

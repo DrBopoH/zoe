@@ -1,19 +1,21 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, provide } from 'vue'
 import AppHeader from './components/AppHeader.vue'
+import SideMenu from './components/SideMenu.vue'
+import ScrollJumpButtons from './components/ScrollJumpButtons.vue'
+import ToastStack from './components/ToastStack.vue'
+import { pushToast } from './composables/useToasts.js'
 import SmetaView from './views/SmetaView.vue'
 import OperationalView from './views/OperationalView.vue'
 import PersonsView from './views/PersonsView.vue'
 import { cleanPersonName, isP2PTransaction } from './utils/formatters.js'
+import { API_BASE } from './utils/api.js'
 
-const API_BASE = 'http://localhost:8080/api'
 const STORAGE_ACTIVE_TAB = 'economic_active_tab'
 
-// Восстановление сохраненной вкладки или дефолт 'dashboard'
 const savedTab = localStorage.getItem(STORAGE_ACTIVE_TAB)
 const activeTab = ref(savedTab || 'dashboard')
 
-// Персистентность при смене вкладки
 watch(activeTab, (newTab) => {
   try {
     localStorage.setItem(STORAGE_ACTIVE_TAB, newTab)
@@ -26,19 +28,40 @@ const accounts = ref([])
 const transactions = ref([])
 const isSyncing = ref(false)
 
-const rawSyncStatusMsg = ref('ГОТОВ')
-const countdownSeconds = ref(0)
+// Версия данных на бэкенде: растёт при любой записи (синк, импорт, правки лиц).
+// Данные перезапрашиваем только когда версия изменилась.
+const dataVersion = ref(null)
+
 const errorMsg = ref('')
 
-let pollTimer = null
-let countdownTimer = null
+// Структурированный прогресс синка (клиенты → счета → таймлайн) из /sync/status
+const progress = ref(null)
+let lastFinishedAt = null // null — ещё не видели ни одного ответа
 
-const formattedStatusMsg = computed(() => {
-  if (countdownSeconds.value > 0) {
-    return rawSyncStatusMsg.value.replace(/\d+\s*С/i, `${countdownSeconds.value}С`)
+// Итог синка. Успех: главное окно уходит само, остаётся пуш «Снято» (по таймеру).
+// Ошибка: главное окно остаётся красным и не пропадает, пока его не закроют.
+const notifyResult = (last) => {
+  if (!last) return
+  if (lastFinishedAt === null) { lastFinishedAt = last.finished_at; return } // старый итог после перезагрузки страницы не показываем
+  if (last.finished_at <= lastFinishedAt) return
+  lastFinishedAt = last.finished_at
+  if (!last.errors || last.errors.length === 0) {
+    pushToast({ kind: 'ok', title: 'Снято', lines: [`Запросов к банку: ${last.requests}`], ttl: 6000 })
   }
-  return rawSyncStatusMsg.value
+}
+
+// какой запуск синка пользователь закрыл крестиком (started_at)
+const dismissedRun = ref(null)
+const panelState = computed(() => {
+  const p = progress.value
+  if (!p || !p.clients || p.clients.length === 0 && !p.running) return null
+  if (dismissedRun.value === p.started_at) return null
+  if (p.running) return 'processing'
+  return p.last && p.last.errors && p.last.errors.length ? 'error' : null
 })
+const closePanel = () => { dismissedRun.value = progress.value?.started_at ?? null }
+
+let pollTimer = null
 
 const personsCount = computed(() => {
   const set = new Set()
@@ -55,17 +78,15 @@ const fetchStatus = async () => {
     const res = await fetch(`${API_BASE}/sync/status`)
     if (res.ok) {
       const data = await res.json()
-      isSyncing.value = data.running
-      const newStatus = data.status || 'ГОТОВ'
+      isSyncing.value = !!data.running
+      progress.value = data.progress || null
+      if (lastFinishedAt === null && !data.progress?.last) lastFinishedAt = 0
+      notifyResult(data.progress?.last)
 
-      const match = newStatus.match(/(\d+)\s*С/i)
-      const newSec = match ? parseInt(match[1], 10) : 0
-
-      if (newStatus !== rawSyncStatusMsg.value) {
-        rawSyncStatusMsg.value = newStatus
-        if (newSec > 0 && (countdownSeconds.value === 0 || Math.abs(newSec - countdownSeconds.value) > 4)) {
-          countdownSeconds.value = newSec
-        }
+      const ver = data.stats?.data_version
+      if (typeof ver === 'number' && ver !== dataVersion.value) {
+        dataVersion.value = ver
+        await loadData()
       }
     }
   } catch (err) {
@@ -73,7 +94,7 @@ const fetchStatus = async () => {
   }
 }
 
-const fetchData = async () => {
+const loadData = async () => {
   try {
     const [accRes, txRes] = await Promise.all([
       fetch(`${API_BASE}/accounts`),
@@ -81,13 +102,22 @@ const fetchData = async () => {
     ])
     if (accRes.ok) accounts.value = (await accRes.json()) || []
     if (txRes.ok) transactions.value = (await txRes.json()) || []
-    await fetchStatus()
+    errorMsg.value = ''
   } catch (err) {
     errorMsg.value = err.message
   }
 }
 
+// Ручное обновление (после импорта, правок лиц): данные + статус (статус сам подтянет данные при смене версии)
+const fetchData = async () => {
+  await loadData()
+  await fetchStatus()
+}
+
+provide('refreshData', fetchData)
+
 const startFullSync = async () => {
+  if (isSyncing.value) return
   errorMsg.value = ''
   try {
     const res = await fetch(`${API_BASE}/sync/full`, { method: 'POST' })
@@ -101,42 +131,41 @@ const startFullSync = async () => {
 onMounted(() => {
   fetchData()
 
-  pollTimer = setInterval(() => {
-    fetchStatus()
-    fetchData()
-  }, 3000)
-
-  countdownTimer = setInterval(() => {
-    if (countdownSeconds.value > 0) {
-      countdownSeconds.value--
-    }
-  }, 1000)
+  // Поллим только лёгкий статус; тяжёлые данные грузятся при смене data_version
+  pollTimer = setInterval(fetchStatus, 2000)
 })
 
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
-  if (countdownTimer) clearInterval(countdownTimer)
 })
 </script>
 
 <template>
-  <div class="min-h-screen bg-slate-950 text-slate-100 font-mono flex flex-col p-6 select-none">
-    <div class="max-w-6xl w-full mx-auto space-y-8">
-      <AppHeader
-        v-model:activeTab="activeTab"
-        :is-syncing="isSyncing"
-        :sync-status-msg="formattedStatusMsg"
-        :persons-count="personsCount"
-        @sync="startFullSync"
-      />
+  <div class="min-h-screen bg-slate-950 text-slate-100 font-mono flex flex-col p-6 pt-24 sm:pt-20 select-none">
+    <SideMenu @refresh="fetchData" />
+    <ScrollJumpButtons />
+    <ToastStack :progress="progress" :panel-state="panelState" @close-panel="closePanel" />
 
+    <!-- Шапка прибита к верху экрана: страница скроллится под ней -->
+    <div class="app-bar">
+      <div class="max-w-6xl w-full mx-auto px-6 pl-16 xl:pl-6 py-3">
+        <AppHeader
+          v-model:activeTab="activeTab"
+          :is-syncing="isSyncing"
+          :persons-count="personsCount"
+          @sync="startFullSync"
+        />
+      </div>
+    </div>
+
+    <div class="max-w-6xl w-full mx-auto space-y-8">
       <div v-if="errorMsg" class="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-3 rounded text-xs">
         ERROR: {{ errorMsg }}
       </div>
 
       <SmetaView v-if="activeTab === 'dashboard'" :accounts="accounts" :transactions="transactions" />
-      <OperationalView v-if="activeTab === 'accounts'" :accounts="accounts" />
-      <PersonsView v-if="activeTab === 'entities'" :transactions="transactions" :accounts="accounts" @refresh="fetchData" />
+      <OperationalView v-if="activeTab === 'accounts'" :accounts="accounts" :transactions="transactions" />
+      <PersonsView v-if="activeTab === 'entities'" :transactions="transactions" :accounts="accounts" :data-version="dataVersion" @refresh="fetchData" />
     </div>
   </div>
 </template>

@@ -1,0 +1,240 @@
+/* Слой 3. Компоненты UI Kit. Используются через components/ui/*.vue (или напрямую для простых элементов). */
+
+@layer components {
+  /* ── Типографика формы ── */
+  .ui-label {
+    @apply text-[10px] text-slate-500 uppercase font-bold tracking-wider;
+  }
+
+  /* ── Поля ввода ── */
+  .ui-input,
+  .ui-select {
+    @apply w-full bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-xs text-white outline-none font-mono transition-colors focus:border-emerald-500;
+  }
+  .ui-select {
+    @apply cursor-pointer;
+  }
+  .ui-input--invalid {
+    @apply border-rose-500/80 focus:border-rose-400;
+  }
+
+  /* ── Кнопки ── */
+  .ui-btn {
+    @apply inline-flex items-center justify-center gap-1.5 font-bold uppercase rounded transition-all cursor-pointer select-none shadow-sm disabled:cursor-not-allowed;
+  }
+  .ui-btn--sm { @apply text-[10px] px-2.5 py-1; }
+  .ui-btn--md { @apply text-xs px-3 py-1.5; }
+  .ui-btn--lg { @apply text-xs px-4 py-1.5; }
+
+  .ui-btn--primary {
+    @apply bg-emerald-600 text-white hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:border disabled:border-slate-700/60 disabled:shadow-none;
+  }
+  .ui-btn--secondary {
+    @apply bg-slate-800 text-slate-300 hover:bg-slate-700;
+  }
+  .ui-btn--danger {
+    @apply bg-rose-600 text-white hover:bg-rose-500;
+  }
+  .ui-btn--amber {
+    @apply bg-amber-600 text-slate-950 hover:bg-amber-500 disabled:bg-slate-800 disabled:text-slate-600 disabled:shadow-none;
+  }
+  .ui-btn--amber-outline {
+    @apply bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20;
+  }
+  .ui-btn--subtle {
+    @apply bg-slate-800 text-emerald-400 border border-slate-700 hover:bg-slate-700;
+  }
+  .ui-btn--cancel {
+    @apply bg-rose-500/20 text-rose-400 border border-rose-500/40 hover:bg-rose-500/30;
+  }
+  .ui-btn--outline {
+    @apply bg-slate-900 text-slate-400 border border-slate-800 hover:text-emerald-400 hover:border-emerald-500/40 shadow-none;
+  }
+
+  /* ── Кнопки-иконки (карандаш, крестик, урна, вставка) ── */
+  .ui-icon-btn {
+    @apply inline-flex items-center justify-center p-1 text-slate-500 transition-colors cursor-pointer shrink-0;
+  }
+  .ui-icon-btn--sm { @apply p-0.5; }
+  .ui-icon-btn--accent { @apply hover:text-emerald-400; }
+  .ui-icon-btn--danger { @apply hover:text-rose-400; }
+
+  /* ── Индикатор «кэш / только в памяти» ── */
+  .ui-dot {
+    @apply w-1.5 h-1.5 rounded-full shrink-0;
+  }
+  .ui-dot--cached { @apply bg-emerald-400; }
+  .ui-dot--static { @apply bg-amber-400; }
+
+  /* ── Чип алиаса ── */
+  .ui-chip {
+    @apply text-[9px] px-1.5 py-0.5 rounded border flex items-center gap-1 transition-colors;
+  }
+  .ui-chip--cached { @apply bg-slate-800 text-emerald-400 border-slate-700; }
+  .ui-chip--static { @apply bg-amber-500/10 text-amber-400 border-amber-500/30; }
+  .ui-chip--loose { @apply border-dashed; }
+  .ui-chip--main { @apply font-bold; }
+  .ui-chip--sub { @apply font-normal opacity-90; }
+
+  /* ── Модальное окно ── */
+  .ui-overlay {
+    @apply fixed inset-0 z-50 w-screen h-screen bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto select-none font-mono;
+  }
+  .ui-panel {
+    @apply bg-slate-900 border border-slate-800 rounded-lg w-full p-5 space-y-4 shadow-2xl text-xs;
+  }
+
+  /* ── Баннер статуса ── */
+  .ui-banner {
+    @apply p-2.5 rounded border text-[11px] font-bold;
+  }
+  .ui-banner--success { @apply bg-emerald-950/40 border-emerald-500/40 text-emerald-400; }
+  .ui-banner--error { @apply bg-rose-950/40 border-rose-500/40 text-rose-400; }
+
+  /* ── Боковое меню: кнопка-бургер + выезжающая панель разделов ── */
+  .ui-burger {
+    @apply fixed top-3 left-3 z-40 w-9 h-9 flex items-center justify-center rounded border border-slate-800 bg-slate-900/90 text-slate-400 cursor-pointer transition-colors hover:text-emerald-400 hover:border-emerald-500/40 backdrop-blur;
+  }
+  .ui-drawer-backdrop {
+    @apply fixed inset-0 z-40 bg-slate-950/60 backdrop-blur-sm;
+  }
+  .ui-drawer {
+    @apply fixed top-0 left-0 bottom-0 z-50 w-72 max-w-[85vw] bg-slate-900 border-r border-slate-800 shadow-2xl flex flex-col font-mono text-xs select-none;
+  }
+  .ui-drawer-item {
+    @apply w-full flex items-center justify-between px-3 py-2 rounded text-left uppercase font-bold cursor-pointer transition-colors text-slate-400 hover:text-slate-200 hover:bg-slate-800/60;
+  }
+  .ui-drawer-item--active { @apply bg-slate-800 text-emerald-400; }
+
+  /* ── Раздел = один монолитный контур, группы внутри без перегородок ── */
+  .ui-groups {
+    @apply border border-slate-800 rounded-md overflow-hidden;
+  }
+  .ui-group {
+    @apply relative px-3 pb-3 pt-6;
+  }
+  .ui-group__title {
+    @apply absolute top-1.5 left-3 text-[9px] font-bold uppercase tracking-wider text-slate-500;
+  }
+
+  /* ── Выбираемая плитка (мультиселект) ── */
+  .ui-select-card {
+    @apply cursor-pointer select-none outline-none hover:brightness-110 focus-visible:ring-2 focus-visible:ring-emerald-400/60;
+  }
+  .ui-select-card--on {
+    @apply ring-2 ring-emerald-400 shadow-emerald-500/20;
+  }
+  .ui-select-mark {
+    @apply absolute bottom-4 right-4 z-10 w-5 h-5 rounded-full border border-current opacity-40 flex items-center justify-center transition-all;
+  }
+  .ui-select-mark--on {
+    @apply opacity-100 bg-emerald-400 border-emerald-400 text-slate-950;
+  }
+
+  /* ── Закрытая карта: помутнение — обесцвечена, приглушена, под «матовым стеклом» с мелкой штриховкой ── */
+  .ui-closed {
+    filter: grayscale(0.9) saturate(0.5) brightness(0.8);
+    opacity: 0.62;
+  }
+  .ui-closed::after {
+    content: '';
+    @apply absolute inset-0 pointer-events-none z-20 rounded-[inherit];
+    background:
+      repeating-linear-gradient(135deg, rgb(148 163 184 / 0.10) 0 1px, transparent 1px 6px),
+      linear-gradient(to bottom, rgb(2 6 23 / 0.15), rgb(2 6 23 / 0.35));
+    backdrop-filter: blur(0.8px);
+  }
+  /* ── Пуш-уведомления (справа сверху, под шапкой) ── */
+  .ui-push-stack {
+    @apply fixed bottom-4 right-4 z-40 w-[420px] max-w-[calc(100vw-2rem)] max-h-[calc(100vh-6rem)] overflow-y-auto flex flex-col justify-end gap-2 pointer-events-none;
+  }
+  .ui-push {
+    @apply pointer-events-auto rounded-md border p-3 shadow-2xl backdrop-blur bg-slate-900/95 border-slate-700;
+  }
+  .ui-push--ok { @apply border-emerald-500/50 bg-emerald-950/90; }
+  .ui-push--err { @apply border-rose-500/50 bg-rose-950/90; }
+
+  /* ── Общий бар: бегущие косые полосы (в процессе) / сплошной (готово) ── */
+  .ui-bar {
+    @apply h-2 rounded-full overflow-hidden bg-slate-800;
+  }
+  .ui-bar--run {
+    background-image: repeating-linear-gradient(135deg, rgb(52 211 153 / 0.85) 0 6px, rgb(6 78 59 / 0.9) 6px 12px);
+    background-size: 17px 17px;
+    animation: stripes 0.7s linear infinite;
+  }
+  .ui-bar--done { @apply bg-emerald-500; }
+  .ui-bar--err { @apply bg-rose-500; }
+
+  /* ── Таймлайн счёта ── */
+  .ui-tl {
+    @apply relative flex-1 h-3 rounded bg-slate-800/80 border border-slate-700/60;
+  }
+  .ui-tl--err { @apply border-rose-500/60; }
+  .ui-tl__run { @apply absolute top-0 bottom-0; }
+  .ui-tl__run--data { @apply bg-emerald-500; }
+  .ui-tl__run--err { @apply bg-rose-500/70; }
+  .ui-tl__run--err.ui-tl__run--empty {
+    background: repeating-linear-gradient(135deg, rgb(254 205 211 / 0.5) 0 1px, transparent 1px 5px), rgb(136 19 55 / 0.8);
+  }
+  .ui-tl__run--empty {
+    background:
+      repeating-linear-gradient(135deg, rgb(148 163 184 / 0.45) 0 1px, transparent 1px 5px),
+      rgb(6 78 59 / 0.75);
+  }
+  .ui-tl__win { @apply absolute -top-px -bottom-px bg-amber-400/20 border-y border-amber-400/50; }
+  .ui-tl__win--wait { @apply animate-pulse; }
+  .ui-tl__win--err { @apply bg-rose-500/30 border-rose-400/70; }
+  .ui-tl__pin {
+    @apply absolute -top-1 -bottom-1 w-[3px] -ml-[1.5px] rounded-full bg-amber-400;
+    box-shadow: 0 0 6px rgb(251 191 36 / 0.8);
+  }
+  .ui-tl__pin::before {
+    content: '';
+    @apply absolute top-1/2 -translate-y-1/2 border-y-[4px] border-y-transparent;
+  }
+  .ui-tl__pin--l::before { @apply left-full border-l-[5px] border-l-amber-400; }
+  .ui-tl__pin--r::before { @apply right-full border-r-[5px] border-r-amber-400; }
+  /* узкое окно — стрелки смотрят наружу */
+  .ui-tl__pin--out.ui-tl__pin--l::before { @apply left-auto right-full border-l-0 border-r-[5px] border-r-amber-400; }
+  .ui-tl__pin--out.ui-tl__pin--r::before { @apply right-auto left-full border-r-0 border-l-[5px] border-l-amber-400; }
+  .ui-tl__pin--err { @apply bg-rose-400; box-shadow: 0 0 6px rgb(251 113 133 / 0.8); }
+  .ui-tl__pin--err.ui-tl__pin--l::before { @apply border-l-rose-400 border-r-rose-400; }
+  .ui-tl__pin--err.ui-tl__pin--r::before { @apply border-l-rose-400 border-r-rose-400; }
+
+  /* ── Края экрана при перетаскивании ── */
+  .ui-edge {
+    @apply fixed inset-x-0 z-20 h-28 pointer-events-none flex justify-center text-emerald-300;
+  }
+  .ui-edge--top {
+    @apply items-start pt-3;
+    background: linear-gradient(to bottom, rgb(16 185 129 / 0.28), transparent);
+  }
+  .ui-edge--bottom {
+    @apply bottom-0 items-end pb-3;
+    background: linear-gradient(to top, rgb(16 185 129 / 0.28), transparent);
+  }
+  /* space-y-* у родителя вешает margin на все дочерние кроме последнего — отодвигало нижнюю зону от края на 32px */
+  .ui-edge { margin: 0 !important; }
+  .ui-edge__arrow { filter: drop-shadow(0 0 6px rgb(52 211 153 / 0.8)); }
+
+  .ui-life-btn {
+    @apply absolute bottom-1 right-1 z-30 w-4 h-4 flex items-center justify-center rounded text-slate-200 bg-slate-950/50 opacity-0 transition-opacity cursor-pointer;
+  }
+  .relative:hover > .ui-life-btn, .ui-life-btn:focus-visible { @apply opacity-90; }
+  .ui-closed-tag {
+    @apply text-[8px] font-bold tracking-widest uppercase px-1.5 py-0.5 rounded border border-slate-500/60 text-slate-300 bg-slate-900/70;
+  }
+
+  /* ── Шапка, прибитая к верху экрана ── */
+  .app-bar {
+    @apply fixed top-0 inset-x-0 z-30 bg-slate-950/90 backdrop-blur border-b border-slate-800;
+  }
+
+  /* ── Плавающие кнопки «в начало / в конец» ── */
+  .ui-jump {
+    @apply fixed left-1/2 -translate-x-1/2 z-30 w-10 h-10 rounded-full flex items-center justify-center cursor-pointer border border-slate-700 bg-slate-900/90 text-slate-300 shadow-lg backdrop-blur transition-colors hover:text-emerald-400 hover:border-emerald-500/50;
+  }
+  .ui-jump--up { @apply top-20; }
+  .ui-jump--down { @apply bottom-6; }
+}

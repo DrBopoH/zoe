@@ -1,0 +1,38 @@
+/* Слой 1. База: глобальные настройки документа */
+html, body {
+  background-color: #020617;
+  color: #f8fafc;
+  min-height: 100vh;
+  margin: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+}
+
+/* Полосы прокрутки в стиле интерфейса: толстые, контрастные, их легко поймать мышью */
+* {
+  scrollbar-width: thin;                                   /* Firefox */
+  scrollbar-color: rgba(100, 116, 139, 0.7) rgba(15, 23, 42, 0.9);
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.9);
+  border-radius: 6px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.7);
+  border: 2px solid rgba(15, 23, 42, 0.9);                 /* «воздух» вокруг ползунка */
+  border-radius: 6px;
+  min-height: 32px;
+  min-width: 32px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(16, 185, 129, 0.8);
+}
+*::-webkit-scrollbar-thumb:active {
+  background: rgba(16, 185, 129, 1);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}

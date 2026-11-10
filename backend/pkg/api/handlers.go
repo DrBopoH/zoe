@@ -1,32 +1,73 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"math"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"economic/pkg/db"
 	"economic/pkg/mono"
+	"economic/pkg/privat"
+	"economic/pkg/raif"
 )
 
 type Server struct {
-	storage    *db.Storage
-	monoClient *mono.Client
+	storage     *db.Storage
+	monoClients []*mono.Client
+	raifClients []*raif.Client
 
 	syncMutex  sync.Mutex
 	isSyncing  bool
 	syncStatus string
+
+	prog progress // структурированный прогресс синка для панели на фронте
+
+	allowedOrigins map[string]bool // CORS: кто из браузера имеет право ходить в API
 }
 
-func NewServer(storage *db.Storage, monoClient *mono.Client) *Server {
+func NewServer(storage *db.Storage, monoClients []*mono.Client, raifClients []*raif.Client) *Server {
 	return &Server{
-		storage:    storage,
-		monoClient: monoClient,
-		syncStatus: "IDLE",
+		storage:     storage,
+		monoClients: monoClients,
+		raifClients: raifClients,
+		syncStatus:  "IDLE",
+		allowedOrigins: map[string]bool{
+			"http://localhost:5173": true,
+			"http://127.0.0.1:5173": true,
+		},
 	}
+}
+
+// SetAllowedOrigins задаёт список Origin фронта (например из env ALLOWED_ORIGINS).
+func (s *Server) SetAllowedOrigins(origins []string) {
+	m := make(map[string]bool, len(origins))
+	for _, o := range origins {
+		if o = strings.TrimRight(strings.TrimSpace(o), "/"); o != "" {
+			m[o] = true
+		}
+	}
+	if len(m) > 0 {
+		s.allowedOrigins = m
+	}
+}
+
+// oldestTime — самое раннее время в выписке (не полагаемся на порядок, в котором банк отдал операции).
+func oldestTime(items []mono.StatementItemDTO) int64 {
+	oldest := items[0].Time
+	for _, it := range items[1:] {
+		if it.Time < oldest {
+			oldest = it.Time
+		}
+	}
+	return oldest
 }
 
 func (s *Server) updateStatus(msg string) {
@@ -36,7 +77,6 @@ func (s *Server) updateStatus(msg string) {
 	log.Printf("[Sync Status] %s", msg)
 }
 
-// Человекочитаемое форматирование даты N (день) name (месяц) YYYY
 var ruMonthsShort = []string{
 	"", "янв.", "февр.", "марта", "апр.", "мая", "июня",
 	"июля", "авг.", "сент.", "окт.", "нояб.", "декабря",
@@ -48,7 +88,16 @@ func formatHumanDate(t time.Time) string {
 
 func (s *Server) EnableCORS(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		// Раньше было "*": любая открытая вкладка браузера могла читать финансы и стирать кеш.
+		// Запросы без Origin (curl, сам фронт через прокси) пропускаем — бэкенд слушает только localhost.
+		if origin := r.Header.Get("Origin"); origin != "" {
+			if !s.allowedOrigins[origin] {
+				http.Error(w, "Origin not allowed", http.StatusForbidden)
+				return
+			}
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Add("Vary", "Origin")
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Token")
 		if r.Method == http.MethodOptions {
@@ -60,6 +109,8 @@ func (s *Server) EnableCORS(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func (s *Server) runFullCrawler() {
+	s.prog.begin()
+	defer s.prog.finish()
 	defer func() {
 		s.syncMutex.Lock()
 		s.isSyncing = false
@@ -67,85 +118,319 @@ func (s *Server) runFullCrawler() {
 		s.syncMutex.Unlock()
 	}()
 
-	info, err := s.monoClient.GetClientInfo()
-	if err != nil {
-		log.Printf("[Sync Error] GetClientInfo: %v", err)
-		s.updateStatus("ОТКАЗ КЛЮЧА API")
+	if len(s.monoClients) == 0 && len(s.raifClients) == 0 {
+		s.updateStatus("ОТСУТСТВУЮТ КЛЮЧИ API")
 		return
 	}
 
-	_ = s.storage.SaveAccounts(info.Accounts, info.Name)
+	var wg sync.WaitGroup
+	totalMono := len(s.monoClients)
+	totalRaif := len(s.raifClients)
+
+	// Параллельный опрос ключей Monobank
+	for clientIdx, client := range s.monoClients {
+		wg.Add(1)
+		go func(idx int, c *mono.Client) {
+			defer wg.Done()
+			s.crawlClient(c, idx+1, totalMono)
+		}(clientIdx, client)
+	}
+
+	// Параллельный опрос ключей Raiffeisen Bank
+	for clientIdx, client := range s.raifClients {
+		wg.Add(1)
+		go func(idx int, c *raif.Client) {
+			defer wg.Done()
+			s.crawlRaifClient(c, idx+1, totalRaif)
+		}(clientIdx, client)
+	}
+
+	wg.Wait()
+}
+
+func (s *Server) crawlClient(client *mono.Client, clientNum, totalClients int) {
+	var info *mono.UserInfoDTO
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		info, err = client.GetClientInfo()
+		if _, isRate := err.(*mono.RateLimitError); isRate {
+			s.updateStatus(fmt.Sprintf("MONO %d/%d: 429 ЛИМИТ · ОХЛАЖДЕНИЕ 65С", clientNum, totalClients))
+			time.Sleep(65 * time.Second)
+			continue
+		}
+		break
+	}
+	if err != nil {
+		log.Printf("[Sync Error] Mono Client %d GetClientInfo: %v", clientNum, err)
+		s.updateStatus(fmt.Sprintf("MONO %d/%d: ОТКАЗ API", clientNum, totalClients))
+		s.prog.clientError(s.prog.client(fmt.Sprintf("Mono %d", clientNum), "mono", 61*time.Second), "банк отказал: "+err.Error())
+		return
+	}
+
+	ownerName := info.Name
+	if ownerName == "" {
+		ownerName = fmt.Sprintf("Mono %d", clientNum)
+	}
+
+	if err := s.storage.SaveAccounts(info.Accounts, ownerName); err != nil {
+		log.Printf("[Sync Error] [%s] Save accounts: %v", ownerName, err)
+	}
 
 	if len(info.Accounts) == 0 {
-		s.updateStatus("СЧЕТА ПУСТЫ")
+		s.updateStatus(fmt.Sprintf("[%s] СЧЕТА ПУСТЫ", ownerName))
 		return
 	}
+	cp := s.prog.client(ownerName, "mono", 61*time.Second)
+	progs := progAccounts(info.Accounts)
+	s.prog.setAccounts(cp, progs)
+	ids := make([]string, 0, len(info.Accounts))
+	for _, a := range info.Accounts {
+		ids = append(ids, a.ID)
+	}
+	if err := s.storage.MarkClosedAbsent(ownerName, ids); err != nil {
+		log.Printf("[Sync Error] [%s] closed accounts: %v", ownerName, err)
+	}
 
-	minHistoricalDate := time.Date(2017, 1, 1, 0, 0, 0, 0, time.UTC)
-
+	var cur *accProg
+	coolSleep := func(d time.Duration) { s.prog.cool(cur, d); time.Sleep(d); s.prog.fetching(cur) }
+	pace := newPacer(61*time.Second, coolSleep)
 	for accIndex, acc := range info.Accounts {
-		s.updateStatus(fmt.Sprintf("СЧЕТ %d/%d (%s)", accIndex+1, len(info.Accounts), acc.Type))
+		cur = progs[accIndex]
+		label := fmt.Sprintf("[%s] СЧЕТ %d/%d (%s)", ownerName, accIndex+1, len(info.Accounts), acc.Type)
+		s.updateStatus(label)
 
-		to := time.Now()
-		emptyWindowsCount := 0
-
-		for {
-			from := to.AddDate(0, 0, -30)
-
-			if from.Before(minHistoricalDate) {
-				log.Printf("[Sync] Достигнут лимит истории (2017)")
-				break
-			}
-
-			statement, err := s.monoClient.GetStatement(acc.ID, from, to)
-
-			if _, isRateErr := err.(*mono.RateLimitError); isRateErr {
-				s.updateStatus("ЛИМИТ БАНКА (429) · ОХЛАЖДЕНИЕ 65С")
-				time.Sleep(65 * time.Second)
-				continue
-			}
-
-			if _, isBadRequest := err.(*mono.BadRequestError); isBadRequest {
-				log.Printf("[Sync] Финиш истории счета %s", acc.ID)
-				s.updateStatus(fmt.Sprintf("[%s] ИСТОРИЯ ПОЛНАЯ", acc.Type))
-				break
-			}
-
-			if err != nil {
-				log.Printf("[Sync Error] Statement err: %v", err)
-				s.updateStatus("СБОЙ ВЫПИСКИ")
-				break
-			}
-
-			// ПУСТОЕ ОКНО — Явно выводим статус с кулдауном перед сном
-			if len(statement) == 0 {
-				emptyWindowsCount++
-				if emptyWindowsCount >= 12 {
-					break
+		accID := acc.ID
+		st, err := s.walkAccount(accID, walkCfg{
+			label:     label,
+			pageLimit: 500, // лимит Monobank на ответ выписки
+			pause:     61 * time.Second,
+			retryWait: 65 * time.Second,
+			classify: func(err error) errKind {
+				switch err.(type) {
+				case *mono.RateLimitError:
+					return errRetry
+				case *mono.BadRequestError:
+					return errHistoryEnd
 				}
-				to = from.Add(-1 * time.Second)
-				s.updateStatus(fmt.Sprintf("[%s] %s — %s · ОХЛАЖДЕНИЕ 61С", acc.Type, formatHumanDate(from), formatHumanDate(to)))
-				time.Sleep(61 * time.Second)
-				continue
-			}
-
-			emptyWindowsCount = 0
-
-			if err := s.storage.SaveTransactions(acc.ID, statement); err != nil {
-				log.Printf("[Sync Error] DB Save: %v", err)
-				break
-			}
-
-			oldestUnix := statement[len(statement)-1].Time
-			to = time.Unix(oldestUnix, 0).Add(-1 * time.Second)
-
-			s.updateStatus(fmt.Sprintf("СНЯТО %d ТРАНШЕЙ · ОХЛАЖДЕНИЕ 61С", len(statement)))
-			time.Sleep(61 * time.Second)
+				return errFatal
+			},
+			fetch: func(from, to time.Time) ([]mono.StatementItemDTO, error) {
+				return client.GetStatement(accID, from, to)
+			},
+			sleep:    coolSleep,
+			pace:     pace,
+			onWindow: func(f, t int64) { s.prog.window(cur, f, t) },
+			now:      time.Now,
+			status:   s.updateStatus,
+		})
+		s.prog.accDone(cur, st, err)
+		if err != nil {
+			log.Printf("[Sync Error] [%s] счёт %s: %v", ownerName, acc.ID, err)
+			s.updateStatus(fmt.Sprintf("[%s] СБОЙ ВЫПИСКИ", acc.Type))
+			continue
 		}
+		log.Printf("[Sync] [%s] счёт %s: запросов к банку %d, история целиком: %v", ownerName, acc.ID, st.Requests, st.Complete)
 	}
 }
 
-// --- USERS HANDLERS (FULL CRUD) ---
+func (s *Server) crawlRaifClient(client *raif.Client, clientNum, totalClients int) {
+	name, accounts, err := client.GetUserInfo()
+	if err != nil {
+		log.Printf("[Sync Error] Raif Client %d GetUserInfo: %v", clientNum, err)
+		s.updateStatus(fmt.Sprintf("RAIF %d/%d: ОТКАЗ API", clientNum, totalClients))
+		s.prog.clientError(s.prog.client(fmt.Sprintf("Raif %d", clientNum), "raif", 30*time.Second), "банк отказал: "+err.Error())
+		return
+	}
+
+	ownerName := name
+	if ownerName == "" {
+		ownerName = fmt.Sprintf("Raif %d", clientNum)
+	}
+
+	if err := s.storage.SaveAccounts(accounts, ownerName); err != nil {
+		log.Printf("[Sync Error] [%s] Save accounts: %v", ownerName, err)
+	}
+
+	if len(accounts) == 0 {
+		s.updateStatus(fmt.Sprintf("[%s] СЧЕТА ПУСТЫ (RAIF)", ownerName))
+		return
+	}
+	rcp := s.prog.client(ownerName, "raif", 30*time.Second)
+	rprogs := progAccounts(accounts)
+	s.prog.setAccounts(rcp, rprogs)
+	rids := make([]string, 0, len(accounts))
+	for _, a := range accounts {
+		rids = append(rids, a.ID)
+	}
+	if err := s.storage.MarkClosedAbsent(ownerName, rids); err != nil {
+		log.Printf("[Sync Error] [%s] closed accounts: %v", ownerName, err)
+	}
+
+	var rcur *accProg
+	rCool := func(d time.Duration) { s.prog.cool(rcur, d); time.Sleep(d); s.prog.fetching(rcur) }
+	pace := newPacer(30*time.Second, rCool)
+	for accIndex, acc := range accounts {
+		rcur = rprogs[accIndex]
+		label := fmt.Sprintf("[%s] СЧЕТ %d/%d (%s) RAIF", ownerName, accIndex+1, len(accounts), acc.Type)
+		s.updateStatus(label)
+
+		accID := acc.ID
+		st, err := s.walkAccount(accID, walkCfg{
+			label:     label,
+			pageLimit: 0, // лимит ответа Raif неизвестен — считаем осторожно
+			pause:     30 * time.Second,
+			retryWait: 30 * time.Second,
+			classify:  func(error) errKind { return errFatal },
+			fetch: func(from, to time.Time) ([]mono.StatementItemDTO, error) {
+				return client.GetStatement(accID, from, to)
+			},
+			sleep:    rCool,
+			pace:     pace,
+			onWindow: func(f, t int64) { s.prog.window(rcur, f, t) },
+			now:      time.Now,
+			status:   s.updateStatus,
+		})
+		s.prog.accDone(rcur, st, err)
+		if err != nil {
+			log.Printf("[Sync Error] [%s] Raif счёт %s: %v", ownerName, acc.ID, err)
+			s.updateStatus(fmt.Sprintf("[%s] СБОЙ ВЫПИСКИ RAIF", acc.Type))
+			continue
+		}
+		log.Printf("[Sync] [%s] Raif счёт %s: запросов %d, история целиком: %v", ownerName, acc.ID, st.Requests, st.Complete)
+	}
+}
+
+func (s *Server) HandleImportCSV(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 32<<20) // выписка больше 32 МБ — это не выписка
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "Failed to read uploaded file", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	filename := "statement"
+	if header != nil && header.Filename != "" {
+		filename = header.Filename
+	}
+
+	rawBytes, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, "Failed to read file bytes", http.StatusBadRequest)
+		return
+	}
+
+	res, err := s.importSource(filename, rawBytes)
+	if err != nil {
+		code := http.StatusInternalServerError
+		if he, ok := err.(*importError); ok {
+			code = he.code
+		}
+		http.Error(w, err.Error(), code)
+		return
+	}
+
+	// Файл успешно разобран → если он новый (по хэшу содержимого), кладём в кэш источников на диске.
+	// Это НЕ кэш-база: переживает любой сброс, из него «Загрузить» восстанавливает данные.
+	cached, aerr := archiveSource(res.Card, filename, rawBytes)
+	if aerr != nil {
+		log.Printf("[Sources] не удалось сохранить источник %q: %v", filename, aerr)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":         "success",
+		"account_id":     res.AccountID,
+		"iban":           res.IBAN,
+		"card_number":    res.Card,
+		"imported_count": res.Count,
+		"source_cached":  cached,
+	})
+}
+
+type importError struct {
+	code int
+	msg  string
+}
+
+func (e *importError) Error() string { return e.msg }
+
+type importResult struct {
+	AccountID, IBAN, Card string
+	Count                 int
+}
+
+// importSource разбирает выписку (PDF Привата / CSV Райфа) и пишет её в кеш-базу.
+// Общий путь и для загрузки файла в интерфейсе, и для «Загрузить» из кэша источников.
+func (s *Server) importSource(filename string, rawBytes []byte) (*importResult, error) {
+	var accountID, targetIBAN, targetCard, bankType string
+	var balance float64
+	var transactions []mono.StatementItemDTO
+
+	// Автоопределение формата: PDF (Приват) vs CSV (Райф / CSV)
+	if bytes.HasPrefix(rawBytes, []byte("%PDF")) || strings.HasSuffix(strings.ToLower(filename), ".pdf") {
+		parsed, err := privat.ParsePDF(bytes.NewReader(rawBytes))
+		if err != nil {
+			return nil, &importError{http.StatusBadRequest, fmt.Sprintf("Failed to parse Privat PDF: %v", err)}
+		}
+		targetIBAN = parsed.IBAN
+		targetCard = parsed.CardNumber
+		bankType = "privat"
+		balance = parsed.Balance
+		transactions = parsed.Transactions
+	} else {
+		parsed, err := raif.ParseCSV(bytes.NewReader(rawBytes))
+		if err != nil {
+			return nil, &importError{http.StatusBadRequest, fmt.Sprintf("Failed to parse CSV: %v", err)}
+		}
+		targetIBAN = parsed.IBAN
+		targetCard = parsed.CardNumber
+		bankType = parsed.BankType
+		balance = parsed.Balance
+		transactions = parsed.Transactions
+	}
+
+	if len(transactions) == 0 {
+		return nil, &importError{http.StatusBadRequest, "No transactions found in file"}
+	}
+
+	accountID = fmt.Sprintf("%s_%s", bankType, targetIBAN)
+	if targetIBAN == "" && targetCard != "" {
+		accountID = fmt.Sprintf("%s_%s", bankType, targetCard)
+	}
+
+	var maskedPans []string
+	if targetCard != "" {
+		maskedPans = append(maskedPans, targetCard)
+	}
+
+	currency := 980
+	if transactions[0].CurrencyCode != 0 {
+		currency = transactions[0].CurrencyCode
+	}
+
+	accDTO := mono.AccountDTO{
+		ID:           accountID,
+		IBAN:         targetIBAN,
+		MaskedPan:    maskedPans,
+		Type:         bankType,
+		CurrencyCode: currency,
+		Balance:      int64(math.Round(balance * 100)),
+	}
+
+	if err := s.storage.SaveImportedAccount(accDTO, filename); err != nil {
+		return nil, &importError{http.StatusInternalServerError, fmt.Sprintf("Failed to save account: %v", err)}
+	}
+	if err := s.storage.SaveTransactions(accountID, transactions); err != nil {
+		return nil, &importError{http.StatusInternalServerError, fmt.Sprintf("Failed to save transactions: %v", err)}
+	}
+	return &importResult{AccountID: accountID, IBAN: targetIBAN, Card: targetCard, Count: len(transactions)}, nil
+}
 
 func (s *Server) HandleUsers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
@@ -163,6 +448,10 @@ func (s *Server) HandleUsers(w http.ResponseWriter, r *http.Request) {
 		var u db.User
 		if err := json.NewDecoder(r.Body).Decode(&u); err != nil {
 			http.Error(w, "Invalid payload", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(u.Name) == "" {
+			http.Error(w, "Name is required", http.StatusBadRequest)
 			return
 		}
 		if u.ID == "" {
@@ -244,6 +533,7 @@ func (s *Server) HandleAddAlias(w http.ResponseWriter, r *http.Request) {
 type LinkIBANRequest struct {
 	UserID            string `json:"user_id"`
 	AccountIdentifier string `json:"account_identifier"`
+	ParentIdentifier  string `json:"parent_identifier"`
 	Note              string `json:"note"`
 }
 
@@ -255,7 +545,8 @@ func (s *Server) HandleLinkAccount(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid payload", http.StatusBadRequest)
 			return
 		}
-		if err := s.storage.LinkAccountToUser(req.UserID, req.AccountIdentifier, req.Note); err != nil {
+		// Note — это название алиаса, к которому относится связь
+		if err := s.storage.LinkAccount(req.UserID, req.Note, req.AccountIdentifier, req.ParentIdentifier); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -269,7 +560,9 @@ func (s *Server) HandleLinkAccount(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Missing identifier", http.StatusBadRequest)
 			return
 		}
-		if err := s.storage.UnlinkAccountFromUser(identifier); err != nil {
+		// alias обязателен для корректного теневого бана; без него — убрать у всех алиасов
+		alias := r.URL.Query().Get("alias")
+		if err := s.storage.UnlinkAccount(alias, identifier); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -278,6 +571,21 @@ func (s *Server) HandleLinkAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+// GET /api/alias-structures — запомненные структуры алиасов (в т.ч. бесхозных, user_id == "").
+func (s *Server) HandleAliasStructures(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	list, err := s.storage.GetAliasStructures()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(list)
 }
 
 type UpdateAccountManualRequest struct {
@@ -319,7 +627,11 @@ func (s *Server) HandleGetAccounts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) HandleGetTransactions(w http.ResponseWriter, r *http.Request) {
-	txs, err := s.storage.GetTransactions(10000)
+	limit := 50000
+	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 && v <= 500000 {
+		limit = v
+	}
+	txs, err := s.storage.GetTransactions(limit)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -338,9 +650,10 @@ func (s *Server) HandleGetStatus(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"running": running,
-		"status":  statusMsg,
-		"stats":   stats,
+		"running":  running,
+		"status":   statusMsg,
+		"stats":    stats,
+		"progress": s.progressSnapshot(),
 	})
 }
 
@@ -391,6 +704,44 @@ func (s *Server) HandleUpdateCreditLimit(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+}
+
+type accountLifeRequest struct {
+	AccountID string `json:"account_id"`
+	Opened    string `json:"opened"` // YYYY-MM-DD или "" (по выписке)
+	Closed    string `json:"closed"` // YYYY-MM-DD или "" (не закрыт / по данным банка)
+}
+
+// HandleSetAccountLife — ручные даты открытия/закрытия счёта (банк их не отдаёт).
+func (s *Server) HandleSetAccountLife(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req accountLifeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.AccountID == "" {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+	parse := func(v string) (int64, error) {
+		if v == "" {
+			return 0, nil
+		}
+		t, err := time.Parse("2006-01-02", v)
+		return t.Unix(), err
+	}
+	opened, err1 := parse(req.Opened)
+	closed, err2 := parse(req.Closed)
+	if err1 != nil || err2 != nil || (opened > 0 && closed > 0 && closed < opened) {
+		http.Error(w, "Некорректные даты", http.StatusBadRequest)
+		return
+	}
+	if err := s.storage.SetAccountLife(req.AccountID, opened, closed); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }
