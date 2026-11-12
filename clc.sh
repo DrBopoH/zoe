@@ -654,13 +654,13 @@ cmd_merge() {
 # ./clc.sh done "сводка" [-v R.B] — pr + merge одной командой (фича закончена)
 cmd_done() { cmd_pr "$@"; cmd_merge; }
 
-# ./clc.sh build [a|b|s|m] — срез билда: ветка build = последний именованный коммит dev + аннотированный тег vR.<буква>B.C+T
-#   Версия берётся из именованного коммита dev (C и T не двигаются, буква добавляется): v1.1.20+20.<хэш> → тег v1.b1.20+20.
-#   Исходники не меняются. Перед срезом проверяется, что CI на этом коммите зелёный. По умолчанию буква b (бета).
-#   Если build уже есть, команда доводит тег только когда build стоит ровно на этом коммите; иначе обновление — PR dev → build.
+# ./clc.sh build [a|b|s|m] ["сводка"] — заморозка билда: PR в build → Merge commit «сводка | vR.<буква>B.C+T.<хэш dev>» → тег на нём
+#   Версия берётся из именованного коммита на вершине dev: v1.1.26+26.<хэш> → билд v1.b1.26+26 (C и T не двигаются, добавляется буква).
+#   Исходники не меняются; отдельный коммит на build — это и есть заморозка. Перед ней ждём зелёный CI на вершине dev.
+#   Буква по умолчанию b (бета); сводка по умолчанию «Build B <состояние>». Ветка build, если её нет, создаётся на вершине dev.
 cmd_build() {
   need_gh
-  local letter=${1:-b}
+  local letter=${1:-b} sum=${2:-}
   [[ $letter =~ ^[absm]$ ]] || die "буква состояния: a|b|s|m (по умолчанию b)"
   [[ -z $(git status --porcelain --untracked-files=no) ]] || die "есть незакоммиченные правки: ./${SELF} commit … или park"
   git fetch -q --tags origin
@@ -675,8 +675,15 @@ cmd_build() {
   r=${BASH_REMATCH[1]}; b=${BASH_REMATCH[2]}
   local tag="v${r}.${letter}${b}.${c}+${t}"
   git rev-parse -q --verify "refs/tags/$tag" >/dev/null && die "тег $tag уже есть"
-  local total bad i pend
-  for i in $(seq 1 40); do   # после мержа CI на dev ещё идёт — ждём до ~3,5 минут
+  if [[ -z $sum ]]; then
+    local st; case $letter in a) st=alpha ;; b) st=beta ;; s) st=stable ;; m) st=milestone ;; esac
+    sum="Build $b $st"
+  fi
+  local title="$sum | $tag.$(git rev-parse --short=7 "$sha")"
+  [[ $title =~ $NAMED_RE ]] || die "заголовок не похож на именованный коммит: $title"
+  # CI на вершине dev: после мержа он ещё идёт — ждём до ~3,5 минут
+  local total=0 bad pend i
+  for i in $(seq 1 40); do
     pend=$(gh api "repos/:owner/:repo/commits/$sha/check-runs" --jq '[.check_runs[] | select(.status != "completed")] | length')
     total=$(gh api "repos/:owner/:repo/commits/$sha/check-runs" --jq '.total_count')
     (( total > 0 && pend == 0 )) && break
@@ -685,15 +692,32 @@ cmd_build() {
   done
   bad=$(gh api "repos/:owner/:repo/commits/$sha/check-runs" --jq '[.check_runs[] | select(.conclusion != "success")] | length')
   (( total > 0 && bad == 0 )) || die "проверки на ${sha:0:7} не зелёные (не успех: $bad из $total) — билд не режу"
-  if git rev-parse -q --verify refs/remotes/origin/build >/dev/null; then
-    [[ $(git rev-parse origin/build) == "$sha" ]] || die "build уже есть и стоит не на вершине dev: обновление — PR dev → build"
-  else
+  # ветка build: нет — создаём на вершине dev (прямой пуш нового имени; дальше только через PR)
+  if ! git rev-parse -q --verify refs/remotes/origin/build >/dev/null; then
     git push -q origin "$sha:refs/heads/build" || die "GitHub не дал создать build (правила ветки). Создай ветку build от dev в вебе и запусти ./${SELF} build ещё раз"
+    git fetch -q origin
   fi
-  git tag -a "$tag" -m "${subj%% | v*}" "$sha"
+  # коммит заморозки: то же дерево, что у вершины dev, родитель — вершина dev; уходит в build мерж-коммитом
+  local cut="bld/$tag" fc
+  fc=$(git commit-tree "$sha^{tree}" -p "$sha" -m "build: freeze $tag")
+  git push -q -f origin "$fc:refs/heads/$cut"
+  if [[ $(gh pr view "$cut" --json state -q .state 2>/dev/null || true) != OPEN ]]; then
+    gh pr create --base build --head "$cut" --title "$title" --body "" >/dev/null
+  fi
+  gh pr view "$cut" --json url -q .url
+  for i in $(seq 1 20); do
+    gh pr checks "$cut" 2>&1 | grep -qi 'no checks reported' && sleep 3 || break
+  done
+  echo "… жду проверки PR"
+  gh pr checks "$cut" --watch --interval 5 || die "проверки PR не прошли — билд не вливаю. Смотри: gh pr checks $cut"
+  gh pr merge "$cut" --merge --subject "$title" --body "" >/dev/null
+  git fetch -q --prune origin
+  local m; m=$(git rev-parse origin/build)
+  git tag -a "$tag" -m "$sum" "$m"
   git push -q origin "$tag"
-  echo "✓ билд $tag → build @ ${sha:0:7}"
-  echo "  ${subj%% | v*}"
+  git push -q origin ":refs/heads/$cut" 2>/dev/null || true
+  echo "✓ $title"
+  echo "  build @ ${m:0:7}, тег $tag"
 }
 
 # ./clc.sh publish — запушить текущую wip-ветку на origin (дальше: pr / done)
@@ -741,7 +765,7 @@ Git
   ./${SELF} pr "сводка" [-v R.B]         push + PR в dev, заголовок = «сводка | vR.B.C+T.хэш»
   ./${SELF} merge                        дождаться проверок → Squash and merge → dev ← origin/dev
   ./${SELF} done "сводка" [-v R.B]       pr + merge (с remote то же делает land и ship … -z)
-  ./${SELF} build [a|b|s|m]              срез билда: ветка build = вершина dev + тег vR.<буква>B.C+T (по умолчанию b — бета)
+  ./${SELF} build [a|b|s|m] ["сводка"]   заморозка билда: PR в build → Merge commit «сводка | vR.<буква>B.C+T.хэш» + тег (по умолчанию b — бета)
   ./${SELF} sw <ветка> | drop <ветка> [-f]     перейти / удалить локальную ветку
 Папка загрузок: ZOE_DL=/путь
 EOF
