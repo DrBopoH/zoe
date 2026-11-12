@@ -58,6 +58,8 @@ type syncResult struct {
 	FinishedAt int64       `json:"finished_at"`
 	Requests   int         `json:"requests"`
 	Errors     []progError `json:"errors"`
+	AutoSave   bool        `json:"autosave"` // после обхода дописывали новые хвосты в файлы-источники
+	Saved      int         `json:"saved"`    // сколько источников записано/обновлено
 }
 
 type progress struct {
@@ -66,12 +68,23 @@ type progress struct {
 	startedAt int64
 	clients   []*clientProg
 	last      *syncResult
+	autoSave  bool
+	saved     int
+	saveErrs  []progError
 }
 
 func (p *progress) begin() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.running, p.startedAt, p.clients = true, time.Now().Unix(), nil
+	p.autoSave, p.saved, p.saveErrs = false, 0, nil
+}
+
+// saveDone запоминает итог автозаписи в источники — он попадёт в общий итог синка (finish).
+func (p *progress) saveDone(saved int, errs []progError) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.autoSave, p.saved, p.saveErrs = true, saved, errs
 }
 
 // reset убирает панель прогресса: «Разведать» снят сбросом кеша, показывать нечего.
@@ -154,6 +167,8 @@ func (p *progress) finish() {
 			}
 		}
 	}
+	res.AutoSave, res.Saved = p.autoSave, p.saved
+	res.Errors = append(res.Errors, p.saveErrs...)
 	p.running, p.last = false, res
 }
 

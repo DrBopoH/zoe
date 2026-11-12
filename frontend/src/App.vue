@@ -13,6 +13,8 @@ import { cleanPersonName, isP2PTransaction } from './utils/formatters.js'
 import { apiGetJson, apiSend } from './utils/api.js'
 import { storageGet, storageSet } from './utils/storage.js'
 import { marketNotice } from './utils/marketNotice.js'
+import { syncOkLines } from './utils/syncNotice.js'
+import { isSyncing, autoSave, syncPath } from './composables/useSync.js'
 import { marketPanelOpen } from './utils/marketPanel.js'
 import { loadMasks } from './composables/useIbanMasks.js'
 
@@ -34,7 +36,6 @@ useWheelScroll() // колесо над слайдерами и горизонт
 const accounts = ref([])
 const transactions = ref([])
 const users = ref([]) // лица: имя и аватар подменяют алиас контрагента в истории
-const isSyncing = ref(false)
 
 // Версия данных на бэкенде: растёт при любой записи (синк, импорт, правки лиц).
 // Данные перезапрашиваем только когда версия изменилась.
@@ -54,7 +55,7 @@ const notifyResult = (last) => {
   if (last.finished_at <= lastFinishedAt) return
   lastFinishedAt = last.finished_at
   if (!last.errors || last.errors.length === 0) {
-    pushToast({ kind: 'ok', title: 'Снято', lines: [`Запросов к банку: ${last.requests}`], ttl: 6000 })
+    pushToast({ kind: 'ok', title: 'Снято', lines: syncOkLines(last), ttl: 6000 })
   }
 }
 
@@ -149,12 +150,14 @@ const startFullSync = async () => {
   if (isSyncing.value) return
   errorMsg.value = ''
   try {
-    await apiSend('POST', '/sync/full')
+    await apiSend('POST', syncPath(autoSave.value))
     await fetchStatus()
   } catch (err) {
     errorMsg.value = err.message
   }
 }
+
+provide('startSync', startFullSync) // кнопки «Разведать» во вкладке Смета и в окне «Выписки»
 
 onMounted(() => {
   fetchData()
@@ -181,7 +184,6 @@ onUnmounted(() => {
           v-model:activeTab="activeTab"
           :is-syncing="isSyncing"
           :persons-count="personsCount"
-          @sync="startFullSync"
         />
       </div>
     </div>

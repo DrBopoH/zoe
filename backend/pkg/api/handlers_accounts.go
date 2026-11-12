@@ -87,7 +87,7 @@ func (s *Server) HandleFullHistoricalSync(w http.ResponseWriter, r *http.Request
 		fail(w, http.StatusConflict, "Синхронизация уже выполняется")
 		return
 	}
-	go s.runFullCrawler(ctx, done)
+	go s.runFullCrawler(ctx, done, r.URL.Query().Get("save") == "1")
 	s.startMarket(ctx, "") // рыночные данные — свой процесс параллельно банкам, свои статус и тосты; занят — пропускаем
 
 	writeMsg(w, "started", "Полная историческая синхронизация запущена.")

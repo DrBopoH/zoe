@@ -369,27 +369,39 @@ func (s *Server) HandleSaveAPI(w http.ResponseWriter, r *http.Request) {
 	if !allow(w, r, http.MethodPost) {
 		return
 	}
-	want := readAccounts(r)
-	accs, err := s.storage.GetAccounts()
+	out, err := s.saveAPISources(readAccounts(r))
 	if err != nil {
 		failErr(w, err)
 		return
 	}
-	type res struct {
-		Account string `json:"account"`
-		Name    string `json:"name"`
-		Saved   bool   `json:"saved"`
-		Skipped string `json:"skipped,omitempty"`
-		Count   int    `json:"count"`
-		Error   string `json:"error,omitempty"`
+	writeJSON(w, map[string]any{"status": "success", "results": out})
+}
+
+// saveRes — итог записи одного счёта в файлы-источники.
+type saveRes struct {
+	Account string `json:"account"`
+	Name    string `json:"name"`
+	Saved   bool   `json:"saved"`
+	Skipped string `json:"skipped,omitempty"`
+	Count   int    `json:"count"`
+	Error   string `json:"error,omitempty"`
+}
+
+// saveAPISources пишет снятое с API в файлы-источники. want == nil — все счета, у которых есть что сохранять
+// (счета без данных API молча пропускаются); иначе только перечисленные, и «нечего сохранять» попадает в итог.
+// Тот же путь, что у кнопки «Сохранить с API» и у автозаписи после «Разведать».
+func (s *Server) saveAPISources(want map[string]bool) ([]saveRes, error) {
+	accs, err := s.storage.GetAccounts()
+	if err != nil {
+		return nil, err
 	}
-	out := []res{}
+	out := []saveRes{}
 	for _, a := range accs {
 		if want != nil && !want[a.ID] {
 			continue
 		}
 		f, err := s.snapshotAPI(a)
-		item := res{Account: a.ID, Name: a.Name}
+		item := saveRes{Account: a.ID, Name: a.Name}
 		switch {
 		case err != nil:
 			item.Error = err.Error()
@@ -411,7 +423,7 @@ func (s *Server) HandleSaveAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, item)
 	}
-	writeJSON(w, map[string]any{"status": "success", "results": out})
+	return out, nil
 }
 
 // HandleDeleteSource — DELETE /api/sources/file?id=<отпечаток>: снести файл-источник.

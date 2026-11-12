@@ -6,7 +6,9 @@ import UiIconButton from './ui/UiIconButton.vue'
 import UiIcon from './ui/UiIcon.vue'
 import CoverBar from './CoverBar.vue'
 import ImportCsvModal from './ImportCsvModal.vue'
+import SyncButton from './SyncButton.vue'
 import { apiGetJson, apiSend, q } from '../utils/api.js'
+import { autoSave, setAutoSave } from '../composables/useSync.js'
 import { formatRuDate, formatMaskedIBAN, plural, fmtN, formatPeriod } from '../utils/formatters.js'
 
 // Окно «ВЫПИСКИ»: всё, что известно об источниках данных (файлы выписок, снимки API) и об их присутствии в кеш-базе.
@@ -19,7 +21,7 @@ const accounts = ref([])
 const info = ref(null) // { dir, migrated, failed }
 const picked = ref(new Set())
 const opened = ref(new Set()) // счета с раскрытым списком файлов
-const busy = ref('') // reset | load | api | del
+const busy = ref('') // reset | load | del
 const msg = ref(null) // { ok, text }
 const loading = ref(false)
 const addOpen = ref(false)
@@ -97,20 +99,6 @@ const doLoad = () => run('load', async () => {
   msg.value = {
     ok: bad === 0,
     text: d.total === 0 ? 'Нет файлов-источников для загрузки' : `Загружено ${d.loaded} из ${d.total}` + (bad ? ` · ошибок: ${bad} — ${d.failed.map(f => `${f.file}: ${f.error}`).join('; ')}` : '')
-  }
-})
-
-const doSaveApi = () => run('api', async () => {
-  const d = await (await apiSend('POST', '/sources/save-api', { accounts: scopeIds.value })).json()
-  const rs = d.results || []
-  const saved = rs.filter(r => r.saved).length
-  const bad = rs.filter(r => r.error)
-  const skipped = rs.filter(r => r.skipped && !r.saved)
-  msg.value = {
-    ok: bad.length === 0,
-    text: rs.length === 0
-      ? 'С API пока ничего не снято — сначала «Разведать»'
-      : `Сохранено с API: ${saved}` + (skipped.length ? ` · без изменений/нечего: ${skipped.length}` : '') + (bad.length ? ` · ошибок: ${bad.length} — ${bad.map(b => b.error).join('; ')}` : '')
   }
 })
 
@@ -210,9 +198,12 @@ const hasApiFile = (a) => a.files.some(f => f.origin === 'api')
         <UiButton variant="primary" size="sm" :disabled="!!busy || !accounts.length" @click="doLoad">
           {{ busy === 'load' ? 'Загрузка…' : `Загрузить${scopeSuffix}` }}
         </UiButton>
-        <UiButton variant="outline" size="sm" :disabled="!!busy || !accounts.length" title="Записать в файлы-источники то, что уже снято с API: после сброса кэш восстановится с диска, а снятые периоды заново не качаются" @click="doSaveApi">
-          {{ busy === 'api' ? 'Сохранение…' : `Сохранить с API${scopeSuffix}` }}
-        </UiButton>
+        <!-- «Разведать» вместо «Сохранить с API»: обход банков, а галочка — дописать снятое в источники сама, когда он закончится -->
+        <label class="flex items-center gap-1.5 text-[10px] text-slate-400 cursor-pointer select-none" title="После обхода снятое с API записывается в файлы-источники: после сброса кэш восстановится с диска, а снятые периоды заново не качаются">
+          <input type="checkbox" class="accent-emerald-500" :checked="autoSave" @change="setAutoSave($event.target.checked)" />
+          дописывать в источники
+        </label>
+        <SyncButton size="sm" />
       </div>
     </div>
 
