@@ -10,6 +10,9 @@ import (
 // и муниципальные бумаги; ОВДП отбираются по этому префиксу.
 const ovdpPrefix = "UA4000"
 
+// auctionsFrom — с какого процента начинаются аукционы: реестр (один запрос) занимает первую часть шкалы.
+const auctionsFrom = 15
+
 // NBURegistry — реестр ОВДП из справочника ценных бумаг депозитария (bank.gov.ua/depo_securities?json).
 // Поля по документации НБУ: cpcode (ISIN), cpdescr (описание), val_code, nominal, auk_proc (ставка, %),
 // razm_date (размещение), pgs_date (погашение).
@@ -52,7 +55,7 @@ func (c *Client) NBURegistry(ctx context.Context) ([]Security, Result, error) {
 // NBUAuctions — результаты аукционов Минфина за последние дни (bank.gov.ua/NBU_ovdp?json&date=DD.MM.YYYY).
 // Формат даты именно DD.MM.YYYY. День без аукциона даёт пустой массив, не ошибку. Берётся доходность и дата аукциона
 // по каждой бумаге; побеждает самый поздний аукцион.
-func (c *Client) NBUAuctions(ctx context.Context) ([]Security, Result, error) {
+func (c *Client) NBUAuctions(ctx context.Context, rep Reporter) ([]Security, Result, error) {
 	res := Result{Source: SourceNBU}
 	days := c.AuctionDays
 	if days <= 0 {
@@ -66,6 +69,7 @@ func (c *Client) NBUAuctions(ctx context.Context) ([]Security, Result, error) {
 			return nil, res, err
 		}
 		day := c.now().AddDate(0, 0, -i)
+		rep.report(auctionsFrom+(100-auctionsFrom)*(days-1-i)/days, "аукционы: "+day.Format("02.01"))
 		body, err := c.get(ctx, strings.TrimRight(c.NBUBase, "/")+"/NBU_ovdp?json&date="+day.Format("02.01.2006"))
 		if err != nil {
 			if firstErr == nil {
@@ -117,9 +121,10 @@ func (c *Client) NBUAuctions(ctx context.Context) ([]Security, Result, error) {
 
 // SyncNBU — реестр + аукционы одним списком: условия из реестра, доходность и дата аукциона из результатов.
 // Если упал реестр, но аукционы пришли (или наоборот) — отдаёт, что есть, и ошибку в Result.
-func (c *Client) SyncNBU(ctx context.Context) ([]Security, Result) {
+func (c *Client) SyncNBU(ctx context.Context, rep Reporter) ([]Security, Result) {
+	rep.report(0, "реестр")
 	reg, rres, rerr := c.NBURegistry(ctx)
-	auc, ares, aerr := c.NBUAuctions(ctx)
+	auc, ares, aerr := c.NBUAuctions(ctx, rep)
 	res := Result{Source: SourceNBU, Skipped: rres.Skipped + ares.Skipped}
 	byID := map[string]*Security{}
 	var order []string

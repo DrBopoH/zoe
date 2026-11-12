@@ -22,7 +22,9 @@ const marketFeedTimeout = 90 * time.Second
 type feedState struct {
 	ID      string `json:"id"`
 	Title   string `json:"title"`
-	State   string `json:"state"` // queued | fetch | done | error
+	State   string `json:"state"`          // queued | fetch | done | error
+	Pct     int    `json:"pct,omitempty"`  // ход долгого источника, 0 — неизвестен (бегущая полоса)
+	Note    string `json:"note,omitempty"` // что идёт сейчас («аукционы: 10.11»)
 	Fetched int    `json:"fetched"`
 	Skipped int    `json:"skipped,omitempty"`
 	Error   string `json:"error,omitempty"`
@@ -96,18 +98,22 @@ func (s *Server) startMarket(ctx context.Context, only string) bool {
 				m.mu.Unlock()
 				fctx, cancel := context.WithTimeout(ctx, marketFeedTimeout)
 				defer cancel()
-				list, res := f.Fetch(fctx)
+				list, res := f.Fetch(fctx, func(pct int, note string) {
+					m.mu.Lock()
+					st.Pct, st.Note = pct, note
+					m.mu.Unlock()
+				})
 				if ctx.Err() == nil && len(list) > 0 {
 					if err := s.storage.SaveMarketBonds(list, time.Now().Unix()); err != nil {
 						res.Error = strings.TrimSpace(res.Error + " сохранение: " + err.Error())
 					}
 				}
 				m.mu.Lock()
-				st.Fetched, st.Skipped, st.Error = res.Fetched, res.Skipped, res.Error
+				st.Fetched, st.Skipped, st.Error, st.Note = res.Fetched, res.Skipped, res.Error, ""
 				if res.Error != "" {
 					st.State = "error"
 				} else {
-					st.State = "done"
+					st.State, st.Pct = "done", 100
 				}
 				m.mu.Unlock()
 			}()
