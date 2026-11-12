@@ -400,7 +400,7 @@ stage_scope() {
   case "$1" in
     be) git add -A -- "$BE" ;;
     fe) git add -A -- "$FE" ;;
-    docs) git add -A -- '*.md' ;;
+    docs) git add -A -- '*.md' .github ;;
     all) git add -A ;;
     *) die "scope: be | fe | docs | all" ;;
   esac
@@ -501,11 +501,14 @@ land_one() {
 # ./clc.sh land "сводка фичи" [-v R.B]            — вливание текущей wip-ветки в dev ОДНИМ именованным коммитом (аналог PR → Squash and merge)
 # ./clc.sh land --plan <файл> [-v R.B]            — то же для готовой истории: по строке «<хэш> сводка» на фичу (строки «f …» и «#» пропускаются)
 #   Атомарные коммиты и wip-ветка остаются локально как есть; dev получает только именованные коммиты. Файлы в рабочем дереве не трогаются.
-#   Когда у проекта появится remote, dev меняется только через PR на GitHub — land тогда отказывается.
+#   Когда у проекта есть remote, dev меняется только через PR: land тогда делает то же, что done (PR → проверки → squash).
 cmd_land() {
   local ver="" plan="" args=()
   while (( $# )); do case "$1" in -v) shift; ver=${1:-} ;; --plan) shift; plan=${1:-} ;; *) args+=("$1") ;; esac; shift; done
-  if git remote get-url origin >/dev/null 2>&1; then die "есть remote: dev меняется только через PR (Squash and merge, в заголовке — версия)"; fi
+  if git remote get-url origin >/dev/null 2>&1; then
+    [[ -z $plan ]] || die "есть remote: --plan не работает, dev меняется только через PR"
+    if [[ -n $ver ]]; then cmd_done "${args[@]}" -v "$ver"; else cmd_done "${args[@]}"; fi; return
+  fi
   [[ $(cur_branch) == wip/* ]] || die "только из wip-ветки"
   # план может лежать в Downloads как patch.zip (.commits/regroup.txt) — забираем его тем же apply, что и ship
   if [[ -n $plan ]] && has_patches; then QUIET=1; cmd_apply --force; QUIET=0; fi
@@ -596,12 +599,67 @@ cmd_restore() {
   git status -s | head -20
 }
 
-# ./clc.sh publish — запушить текущую wip-ветку на origin (для PR в dev, Rebase and merge)
+# pr_title "сводка" [R.B] — заголовок для squash: «сводка | vR.B.C+T.<хэш последнего атомарного коммита>» (счётчики от origin/dev)
+pr_title() {
+  local v; v=$(next_version "${2:-}" origin/dev)
+  echo "$1 | $v.$(git rev-parse --short=7 HEAD)"
+}
+
+need_gh() { command -v gh >/dev/null || die "нужен gh: sudo pacman -S github-cli, затем gh auth login"; }
+
+# ./clc.sh pr "сводка" [-v R.B] — push ветки + PR в dev (или обновить заголовок у существующего), заголовок = именованный коммит
+cmd_pr() {
+  need_gh
+  local ver="" sum="" args=()
+  while (( $# )); do case "$1" in -v) shift; ver=${1:-} ;; *) args+=("$1") ;; esac; shift; done
+  sum="${args[0]:-}"; [[ -n $sum ]] || die "формат: ./${SELF} pr \"сводка фичи\" [-v R.B]"
+  local br; br=$(cur_branch)
+  [[ $br == wip/* ]] || die "только из wip-ветки"
+  [[ -z $(git status --porcelain --untracked-files=no) ]] || die "есть незакоммиченные правки: ./${SELF} commit … или park"
+  git fetch -q origin
+  (( $(git rev-list --count origin/dev..HEAD) > 0 )) || die "в ветке нет коммитов относительно origin/dev"
+  git push -q -u origin "$br"
+  local title; title=$(pr_title "$sum" "$ver")
+  if [[ $(gh pr view "$br" --json state -q .state 2>/dev/null || true) == OPEN ]]; then
+    gh pr edit "$br" --title "$title" >/dev/null
+  else
+    gh pr create --base dev --head "$br" --title "$title" --body "" >/dev/null
+  fi
+  echo "● $title"
+  gh pr view "$br" --json url -q .url
+}
+
+# ./clc.sh merge — дождаться проверок PR текущей ветки → Squash and merge с заголовком PR → локальный dev ← origin/dev
+#   wip-ветка с атомарными коммитами остаётся локально
+cmd_merge() {
+  need_gh
+  local br; br=$(cur_branch)
+  [[ $br == wip/* ]] || die "только из wip-ветки"
+  [[ $(gh pr view "$br" --json state -q .state 2>/dev/null || true) == OPEN ]] || die "нет открытого PR: ./${SELF} pr \"сводка\""
+  local title; title=$(gh pr view "$br" --json title -q .title)
+  local i out
+  for i in $(seq 1 20); do
+    out=$(gh pr checks "$br" 2>&1 || true)
+    if grep -qi 'no checks reported' <<<"$out"; then sleep 3; else break; fi
+  done
+  echo "… жду проверки"
+  gh pr checks "$br" --watch --interval 5 || die "проверки не прошли — PR не вливаю. Смотри: gh pr checks"
+  gh pr merge "$br" --squash --subject "$title" --body "" >/dev/null
+  git fetch -q --prune origin
+  git branch -f dev origin/dev
+  echo "✓ dev ← $title"
+  echo "Дальше: ./${SELF} next <слово> — новая тема от dev"
+}
+
+# ./clc.sh done "сводка" [-v R.B] — pr + merge одной командой (фича закончена)
+cmd_done() { cmd_pr "$@"; cmd_merge; }
+
+# ./clc.sh publish — запушить текущую wip-ветку на origin (дальше: pr / done)
 cmd_publish() {
   local br; br=$(cur_branch)
   if is_protected "$br" || [[ $br == main ]]; then die "из $br не публикуем: только wip-ветки"; fi
   git push -u origin "$br"
-  echo "→ дальше PR в dev (Rebase and merge)"
+  echo "→ дальше: ./${SELF} pr \"сводка\" или ./${SELF} done \"сводка\""
 }
 
 # ./clc.sh sw <ветка> — перейти на ветку; ./clc.sh drop <ветка> [-f] — удалить локальную (без -f только слитую)
@@ -637,7 +695,10 @@ Git
   ./${SELF} park [имя] | park list | unpark   спрятать / вернуть незакоммиченное
   ./${SELF} good [заметка] | good list   тесты+сборка → метка good/<время> на рабочей версии
   ./${SELF} restore [метка|коммит]       backend/ и frontend/ ← метка (по умолчанию последняя good)
-  ./${SELF} publish                      git push -u origin <wip-ветка> (дальше PR в dev)
+  ./${SELF} publish                      git push -u origin <wip-ветка>
+  ./${SELF} pr "сводка" [-v R.B]         push + PR в dev, заголовок = «сводка | vR.B.C+T.хэш»
+  ./${SELF} merge                        дождаться проверок → Squash and merge → dev ← origin/dev
+  ./${SELF} done "сводка" [-v R.B]       pr + merge (с remote то же делает land и ship … -z)
   ./${SELF} sw <ветка> | drop <ветка> [-f]     перейти / удалить локальную ветку
 Папка загрузок: ZOE_DL=/путь
 EOF
@@ -662,6 +723,9 @@ case "${1:-help}" in
   good)     shift; cmd_good "$@" ;;
   restore)  shift; cmd_restore "$@" ;;
   publish)  cmd_publish ;;
+  pr)       shift; cmd_pr "$@" ;;
+  merge)    cmd_merge ;;
+  done)     shift; cmd_done "$@" ;;
   sw)       shift; cmd_sw "$@" ;;
   drop)     shift; cmd_drop "$@" ;;
   help|-h|--help) cmd_help ;;
