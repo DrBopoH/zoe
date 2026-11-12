@@ -131,3 +131,14 @@ export const money = (val, sym = '₴') => `${sym}\u00A0${formatMoney(val)}`
 export const moneySigned = (val, sym = '₴') => `${val > 0 ? '+' : val < 0 ? '−' : ''}${sym}\u00A0${formatMoney(Math.abs(val))}`
 // Дельта — дочерняя от основного числа: без символа валюты («+1,20»)
 export const signed = (val) => `${val > 0 ? '+' : val < 0 ? '−' : ''}${formatMoney(Math.abs(val))}`
+
+// Дата и время строки истории (по локальному времени): «09.11.2026» и «14:05»
+const pad2 = (n) => String(n).padStart(2, '0')
+export const formatTxDate = (iso) => {
+  const d = new Date(iso)
+  return `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`
+}
+export const formatTxTime = (iso) => {
+  const d = new Date(iso)
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+}

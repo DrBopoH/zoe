@@ -1,11 +1,12 @@
 import { ref, computed } from 'vue'
 import { apiSend, apiGetJson, q } from '../utils/api.js'
+import { loadJSON, saveJSON } from '../utils/storage.js'
 const STORAGE_CARD_ORDER = 'persons_card_order'
 
 export function usePersonsData(emit) {
   const users = ref([])
   const structures = ref([]) // запомненные структуры алиасов (в т.ч. бесхозных) из статики
-  const cardOrder = ref([])
+  const cardOrder = ref(loadJSON(STORAGE_CARD_ORDER, [])) // порядок карточек переживает перезагрузку
 
   // Drag & Drop карточек Лиц
   const draggedCardIndex = ref(null)
@@ -20,13 +21,7 @@ export function usePersonsData(emit) {
   const activeNamePasteUsers = ref(new Set())
   const namePasteTimers = ref({})
 
-  const saveCardOrder = () => {
-    try {
-      localStorage.setItem(STORAGE_CARD_ORDER, JSON.stringify(cardOrder.value))
-    } catch (err) {
-      console.error('Save card order error:', err)
-    }
-  }
+  const saveCardOrder = () => saveJSON(STORAGE_CARD_ORDER, cardOrder.value)
 
   const applyCardOrder = (rawUsers) => {
     const sortedRaw = [...rawUsers].sort((a, b) => {

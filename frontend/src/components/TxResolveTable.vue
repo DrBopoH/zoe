@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { moneySigned, curSym } from '../utils/formatters.js'
+import { moneySigned, curSym, formatTxDate, formatTxTime } from '../utils/formatters.js'
+import { usePaged } from '../composables/usePaged.js'
 
 // История выбранной карты. Рядки-контрагенты — цели для drop карты (привязка к алиасу контрагента).
 const props = defineProps({
@@ -11,10 +12,8 @@ const props = defineProps({
 })
 const emit = defineEmits(['drop-row'])
 
-const PAGE = 150
-const visible = ref(PAGE)
-watch(() => props.rows, () => { visible.value = PAGE })
-const shown = computed(() => props.rows.slice(0, visible.value))
+const { shown, rest, more, reset } = usePaged(computed(() => props.rows), 150)
+watch(() => props.rows, reset)
 
 const overId = ref(null)
 const onOver = (e, r) => {
@@ -32,9 +31,6 @@ const onDrop = (e, r) => {
 
 const money = (t) => moneySigned(t.amount, curSym(t.currency_code))
 const tone = (v) => (v > 0 ? 'text-emerald-400' : v < 0 ? 'text-rose-400' : 'text-slate-400')
-const pad = (n) => String(n).padStart(2, '0')
-const dateStr = (iso) => { const d = new Date(iso); return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}` }
-const timeStr = (iso) => { const d = new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}` }
 const bg = (r) => ({ plain: '', yellow: 'tx-yellow', green: 'tx-green' })[r.state]
 const dim = (r) => props.dragging && r.isCp && props.compat(r) === false
 const lit = (r) => props.dragging && r.isCp && props.compat(r) === true
@@ -63,7 +59,7 @@ const lit = (r) => props.dragging && r.isCp && props.compat(r) === true
           @drop="onDrop($event, r)"
         >
           <td class="px-3 py-2 whitespace-nowrap text-slate-400 text-[11px]">
-            {{ dateStr(r.t.time) }}<br /><span class="text-slate-600">{{ timeStr(r.t.time) }}</span>
+            {{ formatTxDate(r.t.time) }}<br /><span class="text-slate-600">{{ formatTxTime(r.t.time) }}</span>
           </td>
           <td class="px-2 py-2">
             <template v-if="r.isCp">
@@ -87,9 +83,9 @@ const lit = (r) => props.dragging && r.isCp && props.compat(r) === true
         <tr v-if="rows.length === 0">
           <td colspan="4" class="p-10 text-center text-slate-600 text-xs uppercase">{{ empty }}</td>
         </tr>
-        <tr v-if="rows.length > visible">
+        <tr v-if="rest > 0">
           <td colspan="4" class="p-3 text-center">
-            <button class="ui-btn ui-btn--sm ui-btn--outline" @click="visible += PAGE">Показать ещё ({{ rows.length - visible }})</button>
+            <button class="ui-btn ui-btn--sm ui-btn--outline" @click="more">Показать ещё ({{ rest }})</button>
           </td>
         </tr>
       </tbody>

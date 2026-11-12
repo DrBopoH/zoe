@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { formatMoney, formatMaskedIBAN, money as fmtMoney, moneySigned, curSym } from '../utils/formatters.js'
+import { formatMoney, formatMaskedIBAN, money as fmtMoney, moneySigned, curSym, formatTxDate, formatTxTime } from '../utils/formatters.js'
+import { usePaged } from '../composables/usePaged.js'
 import { counterpartyName, isPersonTransaction } from '../utils/personLayout.js'
 import UiButton from './ui/UiButton.vue'
 import { effectiveTimes, isDateOnly } from '../utils/historyOrder.js'
@@ -24,8 +25,6 @@ const props = defineProps({
 })
 const emit = defineEmits(['clear', 'clear-range'])
 
-const PAGE = 100
-const visible = ref(PAGE)
 const openId = ref(null)
 
 const byId = computed(() => new Map(props.selected.map(a => [a.id, a])))
@@ -51,13 +50,14 @@ const rows = computed(() => {
     .sort((a, b) => at.get(b.id) - at.get(a.id))
 })
 
+const { shown, rest, more, reset: resetPage, page } = usePaged(rows, 100)
+
 // при смене выбора начинаем с первой страницы и закрываем раскрытую строку
 watch(() => props.selected.map(a => a.id).join('|') + '|' + (props.range ? props.range.key : ''), () => {
-  visible.value = PAGE
+  resetPage()
   openId.value = null
 })
 
-const shown = computed(() => rows.value.slice(0, visible.value))
 
 const totals = computed(() => {
   let income = 0
@@ -76,15 +76,6 @@ const cur = (t) => curSym(t.currency_code)
 const money = (v, t) => moneySigned(v, cur(t))
 const tone = (v) => (v > 0 ? 'text-emerald-400' : v < 0 ? 'text-rose-400' : 'text-slate-400')
 
-const pad = (n) => String(n).padStart(2, '0')
-const dateStr = (iso) => {
-  const d = new Date(iso)
-  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`
-}
-const timeStr = (iso) => {
-  const d = new Date(iso)
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
 
 const people = computed(() => usersById(props.users))
 const person = (t) => personOf(t, people.value)
@@ -188,7 +179,7 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
               @click="toggleRow(t.id)"
             >
               <td class="p-3 whitespace-nowrap text-slate-400">
-                {{ dateStr(t.time) }} <span v-if="!isDateOnly(t)" class="text-slate-600">{{ timeStr(t.time) }}</span>
+                {{ formatTxDate(t.time) }} <span v-if="!isDateOnly(t)" class="text-slate-600">{{ formatTxTime(t.time) }}</span>
               </td>
               <td v-if="selected.length > 1" class="p-3">
                 <span class="text-[9px] px-1.5 py-0.5 rounded border" :class="byId.get(t.account_id)?.theme.tagStyle">
@@ -246,9 +237,9 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
       </table>
     </div>
 
-    <div v-if="rows.length > visible" class="flex justify-center">
-      <UiButton variant="outline" size="sm" @click="visible += PAGE">
-        Показать ещё ({{ Math.min(PAGE, rows.length - visible) }} из {{ rows.length - visible }})
+    <div v-if="rest > 0" class="flex justify-center">
+      <UiButton variant="outline" size="sm" @click="more">
+        Показать ещё ({{ Math.min(page, rest) }} из {{ rest }})
       </UiButton>
     </div>
   </div>
