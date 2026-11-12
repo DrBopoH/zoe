@@ -5,8 +5,11 @@ import UiButton from '../components/ui/UiButton.vue'
 import GrowthChart from '../components/GrowthChart.vue'
 import { storageGet, storageSet } from '../utils/storage.js'
 import IcuIntake from '../components/IcuIntake.vue'
+import MacroPanel from '../components/MacroPanel.vue'
 import { useSection } from '../composables/useSection.js'
 import { useIcuList } from '../composables/useIcuList.js'
+import { useMacro } from '../composables/useMacro.js'
+import { currentInflation, realRate, signedPct, plainPct } from '../utils/macro.js'
 import { apiGetJson, apiSend, apiJson } from '../utils/api.js'
 import { toLocalDateStr } from '../utils/formatters.js'
 import { SOURCES, MARKET_SECTIONS, COLUMNS, filterBonds, sortBonds, currenciesOf, bondCells, nextSort, resolveRates, holdingsOf, qtyText, restrictTo, scoreBonds, scoreColor, HORIZON_YEARS, moneyText, isMatured, rateOf } from '../utils/marketTable.js'
@@ -35,9 +38,10 @@ const load = async (src) => {
     loadError.value = String(e.message || e)
   }
 }
-onMounted(() => { load(section.value); icu.load() })
+const macro = useMacro()
+onMounted(() => { load(section.value); icu.load(); macro.load() })
 watch(section, (s) => { if (!lists.value[s]) load(s) })
-watch(() => props.dataVersion, () => load(section.value))
+watch(() => props.dataVersion, () => { load(section.value); macro.load() })
 
 const q = ref('')
 const currency = ref('')
@@ -83,11 +87,15 @@ const amount = ref(Math.max(1, Number(storageGet('zoe.market.amount', '10000')) 
 watch(amount, (v) => { if (v > 0) storageSet('zoe.market.amount', String(v)) })
 const amountN = computed(() => (Number(amount.value) > 0 ? Number(amount.value) : 1))
 
+// Инфляция г/г (последний известный месяц) — для колонки «Реальная»; только ОВДП в гривне
+const inflation = computed(() => currentInflation(macro.series.value))
+const columns = computed(() => COLUMNS.filter((c) => c.key !== 'real' || (section.value === 'nbu' && inflation.value !== null)))
+
 const found = computed(() => filterBonds(pool.value, { q: q.value, currency: currency.value, hideMatured: hideMatured.value, today: today.value }))
 const rows = computed(() => sortBonds(
   found.value.map((b) => {
     const sc = scores.value.get(b.id)
-    return { ...b, score: sc?.score ?? 0, future: sc ? sc.multipleH * amountN.value : 0 }
+    return { ...b, score: sc?.score ?? 0, future: sc ? sc.multipleH * amountN.value : 0, real: sc && b.currency === 'UAH' ? realRate(sc.rate, inflation.value) : null }
   }),
   sort.value.key, sort.value.dir
 ).map((b) => {
@@ -97,7 +105,8 @@ const rows = computed(() => sortBonds(
   if (own) c.yield = `${own.source === 'curve' ? '≈\u00A0' : ''}${f2(own.rate)} %`
   c.score = sc ? `${Math.round(sc.score)} %` : '—'
   c.future = sc ? moneyText(b.future, b.currency) : '—'
-  return { id: b.id, c, sc, ysrc: own ? own.source : '', color: sc ? scoreColor(sc.score) : null, held: holdings.value.get(String(b.id).toUpperCase()) || 0 }
+  c.real = signedPct(b.real)
+  return { id: b.id, c, sc, real: b.real, ysrc: own ? own.source : '', color: sc ? scoreColor(sc.score) : null, held: holdings.value.get(String(b.id).toUpperCase()) || 0 }
 }))
 
 // Графики: бумаги одной валюты (при «ВСЕ» — самой многочисленной среди найденных). Лучшие 5 по коэффициенту — с точками.
@@ -204,6 +213,8 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
 
     <IcuIntake v-if="icuOpen && section === 'nbu'" :registry="list || []" :today="today" :icu="icu" @close="icuOpen = false" />
 
+    <MacroPanel v-if="section === 'nbu'" :series="macro.series.value" :today="today" />
+
     <GrowthChart v-if="list && (chartItems.length || chartMatured.length)" :items="chartItems" :matured="showMatured ? chartMatured : NONE" :amount="amountN" :currency="chartCurrency" :today="today" :spreads="spreads" />
     <div v-if="chartNote" class="text-[11px] text-slate-500 -mt-2">{{ chartNote }}</div>
 
@@ -214,7 +225,7 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
         <thead>
           <tr class="text-slate-500 uppercase text-[10px] tracking-wider border-b border-slate-800">
             <th
-              v-for="col in COLUMNS"
+              v-for="col in columns"
               :key="col.key"
               class="px-3 py-3 font-bold cursor-pointer hover:text-slate-300 whitespace-nowrap"
               :class="col.num ? 'text-right' : 'text-left'"
@@ -224,7 +235,7 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
         </thead>
         <tbody>
           <tr v-for="r in rows" :key="r.id" class="border-b border-slate-800/60 hover:bg-slate-800/40">
-            <td v-for="col in COLUMNS" :key="col.key" class="px-3 py-2 whitespace-nowrap" :class="[col.num ? 'text-right tabular-nums' : 'text-left', col.key === 'id' ? 'text-slate-300' : 'text-slate-200']">
+            <td v-for="col in columns" :key="col.key" class="px-3 py-2 whitespace-nowrap" :class="[col.num ? 'text-right tabular-nums' : 'text-left', col.key === 'id' ? 'text-slate-300' : 'text-slate-200']">
               <template v-if="col.key === 'name'">
                 <span class="inline-flex items-center gap-2">
                   <span
@@ -237,12 +248,13 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
                   <span v-if="r.held" class="px-1.5 py-0.5 rounded border text-[10px] font-bold text-emerald-300 border-emerald-500/50 bg-emerald-500/10" title="Уже куплено на брокерском счёте">{{ qtyText(r.held) }}</span>
                 </span>
               </template>
+              <span v-else-if="col.key === 'real'" :class="r.real === null ? 'text-slate-600' : r.real >= 0 ? 'text-emerald-400' : 'text-rose-400'" :title="r.real === null ? 'Реальная доходность считается для бумаг в гривне с известной ставкой' : `Доходность ${r.sc ? plainPct(r.sc.rate) : ''} с поправкой на инфляцию ${plainPct(inflation)} г/г`">{{ r.c.real }}</span>
               <span v-else-if="col.key === 'yield' && r.ysrc" :title="YSRC_TITLE[r.ysrc]">{{ r.c[col.key] }}</span>
               <template v-else>{{ r.c[col.key] }}</template>
             </td>
           </tr>
           <tr v-if="!rows.length">
-            <td :colspan="COLUMNS.length" class="px-3 py-10 text-center text-slate-600 uppercase tracking-wider">
+            <td :colspan="columns.length" class="px-3 py-10 text-center text-slate-600 uppercase tracking-wider">
               <template v-if="list === undefined">Загружаю…</template>
               <template v-else-if="!list.length">Кеш пуст. Нажми «Обновить»</template>
               <template v-else>Ничего не найдено</template>

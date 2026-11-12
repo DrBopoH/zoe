@@ -40,7 +40,7 @@ backend/
   pkg/novapay/            парсер CSV NovaPay
   pkg/icu/                парсер брокерского отчёта ICU (PDF)
   pkg/binance/            выписка Binance, журнал, оценка портфеля, публичные цены
-  pkg/market/             публичные облигации: ОВДП (НБУ) и US Treasury (FiscalData), только чтение
+  pkg/market/             публичные данные: облигации ОВДП (НБУ) и US Treasury (FiscalData), макро-ряды НБУ (ставки, инфляция), только чтение
   pkg/pdftext/            обёртка над pdftotext (с таймаутом 30 с)
 frontend/
   src/App.vue             оболочка: вкладки, опрос бэкенда, загрузка данных
@@ -79,7 +79,8 @@ clc.sh                    git/патчи (см. WORKFLOW.md)
 | | `/icu/bonds` | справочник облигаций (GET, POST создать/обновить, DELETE `?isin=`) |
 | Рынок | `/market/lists?name=icu` | свой список ISIN (GET → `{name, isins, prices, ytms}`, PUT `{isins, prices, ytms}` заменяет целиком; ISIN в верхнем регистре, без повторов; `prices` — необязательная цена за бумагу из брокера, `ytms` — показанная брокером доходность, % (эффективная годовая); хранятся токеном `ISIN`, `ISIN=цена`, `ISIN~ytm` или `ISIN=цена~ytm`); лежит в `core.db` (`market_lists`), «стереть кеш» его не трогает |
 | Рынок | `/market/curve?name=icu` | кривая доходности рынка, заданная пользователем (GET → `{name, points:[{years, ytm}]}`, PUT `{points}` заменяет целиком; срок 0–50 лет, доходность 0–100 %, точки по сроку); `core.db`, таблица `market_curves` |
-| Рынок | `/market/bonds`, `/market/sync` | скачанные ОВДП и US Treasury (GET, `?source=&q=`); POST — обновить из публичных API |
+| Рынок | `/market/bonds`, `/market/sync` | скачанные ОВДП и US Treasury (GET, `?source=&q=`); POST — обновить из публичных API (`?source=nbu|ust|macro`) |
+| Рынок | `/macro` | макро-ряды НБУ из кеша (GET `?series=policy_rate,cpi_yoy`; пусто — все): `{series:{id:[{d,v}]}, updated_at}`; ряды `policy_rate`, `overnight_cd`, `overnight_loans` (только даты смены значения: действует до следующей точки), `cpi_yoy`, `cpi_mom`, `core_yoy`, `core_mom` (помесячно, `d` — первое число месяца) |
 | Binance | `/binance` | что запомнил кеш: разбор по монетам и пределы минутного ряда (сам ничего не опрашивает) |
 | | `/binance/candles` | POST: свечи оценки портфеля по корзинам времени |
 | | `/binance/moves`, `/binance/trades`, `/binance/swaps` | переводы между кошельками, сделки, обмены для истории |
@@ -130,6 +131,7 @@ SQLite (драйвер `modernc.org/sqlite`, без CGO), открывается
 | `iban_masks` | скрытый вид IBAN; `custom=1` означает свой псевдоним счёта |
 | `account_overrides` | ручные правки счёта: IBAN, PAN, кредитный лимит, даты открытия и закрытия |
 | `bonds` | справочник облигаций (ISIN, погашение, ставка, номинал) |
+| `macro_series` | кеш макро-рядов НБУ: `series`, `dt` (YYYY-MM-DD), `value`, `updated_at`; ряд заменяется целиком при каждом обновлении |
 | `market_lists` | свои списки бумаг рынка: `name` (`icu`), `isins` — токены `ISIN[=цена][~ytm]` через пробел, `updated_at` |
 | `market_curves` | своя кривая доходности рынка: `name`, `points` (JSON `[{years, ytm}]`), `updated_at` |
 
@@ -218,11 +220,18 @@ SQLite (драйвер `modernc.org/sqlite`, без CGO), открывается
 - Привязка к Лицу — обычным путём, через алиас по имени файла.
 - На фронте: `historyOrder.js` задаёт логический порядок внутри дня (у отчёта нет времени: полдень-заглушка, в таблице скрыт), `useCapitalChart` собирает операции облигаций в справочные строки (`memo`), которые видны в истории, но в приход/расход не входят.
 
+### Макро НБУ (`market/macro.go`, `db/macro.go`, `GET /api/macro`)
+
+- Источник `macro` («Ставки и инфляция · НБУ») в `Feeds()`. Адреса проверены живым curl: `bank.gov.ua/NBUStatService/v1/statdirectory/key?json` — все ставки одним запросом (ежедневно с 1992 года; `id_api`: `KEY_PolicyRate`, `KEY_RateOvernightCD`, `KEY_RateOvernightLoans`, поле `value`), и `…/inflation?period=m&start=YYYYMMDD&end=YYYYMMDD&json` — только окнами (целиком сервер отвечает 400 «надто великий dataset»); окна по 10 лет с 2000 года, данные начинаются с 2007.
+- Ставки сжимаются до дат смены значения (`changePoints`). Из инфляции берутся только строки итога: `ku` пуст, `mcrd081 = Total`, `mcrk110` пуст, название «Індекс споживчих цін» (общая) или «Базовий …» (базовая); `tzep` `DTPY_` = г/г, `PCPM_` = к предыдущему месяцу; остальное (цены производителей, регионы, категории, накопительные `PCCM_`/`PCCP_`) отбрасывается и считается в `Skipped`.
+- Сбой одной части не стирает другую: что скачалось, то сохраняется, ошибка идёт в `Result.Error`. Ряд в базе заменяется целиком (`SaveMacroSeries`), остальные ряды не трогаются.
+- Фронт: `composables/useMacro.js` (читает `/macro`, перечитывает по `data_version`), `utils/macro.js` (`valueAt`, `realRate` по Фишеру, `macroSummary`, `buildMacroChart`), `components/MacroPanel.vue`; колонка «Реальная» в `MarketView` (`signed` в `COLUMNS`: ноль и минус не считаются «пустым» при сортировке).
+
 ### Рыночные облигации (`pkg/market`, `db/market.go`, `api/handlers_market.go`)
 
 - Источники: `https://bank.gov.ua/depo_securities?json` (реестр, ОВДП отбираются по префиксу ISIN `UA4000`), `https://bank.gov.ua/NBU_ovdp?json&date=DD.MM.YYYY` (результаты аукционов Минфина; дата строго `DD.MM.YYYY`, день без аукциона даёт `[]`; перебираются последние 14 дней) и `…/v1/accounting/od/auctions_query` FiscalData (аукционы США за 3 года, CUSIP без дублей, побеждает поздний аукцион).
 - Ключей нет, запросы только на чтение. Обновление **только по запросу**, отдельным процессом рядом с обходом банков: запускается вместе с «Разведать» (`POST /api/sync/full`, даже если у банков нет ключей) или сам (`POST /api/market/sync[?source=nbu|ust]`, ответ сразу, 409 если уже идёт). Список — `GET /api/market/bonds[?source=&q=]`.
-- Источники — «фиды» (`market.Feed`: `ID`, `Title`, `Fetch`, список `Client.Feeds()`): идут **параллельно** и не знают друг о друге, упавший не мешает другому. Новый источник (ключевая ставка, депозитные сертификаты НБУ, ФРС, инфляция) — ещё одна запись в `Feeds()`, без новых маршрутов и тостов.
+- Источники — «фиды» (`market.Feed`: `ID`, `Title`, `Fetch`, список `Client.Feeds()`): идут **параллельно** и не знают друг о друге, упавший не мешает другому. Новый источник (ФРС и т.д.) — ещё одна запись в `Feeds()`, без новых маршрутов и тостов. Фид бумаг заполняет `Fetch` (`[]Security` → `market_bonds`), фид числовых рядов — `Series` (`[]SeriesPoint` → `macro_series`, `Storage.SaveMacroSeries`), у фида есть `Unit` («бумаг»/«точек») для окна процесса и тоста; `?source=` проверяет `market.IsSource`.
 - Состояние — ключ `market` в `/api/sync/status` (`running`, `started_at`, `feeds[]` со `state` `queued|fetch|done|error`, `fetched`, `skipped`, `error`, и `last` с итогом). Он **не смешан** с банковским `progress`: свой итог, своя блокировка и свой отмена-контекст. Сброс кеша (`abortSync`) отменяет и этот процесс и ждёт его до 3 с, чтобы он не дописал данные в чистую базу.
 - Ход: `Feed.Fetch(ctx, rep Reporter)`; источник сообщает `rep(pct, note)` («аукционы: 07.11», 46 %). В `feeds[]` это `pct`/`note`: с процентом фронт рисует заливку, без процента (`pct` 0) — бегущие полосы. Для длинных выгрузок (например, помесячная ставка США за много лет) источник просто вызывает `rep`.
 - Окно процесса: `MarketPanel.vue` (в `ToastStack`) висит, пока `market.running`, как окно синка банков, но отдельное; крестик глушит именно этот запуск (`started_at`). Логика показа — `utils/marketPanel.js` (`marketPanelOpen`, `feedView`).
