@@ -15,6 +15,7 @@ const props = defineProps({
   unit: { type: String, default: '%' }, // единица значения: % | ₴ | $
   empty: { type: String, default: 'Нет данных. Нажми «Обновить»: подтянутся ставки и инфляция НБУ' },
   benner: { type: Boolean, default: false }, // цикл Беннера (колонки и полоса лет): только на графиках фондового рынка
+  log: { type: Boolean, default: false }, // стартовая шкала значения — логарифмическая (цены на десятилетия; переключатель остаётся)
   hint: { type: String, default: 'Колесо: масштаб, перетаскивание: сдвиг, двойной клик: сброс' }
 })
 
@@ -24,6 +25,12 @@ const WIDTH = 1000
 const HEIGHT = 220
 const IDS = computed(() => props.ids)
 
+// Логарифмическая шкала возможна, только если все значения положительные (просадка, ставки с нулём и ряды со знаком остаются линейными)
+const canLog = computed(() => {
+  const pts = IDS.value.flatMap((id) => props.series[id] || [])
+  return pts.length > 0 && pts.every((p) => p.v > 0)
+})
+
 // Окно по умолчанию — весь период данных; дальше колесо и перетаскивание
 const windowAll = () => macroWindow({ series: props.series, ids: IDS.value, todayIso: props.today, years: 0 })
 const kv = useChartView({
@@ -31,14 +38,17 @@ const kv = useChartView({
   height: HEIGHT,
   pad: MACRO_PAD,
   autoX: windowAll,
-  ranges: (view) => macroRanges({ series: props.series, ids: IDS.value, view, todayIso: props.today, floor: props.unit === '%' ? 0 : null }),
+  ranges: (view, scale) => macroRanges({ series: props.series, ids: IDS.value, view, todayIso: props.today, floor: props.unit === '%' ? 0 : null, log: scale === 'log' }),
+  scale: props.log ? 'log' : 'linear',
+  canLog: () => canLog.value,
   spans: { minSpan: MACRO_MIN_SPAN, maxSpan: MACRO_MAX_SPAN },
   resetOn: () => [props.series, props.ids]
 })
 const { svgRef, onWheel, onDown, onMove, onUp, onLeave, reset, zoomed } = kv
+const isLog = computed(() => kv.scaleMode.value === 'log')
 
 const has = computed(() => IDS.value.some((id) => props.series[id]?.length))
-const chart = computed(() => buildMacroChart({ series: props.series, ids: IDS.value, view: kv.view.value, yRange: kv.yShown.value || kv.target.value, todayIso: props.today, width: WIDTH, height: HEIGHT }))
+const chart = computed(() => buildMacroChart({ series: props.series, ids: IDS.value, view: kv.view.value, yRange: kv.yShown.value || kv.target.value, todayIso: props.today, width: WIDTH, height: HEIGHT, scale: kv.scaleMode.value }))
 
 // Слой цикла Беннера (components/BennerBands.vue): ось графика — годы от сегодня
 const YEAR_MS = 365.25 * 86400000
@@ -68,7 +78,10 @@ const hover = computed(() => {
   <section class="bg-slate-900/60 border border-slate-800 rounded p-4 space-y-3">
     <div class="flex flex-wrap items-center justify-between gap-3 text-[10px] uppercase tracking-wider font-bold">
       <span class="text-slate-500">{{ title }}</span>
-      <button v-if="has && zoomed" type="button" class="text-slate-400 hover:text-emerald-400 underline whitespace-nowrap cursor-pointer" @click="reset">Сброс масштаба</button>
+      <span class="flex items-center gap-4">
+        <button v-if="has && kv.logAvailable.value" type="button" class="whitespace-nowrap cursor-pointer underline" :class="isLog ? 'text-emerald-400' : 'text-slate-400 hover:text-emerald-400'" title="Логарифмическая шкала: равные расстояния — равные проценты роста, а не равные суммы" @click="kv.toggleScale">Лог. шкала{{ isLog ? ': вкл' : '' }}</button>
+        <button v-if="has && zoomed" type="button" class="text-slate-400 hover:text-emerald-400 underline whitespace-nowrap cursor-pointer" @click="reset">Сброс масштаба</button>
+      </span>
     </div>
 
     <div v-if="!has" class="text-xs text-slate-600 uppercase tracking-wider py-6 text-center">{{ empty }}</div>

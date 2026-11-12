@@ -3,7 +3,7 @@
 // Бумага держит свою ставку до погашения (сложный процент); если до конца горизонта остаётся время, дальше пунктир: деньги
 // лежат под базовой ставкой группы. «Сгоревшие» (уже погашенные) бумаги — серым пунктиром с даты выпуска до погашения.
 import { HORIZON_YEARS } from './marketTable.js'
-import { zoomWindow, panWindow, panY, zoomY } from './chartView.js'
+import { zoomWindow, panWindow, panY, zoomY, logTicks, scaleOf } from './chartView.js'
 
 export const YEAR_DAYS = 365.25
 export const MIN_SPAN = 0.25 // дальше приближать смысла нет: четверть года
@@ -33,6 +33,13 @@ export function niceTicks(lo, hi, max = 6) {
   const out = []
   for (let v = Math.ceil(lo / step - 1e-9) * step; v <= hi + step * 1e-9; v += step) out.push(Number(v.toFixed(d)))
   return out
+}
+
+// Деления оси значения для любой шкалы: lo, hi — границы в шкальном пространстве (при log — логарифмы). Возвращает значения.
+export function scaleTicks(mode, lo, hi, max = 6) {
+  if (mode !== 'log') return niceTicks(lo, hi, max)
+  const t = logTicks(lo, hi, max + 1)
+  return t.length ? t : niceTicks(scaleOf('log').inv(lo), scaleOf('log').inv(hi), max)
 }
 
 // Первое число месяца через n месяцев от даты (UTC)

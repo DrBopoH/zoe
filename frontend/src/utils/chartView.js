@@ -1,5 +1,7 @@
 // Общая математика интерактивных графиков (окно по времени, вертикаль, плавная подгонка). Без Vue и DOM.
 // Окно — { x0, x1 } в единицах оси X графика (у графиков рынка это годы от сегодня), вертикаль — { lo, hi } в единицах значения.
+// Шкала значения: linear или log. Вертикаль движка всегда живёт в «шкальном» пространстве (при log — натуральный логарифм значения),
+// поэтому сдвиг, масштаб, плавная подгонка и инерция работают одинаково; графики переводят значение в пространство через scaleOf(mode).fwd.
 // На этом стоит composables/useChartView.js; рост вложения (growthChart.js) и макро (macro.js) дают только свои данные и границы.
 
 /** Окно после приближения: factor < 1 приближает, > 1 отдаляет; якорь (значение оси X) остаётся на месте; размах в пределах minSpan…maxSpan. */
@@ -69,7 +71,9 @@ export function quantile(sorted, p) {
  * сбойный месяц не сплющивал весь график), ext — крайности по всем данным (ручной сдвиг и масштаб за них не уходят).
  * visible — значения в окне, all — все значения ряда. Отступ pad (доля размаха) с обеих сторон; floor — нижняя граница, если нужна (например 0).
  */
-export function robustRanges({ visible, all, trim = 0.02, pad = 0.06, floor = null }) {
+export function robustRanges({ visible, all, trim = 0.02, pad = 0.06, floor = null, log = false }) {
+  // log: значения переводятся в натуральный логарифм (неположительные отбрасываются), диапазон — в шкальном пространстве, floor не применяется
+  if (log) { floor = null; const L = (a) => (a ? a.filter((v) => typeof v === 'number' && v > 0).map(Math.log) : a); visible = L(visible); all = L(all) }
   const fin = (a) => a.filter((v) => typeof v === 'number' && isFinite(v)).sort((x, y) => x - y)
   const vis = fin(visible || []), every = fin(all || visible || [])
   const make = (lo, hi) => {
@@ -85,4 +89,28 @@ export function robustRanges({ visible, all, trim = 0.02, pad = 0.06, floor = nu
   const ext = make(every[0] ?? NaN, every[every.length - 1] ?? NaN)
   // auto не шире ext
   return { auto: { lo: Math.max(auto.lo, ext.lo), hi: Math.min(auto.hi, ext.hi) }, ext }
+}
+
+const LINEAR = { mode: 'linear', fwd: (v) => v, inv: (v) => v }
+const LOG = { mode: 'log', fwd: (v) => Math.log(v), inv: (v) => Math.exp(v) }
+/** Шкала значения по имени: { mode, fwd (значение → шкальное), inv (обратно) }. Неизвестное имя — linear. */
+export const scaleOf = (mode) => (mode === 'log' ? LOG : LINEAR)
+
+/**
+ * Деления логарифмической оси: lo, hi — шкальные границы (натуральный логарифм). Возвращает значения (не логарифмы) вида m × 10^k.
+ * Берётся самый частый набор множителей (1…9 → 1,2,5 → 1,3 → 1), при котором делений от 2 до max. Не нашлось (узкий размах) — пустой массив: вызывающий берёт линейные деления.
+ */
+export function logTicks(lo, hi, max = 7) {
+  const vmin = Math.exp(lo), vmax = Math.exp(hi)
+  if (!(vmax > vmin) || !isFinite(vmin) || !isFinite(vmax)) return []
+  const k0 = Math.floor(Math.log10(vmin)), k1 = Math.ceil(Math.log10(vmax))
+  for (const mult of [[1, 2, 3, 4, 5, 6, 7, 8, 9], [1, 2, 5], [1, 3], [1]]) {
+    const out = []
+    for (let k = k0; k <= k1; k++) for (const m of mult) {
+      const v = m * Math.pow(10, k)
+      if (v >= vmin * (1 - 1e-9) && v <= vmax * (1 + 1e-9)) out.push(Number(v.toPrecision(12)))
+    }
+    if (out.length >= 2 && out.length <= max) return out // от частого набора к редкому: первый подходящий
+  }
+  return []
 }

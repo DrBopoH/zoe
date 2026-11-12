@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { zoomWindow, panWindow, panY, zoomY, easeRange, quantile, robustRanges } from '../src/utils/chartView.js'
+import { zoomWindow, panWindow, panY, zoomY, easeRange, quantile, robustRanges, scaleOf, logTicks } from '../src/utils/chartView.js'
 
 test('zoomWindow: якорь стоит на месте, размах зажат пределами', () => {
   const z = zoomWindow({ x0: 0, x1: 10 }, 0.5, 4, { minSpan: 1, maxSpan: 20 })
@@ -60,4 +60,27 @@ test('robustRanges: на малом числе точек выбросов не 
   assert.equal(fl.auto.lo, 0) // нулевая линия видна
   const empty = robustRanges({ visible: [], all: [] })
   assert.ok(empty.auto.hi > empty.auto.lo)
+})
+
+test('scaleOf: linear — тождество, log — натуральный логарифм и обратно', () => {
+  assert.equal(scaleOf('linear').fwd(5), 5)
+  assert.equal(scaleOf('что-то').mode, 'linear')
+  const L = scaleOf('log')
+  assert.ok(Math.abs(L.inv(L.fwd(1234.5)) - 1234.5) < 1e-9)
+  assert.ok(Math.abs(L.fwd(Math.E) - 1) < 1e-12)
+})
+
+test('robustRanges log: диапазон в логарифмах, неположительные значения отброшены, floor не действует', () => {
+  const r = robustRanges({ visible: [10, 100, 1000, 0, -5], all: [10, 100, 1000, 0, -5], pad: 0, floor: 0, log: true })
+  assert.ok(Math.abs(r.ext.lo - Math.log(10)) < 1e-9 && Math.abs(r.ext.hi - Math.log(1000)) < 1e-9)
+  const empty = robustRanges({ visible: [], all: [], log: true })
+  assert.ok(empty.ext.hi > empty.ext.lo)
+})
+
+test('logTicks: 1-3 / степени десяти по лимиту, 1-2-5 на узком, пусто на очень узком', () => {
+  assert.deepEqual(logTicks(Math.log(5), Math.log(8000), 7), [10, 30, 100, 300, 1000, 3000])
+  assert.deepEqual(logTicks(Math.log(5), Math.log(8000), 5), [10, 100, 1000]) // реже — только степени десяти
+  assert.deepEqual(logTicks(Math.log(8), Math.log(120), 7), [10, 20, 50, 100])
+  assert.deepEqual(logTicks(Math.log(100), Math.log(101), 7), [])
+  assert.deepEqual(logTicks(1, 1), [])
 })

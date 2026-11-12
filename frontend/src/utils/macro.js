@@ -1,5 +1,5 @@
-import { niceTicks, timeTicks } from './growthChart.js'
-import { robustRanges } from './chartView.js'
+import { scaleTicks, timeTicks } from './growthChart.js'
+import { robustRanges, scaleOf } from './chartView.js'
 
 // Макро НБУ: ключевые ставки и инфляция (ряды из /api/macro). Чистые функции — без интерфейса.
 // Ставки приходят датами смены значения (значение действует до следующей точки), инфляция — помесячно.
@@ -159,7 +159,7 @@ export function macroWindow({ series, ids, todayIso, years = 0 }) {
 }
 
 /** Вертикаль: auto — под видимое окно без редких выбросов (один сбойный месяц не должен сплющивать график), ext — крайности по всем данным. */
-export function macroRanges({ series, ids, view, todayIso, floor = 0 }) {
+export function macroRanges({ series, ids, view, todayIso, floor = 0, log = false }) {
   const visible = [], all = []
   for (const id of usable(series, ids)) {
     const pts = series[id]
@@ -171,7 +171,7 @@ export function macroRanges({ series, ids, view, todayIso, floor = 0 }) {
       if (t >= view.x0 && t <= view.x1) visible.push(p.v)
     }
   }
-  return robustRanges({ visible, all, floor })
+  return robustRanges({ visible, all, floor, log })
 }
 
 /**
@@ -179,13 +179,15 @@ export function macroRanges({ series, ids, view, todayIso, floor = 0 }) {
  * view — окно { x0, x1 } в годах от сегодня, yRange — { lo, hi }. Точки за краями остаются в линии, обрезает рамка графика.
  * Возвращает { lines:[{id,color,label,d}], yTicks, xTicks, todayX, zeroY, empty, pad, width, height }.
  */
-export function buildMacroChart({ series, ids, view, yRange, todayIso, width = 1000, height = 220, pad = MACRO_PAD }) {
+export function buildMacroChart({ series, ids, view, yRange, todayIso, width = 1000, height = 220, pad = MACRO_PAD, scale = 'linear' }) {
   const use = usable(series, ids)
   if (!use.length) return { lines: [], yTicks: [], xTicks: [], todayX: 0, zeroY: null, empty: true, pad, width, height }
   const { x0, x1 } = view
   const { lo, hi } = yRange
   const X = (t) => pad.l + ((t - x0) / (x1 - x0)) * (width - pad.l - pad.r)
-  const Y = (v) => pad.t + (1 - (v - lo) / (hi - lo)) * (height - pad.t - pad.b)
+  const sc = scaleOf(scale)
+  // yRange — в шкальном пространстве (при log это логарифмы); значения ≤ 0 на логарифмической оси не рисуются (разрыв линии)
+  const Y = (v) => pad.t + (1 - (sc.fwd(v) - lo) / (hi - lo)) * (height - pad.t - pad.b)
   const margin = (x1 - x0) * 0.05
 
   const lines = use.map((id) => {
@@ -194,6 +196,7 @@ export function buildMacroChart({ series, ids, view, yRange, todayIso, width = 1
     const pts = []
     let prev = null
     for (const p of series[id]) {
+      if (sc.mode === 'log' && !(p.v > 0)) continue
       const t = yearsFrom(p.d, todayIso)
       if (t < x0 - margin) { prev = { t: x0 - margin, v: p.v }; continue }
       if (t > x1 + margin) break
@@ -212,10 +215,10 @@ export function buildMacroChart({ series, ids, view, yRange, todayIso, width = 1
 
   return {
     lines,
-    yTicks: niceTicks(lo, hi, 5).map((v) => ({ v, y: Y(v) })),
+    yTicks: scaleTicks(sc.mode, lo, hi, 5).map((v) => ({ v, y: Y(v) })),
     xTicks: timeTicks(x0, x1, todayIso).map((t) => ({ x: X(t.t), label: t.label })),
     todayX: X(0),
-    zeroY: lo < 0 && hi > 0 ? Y(0) : null,
+    zeroY: sc.mode === 'linear' && lo < 0 && hi > 0 ? Y(0) : null,
     pad, width, height,
     empty: false
   }

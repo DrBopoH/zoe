@@ -125,3 +125,19 @@ test('подписи значений по единице', () => {
   assert.equal(axisText(150000, '₴'), '150к ₴')
   assert.equal(unitText(null, '₴'), '—')
 })
+
+test('логарифмическая шкала: равные проценты — равные расстояния, деления — степени десяти, нули не рисуются', () => {
+  const today = '2026-11-12'
+  const series = { px: [{ d: '2006-11-12', v: 10 }, { d: '2016-11-12', v: 100 }, { d: '2026-11-12', v: 1000 }] }
+  const view = { x0: -20, x1: 0.05 }
+  const r = macroRanges({ series, ids: ['px'], view, todayIso: today, floor: null, log: true })
+  const chart = buildMacroChart({ series, ids: ['px'], view, yRange: r.auto, todayIso: today, scale: 'log' })
+  const ys = Object.fromEntries(chart.yTicks.map((t) => [t.v, t.y]))
+  assert.ok([10, 100, 1000].every((v) => v in ys))
+  const [a, b, c] = [ys[10], ys[100], ys[1000]]
+  assert.ok(Math.abs((a - b) - (b - c)) < 1e-6) // равные кратности — равные расстояния
+  assert.equal(chart.zeroY, null)
+  const withZero = { px: [{ d: '2006-11-12', v: 0 }, ...series.px] }
+  const c2 = buildMacroChart({ series: withZero, ids: ['px'], view, yRange: r.auto, todayIso: today, scale: 'log' })
+  assert.ok(!c2.lines[0].d.includes('NaN') && !c2.lines[0].d.includes('Infinity'))
+})
