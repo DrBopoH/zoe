@@ -149,13 +149,14 @@ func (s *Storage) GetAllAccounts() ([]Account, error) {
 	if err != nil {
 		return nil, err
 	}
+	list = s.withBinanceProfile(list) // идентификатор Binance известен из выписки: привязывать вручную нечего
 	for i := range list {
-		if list[i].Type != ICUAccountType {
-			continue
-		}
-		list[i].IBAN = s.icuIBAN(list[i])
-		if st, err := s.accountState(list[i].ID); err == nil {
-			list[i].Balance = st.Balance
+		switch list[i].Type {
+		case ICUAccountType:
+			list[i].IBAN = s.icuIBAN(list[i])
+			if st, err := s.accountState(list[i].ID); err == nil {
+				list[i].Balance = st.Balance
+			}
 		}
 	}
 	return list, nil

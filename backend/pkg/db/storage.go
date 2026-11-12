@@ -156,6 +156,10 @@ func (s *Storage) initCache() error {
 		}
 	}
 
+	if err := s.migrateBinanceModel(); err != nil {
+		return err
+	}
+
 	// Миграции старых кеш-файлов (кеш одноразовый, но так бережнее).
 	if !hasColumn(s.cacheDB, "accounts", "extra_pans") {
 		if _, err := s.cacheDB.Exec(`ALTER TABLE accounts ADD COLUMN extra_pans TEXT DEFAULT ''`); err != nil {
@@ -399,7 +403,7 @@ func (s *Storage) WipeCache() error {
 	if _, err := s.cacheDB.Exec(`DELETE FROM transactions`); err != nil {
 		return err
 	}
-	for _, t := range []string{"sync_coverage", "binance_minutes", "binance_state", "binance_flows", "binance_coverage", "icu_flows", "accounts"} {
+	for _, t := range []string{"sync_coverage", "binance_minutes", "binance_state", "binance_ledger", "icu_flows", "accounts"} {
 		if _, err := s.cacheDB.Exec(`DELETE FROM ` + t); err != nil {
 			return err
 		}

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -510,5 +511,64 @@ func TestNetworkOutageGivesUp(t *testing.T) {
 	})
 	if !errors.Is(err, errOffline) || calls != walkMaxNetRetries+1 {
 		t.Fatalf("err=%v calls=%d", err, calls)
+	}
+}
+
+// «Сбросить» во время «Разведать»: обход снимается (даже из паузы лимита), ничего не дописывает в чистую базу,
+// кнопка освобождается, а следующий «Разведать» запускается как обычно.
+func TestWipeCacheStopsRunningSync(t *testing.T) {
+	s, st := newBinanceServer(t, newPriceFake())
+	ctx, done, ok := s.beginSync()
+	if !ok {
+		t.Fatal("синк должен стартовать")
+	}
+	cooling := make(chan struct{})
+	var once sync.Once
+	go func() {
+		defer close(done)
+		s.prog.begin()
+		s.crawlBank(ctx, bankSpec{
+			kind: "raif", num: 1, total: 1, tag: "RAIF", pause: time.Hour, retryWait: time.Hour,
+			info: func() (string, []mono.AccountDTO, error) {
+				return "Ivan", []mono.AccountDTO{{ID: "a1", IBAN: "UA583003350000000026001234567", Type: "x"}}, nil
+			},
+			statement: func(string, time.Time, time.Time) ([]mono.StatementItemDTO, error) {
+				once.Do(func() { close(cooling) })
+				return nil, errors.New("429")
+			},
+			classify: func(error) errKind { return errRetry },
+		})
+	}()
+	select {
+	case <-cooling: // обход ушёл в час ожидания лимита
+	case <-time.After(5 * time.Second):
+		t.Fatal("обход не дошёл до запроса")
+	}
+	_, b := call(t, s.HandleGetStatus, "GET", "/api/sync/status", "")
+	if !strings.Contains(string(b), `"running":true`) {
+		t.Fatalf("до сброса синк идёт: %s", b)
+	}
+
+	started := time.Now()
+	if c, _ := call(t, s.HandleWipeCache, "POST", "/api/sync/wipe-cache", ""); c != 200 {
+		t.Fatalf("сброс: %d", c)
+	}
+	if time.Since(started) > 2500*time.Millisecond {
+		t.Fatalf("сброс ждал обход слишком долго: %s", time.Since(started))
+	}
+	select {
+	case <-done:
+	default:
+		t.Fatal("обход не остановлен")
+	}
+	_, b = call(t, s.HandleGetStatus, "GET", "/api/sync/status", "")
+	if !strings.Contains(string(b), `"running":false`) {
+		t.Fatalf("после сброса кнопка свободна: %s", b)
+	}
+	if accs, _ := st.GetAccounts(); len(accs) != 0 {
+		t.Fatalf("остановленный обход дописал в чистую базу: %+v", accs)
+	}
+	if _, _, ok := s.beginSync(); !ok {
+		t.Fatal("после сброса новый «Разведать» должен стартовать")
 	}
 }

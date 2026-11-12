@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -21,6 +22,9 @@ const (
 	errNetwork                   // нет связи с банком (обрыв сети, DNS, таймаут): дальше долбить бессмысленно
 )
 
+// errStopped — обход остановлен сбросом кеша: ничего не пишем и не считаем сбоем.
+var errStopped = errors.New("обход остановлен")
+
 // errOffline — обход остановлен из-за сети. Оставшиеся счета ключа не опрашиваем и не ждём паузы между запросами.
 var errOffline = errors.New("нет связи с банком")
 
@@ -32,6 +36,7 @@ func isNetworkErr(err error) bool {
 
 // walkCfg — всё, что отличает Mono от Raif (и что подменяется в тестах).
 type walkCfg struct {
+	ctx       context.Context // отмена обхода (сброс кеша); nil — не отменяется
 	label     string
 	pageLimit int           // сколько операций банк отдаёт максимум за запрос (0 — неизвестно)
 	pause     time.Duration // пауза между запросами к банку (для статуса; сам ждёт pace)
@@ -44,6 +49,8 @@ type walkCfg struct {
 	now       func() time.Time
 	status    func(string)
 }
+
+func (c walkCfg) stopped() bool { return c.ctx != nil && c.ctx.Err() != nil }
 
 const (
 	walkWindow     = 30 * 24 * time.Hour
@@ -96,6 +103,9 @@ func (s *Server) walkAccount(accID string, cfg walkCfg) (walkStats, error) {
 	opened := s.storage.OpenedAt(accID)
 
 	for {
+		if cfg.stopped() {
+			return st, errStopped
+		}
 		spans, err := s.storage.Coverage(accID)
 		if err != nil {
 			return st, err
@@ -150,8 +160,14 @@ func (s *Server) walkAccount(accID string, cfg walkCfg) (walkStats, error) {
 			cfg.onWindow(from, to)
 		}
 		cfg.pace()
+		if cfg.stopped() {
+			return st, errStopped
+		}
 		items, err := s.fetchWithRetry(cfg, from, to)
 		st.Requests++
+		if cfg.stopped() { // кеш сбросили, пока банк отвечал
+			return st, errStopped
+		}
 		switch {
 		case err == nil:
 		case cfg.classify(err) == errHistoryEnd:
@@ -208,6 +224,9 @@ func (s *Server) walkAccount(accID string, cfg walkCfg) (walkStats, error) {
 func (s *Server) fetchWithRetry(cfg walkCfg, from, to int64) ([]mono.StatementItemDTO, error) {
 	rate, net := 0, 0
 	for {
+		if cfg.stopped() {
+			return nil, errStopped
+		}
 		items, err := cfg.fetch(time.Unix(from, 0), time.Unix(to, 0))
 		if err == nil {
 			return items, nil

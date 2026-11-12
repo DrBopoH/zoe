@@ -1,14 +1,30 @@
 package db
 
-import "testing"
+import (
+	"testing"
+)
 
+const (
+	bnFile    = "Binance Тест.csv"
+	bnProfile = "BN1000000001"
+)
+
+func bnRows() []BinanceRow {
+	return []BinanceRow{
+		{T: 1_700_000_000_000, Account: "Spot", Op: "Deposit", Asset: "USDT", Delta: 100, Kind: "deposit"},
+		{T: 1_700_000_100_000, Account: "Spot", Op: "Transaction Buy", Asset: "BTC", Delta: 0.001},
+		{T: 1_700_000_100_000, Account: "Spot", Op: "Transaction Spend", Asset: "USDT", Delta: -40},
+		{T: 1_700_000_100_000, Account: "Spot", Op: "Transaction Spend", Asset: "USDT", Delta: -40}, // две одинаковые строки в одну секунду — обе настоящие
+	}
+}
+
+// Binance — такой же кеш, как банки: счёт и журнал из выписки, вайп кеша всё сносит, в core.db ничего.
 func TestBinanceLivesInCacheOnly(t *testing.T) {
 	s, _, _ := newS(t)
 	if accs, _ := s.GetAllAccounts(); len(accs) != 0 {
-		t.Fatalf("до первого опроса счёта Binance нет: %+v", accs)
+		t.Fatalf("до выписки счёта Binance нет: %+v", accs)
 	}
-	t0 := int64(1_700_000_000) / 60 * 60
-	if err := s.SaveBinance(BinanceSave{Portfolio: 1150, Start: t0, Vals: []float64{100, 110, 90}, Replace: true, Detail: map[string]any{"total": 1150}}); err != nil {
+	if err := s.SaveBinanceStatement(bnFile, bnProfile, bnRows()); err != nil {
 		t.Fatal(err)
 	}
 	accs, _ := s.GetAllAccounts()
@@ -16,52 +32,108 @@ func TestBinanceLivesInCacheOnly(t *testing.T) {
 		t.Fatalf("счета: %+v", accs)
 	}
 	a := accs[0]
-	if a.ID != BinanceAccountID || a.Type != BinanceAccountType || a.Balance != 1150 || a.BankKey != "binance" || !a.HasDetail || a.Currency != 980 || a.OpenedAt != t0 {
+	if a.ID != BinanceAccountID || a.Type != BinanceAccountType || a.Name != bnFile+" (binance)" || a.BankKey != "binance" || !a.HasDetail || a.Currency != 980 || a.OpenedAt != 1_700_000_000 {
 		t.Fatalf("счёт: %+v", a)
 	}
-	if txs, _ := s.GetAllTransactions(100); len(txs) != 0 {
-		t.Fatalf("синтетических операций нет: %+v", txs)
+	rows, _ := s.BinanceLedger()
+	if len(rows) != 4 {
+		t.Fatalf("журнал: %d строк", len(rows))
 	}
-	if len(s.BinanceDetail()) == 0 {
-		t.Fatal("разбор не сохранён")
-	}
-	// в core.db от Binance нет ничего
 	for _, n := range legacyBinanceCore {
 		if tableExists(s.coreDB, n) {
 			t.Fatalf("в core.db таблица %s", n)
 		}
 	}
-	// повторный опрос обновляет баланс, а не плодит счета
-	_ = s.SaveBinance(BinanceSave{Portfolio: 900, Start: t0 + 180, Vals: []float64{95}, Detail: map[string]any{"total": 900}})
-	if accs, _ := s.GetAllAccounts(); len(accs) != 1 || accs[0].Balance != 900 {
-		t.Fatalf("повторно: %+v", accs)
-	}
-	// вайп кеша сносит всё облачное
 	if err := s.WipeCache(); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, n := s.BinanceSeriesInfo(); n != 0 || len(s.BinanceDetail()) != 0 {
-		t.Fatalf("после вайпа остались данные: n=%d", n)
+	if s.HasBinance() {
+		t.Fatal("после вайпа журнал остался")
 	}
 	if accs, _ := s.GetAllAccounts(); len(accs) != 0 {
 		t.Fatalf("после вайпа остался счёт: %+v", accs)
 	}
 }
 
-func TestLegacyBinanceTablesDroppedFromCore(t *testing.T) {
+// Выписки за разные периоды перекрываются: повторная и пересекающаяся загрузка не задваивает строки,
+// а две одинаковые строки внутри одной выписки сохраняются обе.
+func TestBinanceStatementsOverlapWithoutDuplicates(t *testing.T) {
 	s, _, _ := newS(t)
-	for _, n := range legacyBinanceCore {
-		if _, err := s.coreDB.Exec(`CREATE TABLE ` + n + ` (x INTEGER)`); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := s.dropLegacyBinanceCore(); err != nil {
+	if err := s.SaveBinanceStatement(bnFile, bnProfile, bnRows()); err != nil {
 		t.Fatal(err)
 	}
-	for _, n := range legacyBinanceCore {
-		if tableExists(s.coreDB, n) {
-			t.Fatalf("%s осталась в core.db", n)
-		}
+	if err := s.SaveBinanceStatement(bnFile, bnProfile, bnRows()); err != nil {
+		t.Fatal(err)
+	}
+	more := append(bnRows()[2:], BinanceRow{T: 1_700_000_200_000, Account: "Spot", Op: "Withdraw", Asset: "USDT", Delta: -5, Kind: "withdraw"})
+	if err := s.SaveBinanceStatement("Binance Тест 2.csv", bnProfile, more); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := s.BinanceLedger()
+	if len(rows) != 5 {
+		t.Fatalf("ждали 5 строк (4 + новая), получили %d", len(rows))
+	}
+	if accs, _ := s.GetAllAccounts(); len(accs) != 1 || accs[0].Name != "Binance Тест 2.csv (binance)" {
+		t.Fatalf("счёт один, имя — по последнему файлу: %+v", accs)
+	}
+}
+
+// Идентификатор профиля известен кешу из выписки: он сразу в списке счетов (алиас файла получит его сам, без ручной привязки),
+// а исчезает вместе с кешем.
+func TestBinanceIdentityComesFromStatement(t *testing.T) {
+	s, _, _ := newS(t)
+	if err := s.SaveBinanceStatement(bnFile, bnProfile, bnRows()); err != nil {
+		t.Fatal(err)
+	}
+	accs, _ := s.GetAllAccounts()
+	if len(accs) != 1 || accs[0].IBAN != bnProfile {
+		t.Fatalf("идентификатор: %+v", accs)
+	}
+	if err := s.WipeCache(); err != nil {
+		t.Fatal(err)
+	}
+	if s.BinanceProfile() != "" {
+		t.Fatal("после вайпа профиль остался")
+	}
+}
+
+// Оценка портфеля (минутный ряд и баланс) пишется отдельно от журнала; новая выписка сбрасывает ряд до пересборки.
+func TestBinanceSeriesIsRebuiltAfterNewStatement(t *testing.T) {
+	s, _, _ := newS(t)
+	_ = s.SaveBinanceStatement(bnFile, bnProfile, bnRows())
+	t0 := int64(1_700_000_000) / 60 * 60
+	if err := s.SaveBinance(BinanceSave{Portfolio: 1150, Start: t0, Vals: []float64{100, 110, 90}, Replace: true, Detail: map[string]any{"total": 1150}}); err != nil {
+		t.Fatal(err)
+	}
+	if accs, _ := s.GetAllAccounts(); accs[0].Balance != 1150 {
+		t.Fatalf("баланс: %+v", accs[0])
+	}
+	if len(s.BinanceDetail()) == 0 {
+		t.Fatal("разбор не сохранён")
+	}
+	_ = s.SaveBinanceStatement(bnFile, bnProfile, bnRows())
+	if _, _, n := s.BinanceSeriesInfo(); n != 0 {
+		t.Fatal("ряд должен быть сброшен до пересборки")
+	}
+}
+
+// Внешние движения журнала становятся операциями счёта один раз.
+func TestBinanceExternalFlowsBecomeTransactions(t *testing.T) {
+	s, _, _ := newS(t)
+	_ = s.SaveBinanceStatement(bnFile, bnProfile, bnRows())
+	fl, err := s.BinanceUnvaluedFlows([]string{"deposit", "withdraw"})
+	if err != nil || len(fl) != 1 || fl[0].Asset != "USDT" || fl[0].Delta != 100 {
+		t.Fatalf("внешние движения: %+v %v", fl, err)
+	}
+	if err := s.SaveBinanceTxs([]BinanceTx{{FlowID: fl[0].ID, T: fl[0].T, Desc: "Binance: депозит", UAH: 4000}}); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := s.BinanceUnvaluedFlows([]string{"deposit"}); len(again) != 0 {
+		t.Fatalf("оценённое не должно возвращаться: %+v", again)
+	}
+	txs, _ := s.GetAllTransactions(10)
+	if len(txs) != 1 || !txs[0].Internal || txs[0].Amount != 4000 {
+		t.Fatalf("операции: %+v", txs)
 	}
 }
 
@@ -99,78 +171,83 @@ func TestBinanceMinutesCandles(t *testing.T) {
 	}
 }
 
-// Каждый просмотренный период сразу в кеше: движения + покрытие; повторная запись не дублирует.
-func TestBinanceWindowsCachedAndResumable(t *testing.T) {
-	s, _, _ := newS(t)
-	if s.BinanceCovered("депозиты", "", 100, 200) {
-		t.Fatal("пустой кеш ничего не покрывает")
+// Алиас файла выписки привязан к лицу → профиль Binance попадает в статику (единственным путём «кеш → статика»)
+// и переживает сброс кеша: карта в лице не исчезает. Порядок «выписка → лицо» и «лицо → выписка» одинаков.
+func TestBinanceProfileSurvivesWipeForAttachedAlias(t *testing.T) {
+	const alias, profile = "Крипто Іваненко Петро.csv", "BN1245940041"
+	rows := []BinanceRow{{T: 1000, Account: "Spot", Op: "Deposit", Asset: "USDT", Delta: 10, Kind: "deposit"}}
+	links := func(s *Storage) []AliasLink {
+		us, err := s.GetUsers()
+		if err != nil || len(us) != 1 {
+			t.Fatalf("лица: %v %v", us, err)
+		}
+		return us[0].AliasLinks
 	}
-	fl := []BinanceFlow{{T: 150, Asset: "USDT", Delta: 100, Kind: "deposit"}, {T: 150, Asset: "USDT", Delta: 100, Kind: "deposit"}}
-	if err := s.SaveBinanceWindow("депозиты", "", 100, 200, fl); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.SaveBinanceWindow("депозиты", "", 100, 200, fl); err != nil { // тот же период ещё раз
-		t.Fatal(err)
-	}
-	// хвост заново запрошен шире: два одинаковых движения те же, третье новое
-	if err := s.SaveBinanceWindow("депозиты", "", 100, 300, append(fl, BinanceFlow{T: 250, Asset: "BTC", Delta: 1, Kind: "deposit"})); err != nil {
-		t.Fatal(err)
-	}
-	got, _ := s.BinanceFlows()
-	if len(got) != 3 {
-		t.Fatalf("ожидали 3 движения без дублей: %+v", got)
-	}
-	if !s.BinanceCovered("депозиты", "", 100, 200) || !s.BinanceCovered("депозиты", "", 120, 180) || s.BinanceCovered("депозиты", "", 100, 400) || s.BinanceCovered("выводы", "", 100, 200) {
-		t.Fatal("покрытие определяется неверно")
-	}
-	if err := s.WipeCache(); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := s.BinanceFlows(); len(got) != 0 || s.BinanceCovered("депозиты", "", 100, 200) {
-		t.Fatal("вайп кеша сносит и движения, и покрытие")
+	for _, statementFirst := range []bool{true, false} {
+		s, _, _ := newS(t)
+		if err := s.CreateUser(User{ID: "u1", Name: "Петро"}); err != nil {
+			t.Fatal(err)
+		}
+		if statementFirst {
+			if err := s.SaveBinanceStatement(alias, profile, rows); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.AddUserAlias("u1", alias); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			if err := s.AddUserAlias("u1", alias); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.SaveBinanceStatement(alias, profile, rows); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if l := links(s); len(l) != 1 || l[0].AccountIdentifier != profile {
+			t.Fatalf("statementFirst=%v: профиль не попал в статику: %+v", statementFirst, l)
+		}
+		if err := s.WipeCache(); err != nil {
+			t.Fatal(err)
+		}
+		if l := links(s); len(l) != 1 || l[0].AccountIdentifier != profile {
+			t.Fatalf("statementFirst=%v: после сброса кеша связи нет: %+v", statementFirst, l)
+		}
 	}
 }
 
-// Счёт попадает в кеш сразу (до истории), операции счёта пишутся по мере оценки движений и переживают повторную сборку;
-// первая свеча ряда открывается с origin, поэтому скачок депозита виден.
-func TestBinanceAccountAndTxsAreCachedEarly(t *testing.T) {
-	s, _, _ := newS(t)
-	t0 := int64(1_700_000_000) / 60 * 60
-	if err := s.SaveBinanceAccount(500, map[string]any{"total": 500}); err != nil {
+// Кеш, посчитанный по старым правилам учёта, при открытии теряет ряд и операции (журнал остаётся); по текущим — нет.
+func TestBinanceModelMigrationDropsStaleSeries(t *testing.T) {
+	s, cachePath, corePath := newS(t)
+	rows := []BinanceRow{{T: 1000, Account: "Spot", Op: "Deposit", Asset: "USDT", Delta: 10, Kind: "deposit"}}
+	if err := s.SaveBinanceStatement("b.csv", "BN1000001", rows); err != nil {
 		t.Fatal(err)
 	}
-	accs, _ := s.GetAccounts()
-	if len(accs) != 1 || accs[0].ID != BinanceAccountID || accs[0].Balance != 500 {
-		t.Fatalf("счёт должен быть в кеше до истории: %+v", accs)
-	}
-	if err := s.SaveBinanceWindow("депозиты", "", t0*1000-1000, t0*1000+1000, []BinanceFlow{{T: t0 * 1000, Asset: "USDT", Delta: 10, Kind: "deposit"}, {T: t0*1000 + 5, Asset: "USDT", Delta: 3, Kind: "trade"}}); err != nil {
+	if err := s.SaveBinance(BinanceSave{Portfolio: 1, Start: 60, Vals: []float64{1, 2, 3}, Replace: true}); err != nil {
 		t.Fatal(err)
 	}
-	un, err := s.BinanceUnvaluedFlows([]string{"deposit"})
-	if err != nil || len(un) != 1 || un[0].Kind != "deposit" {
-		t.Fatalf("без оценки только депозит: %+v %v", un, err)
-	}
-	if err := s.SaveBinanceTxs([]BinanceTx{{FlowID: un[0].ID, T: un[0].T, Desc: "Binance: депозит 10 USDT", UAH: 400}}); err != nil {
+	if err := s.SaveBinanceTxs([]BinanceTx{{FlowID: "x", T: 1000, Desc: "d", UAH: 1}}); err != nil {
 		t.Fatal(err)
 	}
-	if un, _ := s.BinanceUnvaluedFlows([]string{"deposit"}); len(un) != 0 {
-		t.Fatalf("после записи оценивать нечего: %+v", un)
-	}
-	txs, _ := s.GetAllTransactions(100)
-	if len(txs) != 1 || txs[0].AccountID != BinanceAccountID || txs[0].Amount != 400 || !txs[0].Internal || txs[0].Description != "Binance: депозит 10 USDT" {
-		t.Fatalf("операции: %+v", txs)
-	}
-	if err := s.SaveBinance(BinanceSave{Portfolio: 500, Start: t0, Vals: []float64{400, 410, 500}, Replace: true}); err != nil {
+	s.Close()
+	s, err := NewStorage(cachePath, corePath)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if txs, _ := s.GetAllTransactions(100); len(txs) != 1 {
-		t.Fatalf("сборка ряда не должна терять операции: %+v", txs)
+	if _, _, n := s.BinanceSeriesInfo(); n != 3 {
+		t.Fatalf("ряд текущей модели жив: %d", n)
 	}
-	if accs, _ := s.GetAccounts(); accs[0].OpenedAt != t0 {
-		t.Fatalf("opened_at = первая минута ряда: %+v", accs[0])
+	if _, err := s.cacheDB.Exec(`UPDATE binance_state SET v='1' WHERE k='model'`); err != nil {
+		t.Fatal(err)
 	}
-	c, has, _ := s.BinanceCandles([]int64{t0}, t0+300)
-	if !has[0] || c[0][0] != 0 || c[0][3] != 500 || c[0][1] != 500 { // открытие 0, закрытие 500: скачок виден
-		t.Fatalf("свеча: %v", c[0])
+	s.Close()
+	s, err = NewStorage(cachePath, corePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var tx int
+	_ = s.cacheDB.QueryRow(`SELECT COUNT(*) FROM transactions WHERE id LIKE 'binance_%'`).Scan(&tx)
+	if _, _, n := s.BinanceSeriesInfo(); n != 0 || tx != 0 || !s.HasBinance() {
+		t.Fatalf("старая модель: ряд %d, операций %d, журнал %v", n, tx, s.HasBinance())
 	}
 }

@@ -44,6 +44,7 @@ func (s *Storage) loadCacheIndex() (*cacheIndex, error) {
 	if err != nil {
 		return nil, err
 	}
+	accs = s.withBinanceProfile(accs)
 	idx := &cacheIndex{byAlias: map[string][]cacheLink{}, ibanByPAN: map[string]string{}, pansByIBAN: map[string][]string{}}
 	add := func(key string, l cacheLink) {
 		if key == "" || l.ID == "" {

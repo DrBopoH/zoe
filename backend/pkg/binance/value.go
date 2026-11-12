@@ -11,18 +11,21 @@ import (
 	"time"
 )
 
+// dust — остаток меньше этого считается нулём (сумма сотен строк выписки даёт шум вроде 1e-17).
+const dust = 1e-9
+
 // Wallets — остатки монеты по кошелькам.
 type Wallets struct {
-	Spot, Funding, Earn float64
+	Spot, Funding, Earn, Strategy, Futures float64
 }
 
-func (w Wallets) Total() float64 { return w.Spot + w.Funding + w.Earn }
+func (w Wallets) Total() float64 { return w.Spot + w.Funding + w.Earn + w.Strategy + w.Futures }
 
 // Holdings — всё, что лежит на Binance: монета → кошельки.
 type Holdings map[string]*Wallets
 
 func (h Holdings) add(asset string, v float64, set func(*Wallets, float64)) {
-	if v == 0 {
+	if math.Abs(v) < dust { // следы округления сумм в выписке
 		return
 	}
 	// LD* — «зеркало» Simple Earn в споте: оценивается по настоящей монете, а сами остатки приходят из Earn-эндпоинтов
@@ -47,6 +50,16 @@ func (h Holdings) AddFunding(m map[string]float64) {
 		h.add(a, v, func(w *Wallets, x float64) { w.Funding += x })
 	}
 }
+func (h Holdings) AddStrategy(m map[string]float64) {
+	for a, v := range m {
+		h.add(a, v, func(w *Wallets, x float64) { w.Strategy += x })
+	}
+}
+func (h Holdings) AddFutures(m map[string]float64) {
+	for a, v := range m {
+		h.add(a, v, func(w *Wallets, x float64) { w.Futures += x })
+	}
+}
 func (h Holdings) AddEarn(m map[string]float64) {
 	for a, v := range m {
 		h.add(a, v, func(w *Wallets, x float64) { w.Earn += x })
@@ -60,6 +73,8 @@ type Item struct {
 	Spot     float64 `json:"spot"`
 	Funding  float64 `json:"funding"`
 	Earn     float64 `json:"earn"`
+	Strategy float64 `json:"strategy"`
+	Futures  float64 `json:"futures"`
 	PriceUAH float64 `json:"price_uah"`
 	ValueUAH float64 `json:"value_uah"`
 }
@@ -105,7 +120,7 @@ func Value(h Holdings, prices map[string]float64) (Valuation, bool) {
 		if total == 0 {
 			continue
 		}
-		it := Item{Asset: asset, Amount: total, Spot: w.Spot, Funding: w.Funding, Earn: w.Earn}
+		it := Item{Asset: asset, Amount: total, Spot: w.Spot, Funding: w.Funding, Earn: w.Earn, Strategy: w.Strategy, Futures: w.Futures}
 		switch {
 		case asset == "UAH":
 			it.PriceUAH = 1
@@ -140,36 +155,8 @@ func round2(x float64) float64 {
 	return float64(int64(x*100+0.5)) / 100
 }
 
-// Fetch собирает остатки по всем кошелькам. Spot обязателен; Funding и Earn — по возможности
-// (если у ключа нет права или кошелька, пишем предупреждение и идём дальше).
-func (c *Client) Fetch() (Holdings, []string, error) {
-	var warns []string
-	_ = c.SyncTime()
-	h := Holdings{}
-	spot, err := c.Spot()
-	if err != nil {
-		return nil, nil, err
-	}
-	h.AddSpot(spot)
-	if m, err := c.Funding(); err != nil {
-		warns = append(warns, "Funding: "+err.Error())
-	} else {
-		h.AddFunding(m)
-	}
-	if m, err := c.EarnFlexible(); err != nil {
-		warns = append(warns, "Earn (flexible): "+err.Error())
-	} else {
-		h.AddEarn(m)
-	}
-	if m, err := c.EarnLocked(); err != nil {
-		warns = append(warns, "Earn (locked): "+err.Error())
-	} else {
-		h.AddEarn(m)
-	}
-	return h, warns, nil
-}
-
-// minuteClose — цена закрытия минутной свечи пары (первая свеча не раньше этой минуты); результат запоминается.
+// minuteClose — цена закрытия последней свечи пары не позже этой минуты (на неликвидной паре минута без сделок = цена
+// последней сделки, как у минутной сетки); если до неё свечей нет — первая после. Результат запоминается.
 func (c *Client) minuteClose(symbol string, tMs int64) (float64, error) {
 	t := tMs / minute * minute
 	key := symbol + "|" + strconv.FormatInt(t, 10)
@@ -179,13 +166,19 @@ func (c *Client) minuteClose(symbol string, tMs int64) (float64, error) {
 		return v, nil
 	}
 	c.mu.Unlock()
-	body, err := c.do("GET", "/api/v3/klines", url.Values{"symbol": {symbol}, "interval": {"1m"}, "startTime": {strconv.FormatInt(t, 10)}, "limit": {"1"}}, false)
-	if err != nil {
-		return 0, err
-	}
 	var r [][]json.RawMessage
-	if err := json.Unmarshal(body, &r); err != nil {
-		return 0, err
+	for _, q := range []string{"endTime", "startTime"} { // сначала последняя сделка до минуты, потом первая после
+		body, err := c.do("/api/v3/klines", url.Values{"symbol": {symbol}, "interval": {"1m"}, q: {strconv.FormatInt(t, 10)}, "limit": {"1"}})
+		if err != nil {
+			return 0, err
+		}
+		r = nil
+		if err := json.Unmarshal(body, &r); err != nil {
+			return 0, err
+		}
+		if len(r) > 0 && len(r[0]) >= 5 {
+			break
+		}
 	}
 	if len(r) == 0 || len(r[0]) < 5 {
 		return 0, fmt.Errorf("нет цены %s на %s", symbol, time.UnixMilli(t).Format("2006-01-02 15:04"))

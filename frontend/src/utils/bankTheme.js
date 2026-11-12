@@ -46,7 +46,7 @@ const THEMES = {
     tile: 'bg-gradient-to-br from-yellow-600/30 via-zinc-900 to-black border-yellow-500/60 text-yellow-100',
     panel: 'bg-gradient-to-br from-yellow-600/30 via-zinc-900 to-black border-yellow-500/60 text-yellow-100',
     color: '#F0B90B', // фирменный цвет: маркеры на графике и т.п.
-    tag: 'BINANCE',
+    tag: 'HOT',
     tagStyle: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/40'
   },
   other: {

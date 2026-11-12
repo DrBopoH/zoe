@@ -11,21 +11,24 @@ import (
 	"time"
 )
 
-// Официальная выписка Binance (Wallet → Transaction History → Export) — единственный источник движений, которых нет в API:
-// переводы в Strategy (грид-боты) и на фьючерсы, стейкинг SOL, конвертация «пыли» в BNB, кэшбэк и возврат комиссий.
-// Фьючерсы, пыль и стейкинг API тоже отдаёт (последние 6 месяцев и т.п.), но глубже или при сбое их видит только выписка:
-// их движения помечены «stmt:» и в историю попадают лишь там, где API того же события не показал (mergeStatement).
-// Всё остальное (депозиты, сделки, конвертации, P2P, Earn) приходит из API, поэтому из выписки берутся только эти операции:
-// иначе движения задвоились бы (WBETH-стейкинг тоже уже виден в API: сверено по необъяснённому остатку). Строки самих разделов Strategy и Futures не нужны — внутри них капитал не меняется.
+// Официальная выписка Binance (Wallet → Transaction History → Export) — единственный источник движений.
+// В ней есть всё: спот-сделки, Earn, Strategy, фьючерсы, конвертации, P2P, депозиты. Читаются ВСЕ строки как есть;
+// что с ними делать (в какой кошелёк, внешнее движение или внутреннее) решает ledger.go.
 
-// statementOps — операция в строках счёта Spot → вид движения.
-var statementOps = map[string]string{
-	"Transfer Between Spot and Strategy":   "strategy",
-	"Transfer Between Spot and UM Futures": "stmt:futures", // «stmt:» — то же видит и API: берём, только если API это не отдал (mergeStatement)
-	"SOL Staking - Purchase":               "stmt:staking",
-	"Small Assets Exchange BNB":            "stmt:dust",
-	"Cashback Voucher":                     "bonus",
-	"Strategy Trading Fee Rebate":          "bonus",
+// Row — строка выписки.
+type Row struct {
+	T       int64 // мс
+	Account string
+	Op      string
+	Asset   string
+	Delta   float64
+	Note    string
+}
+
+// Statement — разобранная выписка.
+type Statement struct {
+	UserID string // «Ідентифікатор користувача»: единственное, что в выписке говорит, чей это счёт
+	Rows   []Row
 }
 
 var statementHeads = []string{"ідентифікатор користувача", "user_id", "user id", "идентификатор пользователя"}
@@ -52,6 +55,7 @@ func IsStatement(raw []byte) bool {
 var zoneRe = regexp.MustCompile(`\(UTC([+-])(\d{1,2})(?::?(\d{2}))?\)`)
 
 // StatementZone — часовой пояс времени в выписке: Binance пишет его в имени файла «…(UTC+2)…», без пометки — UTC.
+// Имя файла пользователь может переименовать: тогда пояс не определить и время читается как UTC (его видно в «Загрузить»).
 func StatementZone(filename string) *time.Location {
 	m := zoneRe.FindStringSubmatch(filename)
 	if m == nil {
@@ -69,42 +73,61 @@ func StatementZone(filename string) *time.Location {
 	return time.FixedZone("UTC"+m[1]+m[2], off)
 }
 
-// ParseStatement разбирает выписку и отдаёт движения счёта Spot из statementOps. total — сколько строк было в файле.
-func ParseStatement(r io.Reader, loc *time.Location) (flows []Flow, total int, err error) {
+// ProfileID — идентификатор счёта в core.db: «BN» + id пользователя. У Binance нет ни IBAN, ни карты;
+// префикс делает его IBAN-подобным (две буквы и цифры), поэтому он проходит тем же путём, что IBAN у банков.
+func ProfileID(userID string) string { return "BN" + strings.TrimSpace(userID) }
+
+// ParseStatement разбирает выписку целиком. Строки с нулевым изменением пропускаются.
+func ParseStatement(r io.Reader, loc *time.Location) (*Statement, error) {
 	raw, err := io.ReadAll(r)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	if !IsStatement(raw) {
-		return nil, 0, errors.New("не похоже на выписку Binance (ожидается «Ідентифікатор користувача, Час, Акаунт, Операція, Монета, Змінити»)")
+		return nil, errors.New("не похоже на выписку Binance (ожидается «Ідентифікатор користувача, Час, Акаунт, Операція, Монета, Змінити»)")
 	}
 	cr := csv.NewReader(bytes.NewReader(bytes.TrimPrefix(raw, []byte("\xef\xbb\xbf"))))
 	cr.FieldsPerRecord = -1
 	rows, err := cr.ReadAll()
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	if loc == nil {
 		loc = time.UTC
 	}
+	st := &Statement{}
 	for _, row := range rows[1:] {
 		if len(row) < 6 {
 			continue
 		}
-		total++
-		kind, ok := statementOps[strings.TrimSpace(row[3])]
-		if !ok || !strings.EqualFold(strings.TrimSpace(row[2]), "Spot") {
-			continue
+		uid := strings.TrimSpace(row[0])
+		if st.UserID == "" {
+			st.UserID = uid
+		} else if uid != st.UserID {
+			return nil, errors.New("в выписке несколько пользователей: " + st.UserID + " и " + uid)
 		}
 		t, err := time.ParseInLocation("2006-01-02 15:04:05", strings.TrimSpace(row[1]), loc)
 		if err != nil {
-			return nil, 0, errors.New("не разобрать время «" + row[1] + "»")
+			return nil, errors.New("не разобрать время «" + row[1] + "»")
 		}
 		d, err := strconv.ParseFloat(strings.TrimSpace(row[5]), 64)
-		if err != nil || d == 0 {
+		if err != nil {
+			return nil, errors.New("не разобрать сумму «" + row[5] + "»")
+		}
+		if d == 0 {
 			continue
 		}
-		flows = append(flows, Flow{T: t.UnixMilli(), Asset: strings.TrimSpace(row[4]), Delta: d, Kind: kind})
+		note := ""
+		if len(row) > 6 {
+			note = strings.TrimSpace(row[6])
+		}
+		st.Rows = append(st.Rows, Row{
+			T: t.UnixMilli(), Account: strings.TrimSpace(row[2]), Op: strings.TrimSpace(row[3]),
+			Asset: strings.TrimSpace(row[4]), Delta: d, Note: note,
+		})
 	}
-	return flows, total, nil
+	if st.UserID == "" {
+		return nil, errors.New("в выписке нет строк")
+	}
+	return st, nil
 }

@@ -74,6 +74,7 @@ export const validateAndCleanAccount = (input) => {
   if (/^\d{4,8}[*•xX]{2,12}\d{4}$/.test(compact)) return compact.replace(/[•xX]/g, '*')
   const clean = input.replace(/[^a-zA-Z0-9]/g, '').toUpperCase()
   if (/^\d{12,19}$/.test(clean)) return clean
+  if (/^BN\d{6,12}$/.test(clean)) return clean // профиль Binance: BN + id пользователя из выписки
   if (/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(clean)) return clean
   return null
 }

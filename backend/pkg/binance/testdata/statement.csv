@@ -1,0 +1,67 @@
+﻿Ідентифікатор користувача,Час,Акаунт,Операція,Монета,Змінити,Примітка
+1000000001,2026-05-19 08:05:59,Funding,P2P Trading,USDT,25.06,0000000000000000001
+1000000001,2026-05-19 08:11:56,Spot,Transfer Between Spot and Funding,USDT,25.06,
+1000000001,2026-05-19 08:11:57,Funding,Transfer Between Spot and Funding,USDT,-25.06,
+1000000001,2026-05-19 19:44:06,Spot,Transaction Buy,BTC,0.00006,
+1000000001,2026-05-19 19:44:06,Spot,Transaction Spend,USDT,-4.6139112,
+1000000001,2026-05-19 19:44:06,Spot,Transaction Fee,BTC,-0.00000006,
+1000000001,2026-05-19 19:46:34,Spot,Transaction Spend,USDT,-4.6107738,
+1000000001,2026-05-19 19:46:34,Spot,Transaction Fee,BTC,-0.00000006,
+1000000001,2026-05-19 19:46:34,Spot,Transaction Buy,BTC,0.00006,
+1000000001,2026-05-19 23:51:05,Spot,Transaction Revenue,USDT,1.86924,
+1000000001,2026-05-19 23:51:05,Spot,Transaction Revenue,USDT,4.76572,
+1000000001,2026-05-19 23:51:05,Spot,Transaction Sold,EDEN,-56.6,
+1000000001,2026-05-19 23:51:05,Spot,Transaction Sold,EDEN,-22.2,
+1000000001,2026-05-21 20:43:50,Spot,Binance Convert,SOL,-0.000825,
+1000000001,2026-05-21 20:43:50,Spot,Binance Convert,BNB,0.00010928,
+1000000001,2026-05-23 08:02:39,Spot,Cashback Voucher,USDT,0.02010689,
+1000000001,2026-05-24 07:49:32,Spot,Transfer Between Spot and Strategy,USDT,-26.343,
+1000000001,2026-05-24 07:49:32,Strategy,Transaction Spend,USDT,-11.06952,
+1000000001,2026-05-24 07:49:32,Strategy,Transfer Between Spot and Strategy,USDT,26.343,
+1000000001,2026-05-24 07:49:32,Strategy,Transaction Spend,USDT,-0.32945,
+1000000001,2026-05-24 07:49:32,Strategy,Transaction Fee,GENIUS,-0.0168,
+1000000001,2026-05-24 07:49:32,Strategy,Transaction Fee,GENIUS,-0.0005,
+1000000001,2026-05-24 07:49:32,Strategy,Transaction Buy,GENIUS,16.8,
+1000000001,2026-05-24 07:49:32,Strategy,Transaction Buy,GENIUS,0.5,
+1000000001,2026-05-24 08:02:55,Spot,Cashback Voucher,USDT,0.09799195,
+1000000001,2026-05-24 08:28:00,Strategy,Transaction Sold,GENIUS,-8.1,
+1000000001,2026-05-24 08:28:00,Strategy,Transaction Revenue,USDT,5.45373,
+1000000001,2026-05-24 08:39:56,Strategy,Transaction Revenue,USDT,5.589,
+1000000001,2026-05-24 08:39:56,Strategy,Transaction Sold,GENIUS,-8.1,
+1000000001,2026-05-24 11:47:24,Spot,Transfer Between Spot and Strategy,GENIUS,9.1746,
+1000000001,2026-05-24 11:47:24,Strategy,Transfer Between Spot and Strategy,GENIUS,-9.1746,
+1000000001,2026-05-24 12:30:21,Funding,P2P Trading,USDT,88.85,0000000000000000001
+1000000001,2026-05-24 12:30:22,Funding,Simple Earn Flexible Subscription,USDT,-88.85,Binance Earn
+1000000001,2026-05-24 12:35:18,Spot,Simple Earn Flexible Redemption,USDT,88.85001018,Binance Earn
+1000000001,2026-05-24 13:33:52,Spot,Simple Earn Flexible Subscription,BTC,-0.00000976,Binance Earn
+1000000001,2026-05-24 13:33:52,Spot,Simple Earn Flexible Subscription,GENIUS,-0.2007,Binance Earn
+1000000001,2026-05-24 13:35:01,Spot,Simple Earn Flexible Redemption,BTC,0.00000976,Binance Earn
+1000000001,2026-05-25 01:36:09,Spot,Strategy Trading Fee Rebate,USDT,0.02198581,
+1000000001,2026-05-25 01:36:09,Spot,Strategy Trading Fee Rebate,BNB,-0.00003089,
+1000000001,2026-05-29 01:25:02,Spot,Transfer Between Spot and UM Futures,USDT,-6,
+1000000001,2026-05-29 01:25:02,USD-M Futures,Transfer Between Spot and UM Futures,USDT,6,
+1000000001,2026-05-29 01:44:02,USD-M Futures,Fee,USDT,-0.01489579,TradeID - 86629527
+1000000001,2026-05-29 02:00:01,USD-M Futures,Funding Fee,USDT,-0.00232,
+1000000001,2026-05-29 02:27:09,USD-M Futures,Fee,USDT,-0.01465828,TradeID - 86934571
+1000000001,2026-05-29 02:27:09,USD-M Futures,Realized Profit and Loss,USDT,0.47502,TradeID - 86934571
+1000000001,2026-05-29 02:36:23,USD-M Futures,Realized Profit and Loss,USDT,-0.1287,TradeID - 87011156
+1000000001,2026-05-29 03:55:04,USD-M Futures,Insurance Fund Refund,USDT,0.02025626,
+1000000001,2026-05-29 04:32:02,USD-M Futures,Insurance Fund Refund,USDT,0.0013753,
+1000000001,2026-05-29 14:03:15,Spot,Transfer Between Spot and UM Futures,USDT,-6,
+1000000001,2026-05-29 14:03:15,USD-M Futures,Transfer Between Spot and UM Futures,USDT,6,
+1000000001,2026-05-29 14:53:05,Spot,Simple Earn Locked Subscription,USDT,-5.16289122,Binance Earn
+1000000001,2026-05-29 14:53:21,Spot,Simple Earn Locked Subscription,BNB,-0.156351,Binance Earn
+1000000001,2026-05-31 02:54:40,Spot,Simple Earn Locked Rewards,USDT,0.002829,Binance Earn
+1000000001,2026-06-01 02:35:17,Spot,Simple Earn Locked Redemption,BNB,0.156351,Binance Earn
+1000000001,2026-06-01 02:53:49,Spot,Simple Earn Locked Rewards,USDT,0.002829,Binance Earn
+1000000001,2026-06-12 06:48:15,Spot,Simple Earn Flexible Interest,USDT,0.00056577,Binance Earn
+1000000001,2026-06-13 07:20:58,Spot,Simple Earn Flexible Interest,USDT,0.00056579,Binance Earn
+1000000001,2026-08-10 21:11:12,Spot,Deposit,USDT,1,
+1000000001,2026-08-10 21:15:38,Spot,Deposit,USDT,82.1035,
+1000000001,2026-08-24 02:00:00,USD-M Futures,Funding Fee,USDT,0.41186724,
+1000000001,2026-08-25 11:57:52,Spot,Small Assets Exchange BNB,USDT,-0.21813612,USDT to BNB
+1000000001,2026-08-25 11:57:52,Spot,Small Assets Exchange BNB,BNB,0.00000334,GENIUS to BNB
+1000000001,2026-09-01 21:39:17,Spot,WBETH2.0 - Staking,ETH,-0.0124,
+1000000001,2026-09-01 21:39:17,Spot,WBETH2.0 - Staking,WBETH,0.01121637,
+1000000001,2026-09-01 21:45:26,Spot,SOL Staking - Purchase,BNSOL,0.17704555,
+1000000001,2026-09-01 21:45:26,Spot,SOL Staking - Purchase,SOL,-0.2,

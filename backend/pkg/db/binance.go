@@ -6,11 +6,15 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"economic/pkg/mono"
 )
 
-// Binance — такой же источник из облака, как банки: всё, что отсюда приходит, — КЕШ (cache.db, одноразовый).
-// Счёт «Binance» — обычная строка accounts (type=binance), оценка портфеля по минутам — binance_minutes,
-// разбор по монетам для модалки — binance_state. В core.db от Binance нет ничего.
+// Binance — такой же источник, как банки: выписка (CSV) → счёт и журнал в КЕШЕ (cache.db, одноразовый).
+// Счёт «Binance» — обычная строка accounts (type=binance), его идентификатор BN<id пользователя> кеш знает из выписки
+// (в iban-поле списка счетов), поэтому алиас по имени файла получает его сам и попадает в бесхоз; к лицу алиас привязывается
+// как любой другой (core.db → alias_accounts).
+// Оценка портфеля по минутам — binance_minutes, разбор по монетам для модалки — binance_state. В core.db от Binance нет ничего.
 
 const binanceCacheSchema = `
 CREATE TABLE IF NOT EXISTS binance_minutes (
@@ -18,22 +22,21 @@ CREATE TABLE IF NOT EXISTS binance_minutes (
 	v REAL NOT NULL                  -- оценка портфеля, ₴
 );
 CREATE TABLE IF NOT EXISTS binance_state (k TEXT PRIMARY KEY, v TEXT NOT NULL);
--- найденные движения по счёту (депозиты, выводы, сделки, …): каждый просмотренный период пишется сразу
-CREATE TABLE IF NOT EXISTS binance_flows (
-	id TEXT PRIMARY KEY,             -- время|монета|сумма|вид|№ повтора
+-- журнал выписки целиком: каждая строка как есть; id = время|счёт|операция|монета|сумма|№ повтора
+CREATE TABLE IF NOT EXISTS binance_ledger (
+	id TEXT PRIMARY KEY,
 	t INTEGER NOT NULL,              -- мс
+	account TEXT NOT NULL,           -- Spot / Funding / Strategy / USD-M Futures
+	op TEXT NOT NULL,
 	asset TEXT NOT NULL,
 	delta REAL NOT NULL,
-	kind TEXT NOT NULL
+	kind TEXT NOT NULL DEFAULT '',   -- внешнее движение (binance.Kind), у внутренних пусто
+	note TEXT NOT NULL DEFAULT ''
 );
--- какие периоды уже просмотрены (stage + key: P2P BUY/SELL, пара сделок), чтобы не качать их заново
-CREATE TABLE IF NOT EXISTS binance_coverage (
-	stage TEXT NOT NULL,
-	key TEXT NOT NULL,
-	from_ms INTEGER NOT NULL,
-	to_ms INTEGER NOT NULL,
-	PRIMARY KEY (stage, key, from_ms, to_ms)
-);
+CREATE INDEX IF NOT EXISTS idx_binance_ledger_t ON binance_ledger(t);
+-- старая схема: движения собирались из API по периодам
+DROP TABLE IF EXISTS binance_flows;
+DROP TABLE IF EXISTS binance_coverage;
 `
 
 const (
@@ -53,82 +56,105 @@ func (s *Storage) dropLegacyBinanceCore() error {
 	return nil
 }
 
-// BinanceFlow — движение по счёту Binance (как его отдал API).
-type BinanceFlow struct {
-	T     int64
-	Asset string
-	Delta float64
-	Kind  string
+// BinanceRow — строка журнала выписки.
+type BinanceRow struct {
+	T       int64
+	Account string
+	Op      string
+	Asset   string
+	Delta   float64
+	Kind    string
+	Note    string
 }
 
-func flowID(f BinanceFlow, occ int) string {
-	return fmt.Sprintf("%d|%s|%.12g|%s|%d", f.T, f.Asset, f.Delta, f.Kind, occ)
+func rowID(r BinanceRow, occ int) string {
+	return fmt.Sprintf("%d|%s|%s|%s|%.12g|%d", r.T, r.Account, r.Op, r.Asset, r.Delta, occ)
 }
 
-// SaveBinanceWindow кладёт в кеш найденные за период движения и сам период (одной транзакцией): прерванный синк
-// продолжится с того места, где остановился. key различает независимые обходы одного этапа (P2P BUY/SELL, пара сделок).
-func (s *Storage) SaveBinanceWindow(stage, key string, fromMs, toMs int64, fl []BinanceFlow) error {
+// SaveBinanceStatement кладёт в кеш счёт (имя = имя файла выписки) и все строки журнала. Идемпотентно: одну и ту же строку
+// второй раз не пишет, поэтому перекрывающиеся выписки (за разные периоды) просто дополняют друг друга.
+// profile — идентификатор счёта (BN<id>): по нему пользователь привязывает счёт к алиасу файла.
+func (s *Storage) SaveBinanceStatement(filename, profile string, rows []BinanceRow) error {
+	if err := s.saveBinanceStatement(filename, profile, rows); err != nil {
+		return err
+	}
+	s.syncAliases(nil) // профиль появился только сейчас: привязанным к лицу алиасам он попадает в статику (как IBAN банка)
+	return nil
+}
+
+func (s *Storage) saveBinanceStatement(filename, profile string, rows []BinanceRow) error {
+	if err := s.SaveImportedAccount(mono.AccountDTO{ID: BinanceAccountID, Type: BinanceAccountType, CurrencyCode: 980}, filename); err != nil {
+		return err
+	}
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
+	defer s.bump()
 	tx, err := s.cacheDB.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	seen := map[string]int{}
-	for _, f := range fl {
-		base := flowID(f, 0)
+	for _, r := range rows {
+		base := rowID(r, 0)
 		occ := seen[base]
 		seen[base]++
-		if _, err := tx.Exec(`INSERT OR IGNORE INTO binance_flows(id,t,asset,delta,kind) VALUES(?,?,?,?,?)`, flowID(f, occ), f.T, f.Asset, f.Delta, f.Kind); err != nil {
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO binance_ledger(id,t,account,op,asset,delta,kind,note) VALUES(?,?,?,?,?,?,?,?)`,
+			rowID(r, occ), r.T, r.Account, r.Op, r.Asset, r.Delta, r.Kind, r.Note); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.Exec(`INSERT OR IGNORE INTO binance_coverage(stage,key,from_ms,to_ms) VALUES(?,?,?,?)`, stage, key, fromMs, toMs); err != nil {
+	if _, err := tx.Exec(`INSERT INTO binance_state(k,v) VALUES('profile',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`, profile); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO binance_state(k,v) VALUES('model',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`, binanceModel); err != nil {
+		return err // сброс кеша стирает версию, а журнал после него снова пишется по текущим правилам
+	}
+	if _, err := tx.Exec(`UPDATE accounts SET opened_at = COALESCE((SELECT MIN(t)/1000 FROM binance_ledger), 0) WHERE id = ?`, BinanceAccountID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM binance_minutes`); err != nil { // новые строки меняют прошлое: ряд соберётся заново при «Разведать»
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM binance_state WHERE k = 'origin'`); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-// DropBinanceSeries сбрасывает минутный ряд оценки (движения и покрытие периодов остаются): новые движения, например из
-// выписки, меняют прошлое, поэтому следующий «Разведать» соберёт ряд заново из кеша движений — дёшево, запросов почти нет.
-func (s *Storage) DropBinanceSeries() error {
-	s.cacheMu.Lock()
-	defer s.cacheMu.Unlock()
-	defer s.bump()
-	if _, err := s.cacheDB.Exec(`DELETE FROM binance_minutes`); err != nil {
-		return err
-	}
-	_, err := s.cacheDB.Exec(`DELETE FROM binance_state WHERE k = 'origin'`)
-	return err
-}
-
-// BinanceCovered — период (или пара сделок: from=to=0) уже просмотрен и лежит в кеше.
-func (s *Storage) BinanceCovered(stage, key string, fromMs, toMs int64) bool {
-	var n int
-	_ = s.cacheDB.QueryRow(`SELECT COUNT(*) FROM binance_coverage WHERE stage=? AND key=? AND from_ms<=? AND to_ms>=?`, stage, key, fromMs, toMs).Scan(&n)
-	return n > 0
-}
-
-// BinanceFlows — все сохранённые движения.
-func (s *Storage) BinanceFlows() ([]BinanceFlow, error) {
-	rows, err := s.cacheDB.Query(`SELECT t, asset, delta, kind FROM binance_flows ORDER BY t`)
+// BinanceLedger — весь журнал по времени.
+func (s *Storage) BinanceLedger() ([]BinanceRow, error) {
+	rows, err := s.cacheDB.Query(`SELECT t, account, op, asset, delta, kind, note FROM binance_ledger ORDER BY t, id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []BinanceFlow
+	var out []BinanceRow
 	for rows.Next() {
-		var f BinanceFlow
-		if err := rows.Scan(&f.T, &f.Asset, &f.Delta, &f.Kind); err != nil {
+		var r BinanceRow
+		if err := rows.Scan(&r.T, &r.Account, &r.Op, &r.Asset, &r.Delta, &r.Kind, &r.Note); err != nil {
 			return nil, err
 		}
-		out = append(out, f)
+		out = append(out, r)
 	}
 	return out, rows.Err()
 }
 
-// BinanceSave — результат опроса Binance для записи в кеш.
+// HasBinance — в кеше есть журнал выписки Binance.
+func (s *Storage) HasBinance() bool {
+	var n int
+	_ = s.cacheDB.QueryRow(`SELECT COUNT(*) FROM binance_ledger`).Scan(&n)
+	return n > 0
+}
+
+// BinanceProfile — идентификатор счёта из последней выписки ("" — выписок не было): его пользователь привязывает к алиасу файла.
+func (s *Storage) BinanceProfile() string {
+	var v string
+	_ = s.cacheDB.QueryRow(`SELECT v FROM binance_state WHERE k='profile'`).Scan(&v)
+	return v
+}
+
+// BinanceSave — результат оценки портфеля для записи в кеш.
 type BinanceSave struct {
 	Portfolio float64   // оценка портфеля сейчас, ₴
 	Start     int64     // unix-секунды первой минуты Vals
@@ -138,7 +164,7 @@ type BinanceSave struct {
 	Detail    any
 }
 
-// SaveBinance одной транзакцией кладёт в кеш счёт с оценкой, точки минутного ряда, операции счёта и JSON-разбор по монетам.
+// SaveBinance одной транзакцией кладёт в кеш оценку счёта, точки минутного ряда и JSON-разбор по монетам.
 func (s *Storage) SaveBinance(in BinanceSave) error {
 	raw, err := json.Marshal(in.Detail)
 	if err != nil {
@@ -170,50 +196,22 @@ func (s *Storage) SaveBinance(in BinanceSave) error {
 			return err
 		}
 	}
-	if err := upsertBinanceAccount(tx, in.Portfolio, raw); err != nil {
+	if _, err := tx.Exec(`UPDATE accounts SET balance = ?, closed_at = 0 WHERE id = ?`, round2(in.Portfolio), BinanceAccountID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO binance_state(k,v) VALUES('detail',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`, string(raw)); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func upsertBinanceAccount(tx *sql.Tx, balance float64, detail []byte) error {
-	if _, err := tx.Exec(`
-		INSERT INTO accounts (id, name, balance, type, currency_code, iban, masked_pan, extra_pans, source, owner, opened_at)
-		VALUES (?, 'Binance', ?, ?, 980, '', '', '', 'api', 'Binance',
-			COALESCE((SELECT MIN(ts) FROM binance_minutes), (SELECT MIN(time) FROM transactions WHERE account_id = ?), 0))
-		ON CONFLICT(id) DO UPDATE SET balance = excluded.balance, closed_at = 0, opened_at = excluded.opened_at`,
-		BinanceAccountID, round2(balance), BinanceAccountType, BinanceAccountID); err != nil {
-		return err
-	}
-	_, err := tx.Exec(`INSERT INTO binance_state(k,v) VALUES('detail',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`, string(detail))
-	return err
-}
-
-// SaveBinanceAccount кладёт в кеш счёт Binance с текущей оценкой и разбором по монетам — самым первым шагом синка,
-// чтобы счёт был в «Операционной» ещё до того, как соберётся история.
-func (s *Storage) SaveBinanceAccount(portfolio float64, detail any) error {
-	raw, err := json.Marshal(detail)
-	if err != nil {
-		return err
-	}
-	s.cacheMu.Lock()
-	defer s.cacheMu.Unlock()
-	defer s.bump()
-	tx, err := s.cacheDB.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := upsertBinanceAccount(tx, portfolio, raw); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-// BinanceFlowRow — сохранённое движение вместе с его id в кеше.
+// BinanceFlowRow — внешнее движение вместе с его id в журнале.
 type BinanceFlowRow struct {
-	ID string
-	BinanceFlow
+	ID    string
+	T     int64
+	Asset string
+	Delta float64
+	Kind  string
 }
 
 // BinanceTx — внешнее движение как операция счёта Binance; UAH — со знаком, на момент движения.
@@ -234,7 +232,7 @@ func (s *Storage) BinanceUnvaluedFlows(kinds []string) ([]BinanceFlowRow, error)
 	for i, k := range kinds {
 		args[i] = k
 	}
-	rows, err := s.cacheDB.Query(`SELECT f.id, f.t, f.asset, f.delta, f.kind FROM binance_flows f
+	rows, err := s.cacheDB.Query(`SELECT f.id, f.t, f.asset, f.delta, f.kind FROM binance_ledger f
 		WHERE f.kind IN (`+ph+`) AND NOT EXISTS (SELECT 1 FROM transactions x WHERE x.id = 'binance_' || f.id) ORDER BY f.t`, args...)
 	if err != nil {
 		return nil, err
@@ -271,6 +269,18 @@ func (s *Storage) SaveBinanceTxs(txs []BinanceTx) error {
 		}
 	}
 	return tx.Commit()
+}
+
+// DropBinanceSeries сбрасывает минутный ряд оценки (журнал остаётся): следующий «Разведать» соберёт его заново.
+func (s *Storage) DropBinanceSeries() error {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	defer s.bump()
+	if _, err := s.cacheDB.Exec(`DELETE FROM binance_minutes`); err != nil {
+		return err
+	}
+	_, err := s.cacheDB.Exec(`DELETE FROM binance_state WHERE k = 'origin'`)
+	return err
 }
 
 // binanceOrigin — оценка «до начала ряда» (ok == false у рядов старой схемы: тогда открытие первой свечи — первая точка).
@@ -393,4 +403,38 @@ func minf(a, b float64) float64 {
 		return a
 	}
 	return b
+}
+
+// withBinanceProfile — у счёта Binance идентификатор (BN<id>) известен только из выписки: подставляем его на чтении,
+// чтобы его видели и экран, и «кеш → статика» (привязка алиаса к лицу запоминает его в core, сброс кеша его не стирает).
+func (s *Storage) withBinanceProfile(list []Account) []Account {
+	for i := range list {
+		if list[i].Type == BinanceAccountType {
+			list[i].IBAN = s.BinanceProfile()
+		}
+	}
+	return list
+}
+
+// binanceModel — версия правил учёта. При смене старый ряд и операции, посчитанные по прежним правилам, выбрасываются:
+// журнал остаётся, «Разведать» соберёт всё заново. Версия 2: Strategy и Futures — кошельки портфеля, переводы между кошельками внутренние.
+const binanceModel = "2"
+
+func (s *Storage) migrateBinanceModel() error {
+	var v string
+	_ = s.cacheDB.QueryRow(`SELECT v FROM binance_state WHERE k='model'`).Scan(&v)
+	if v == binanceModel {
+		return nil
+	}
+	for _, q := range []string{
+		`DELETE FROM binance_minutes`,
+		`DELETE FROM binance_state WHERE k IN ('origin','detail')`,
+		`DELETE FROM transactions WHERE id LIKE 'binance\_%' ESCAPE '\'`,
+	} {
+		if _, err := s.cacheDB.Exec(q); err != nil {
+			return err
+		}
+	}
+	_, err := s.cacheDB.Exec(`INSERT INTO binance_state(k,v) VALUES('model',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`, binanceModel)
+	return err
 }

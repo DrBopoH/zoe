@@ -1,7 +1,6 @@
 <script setup>
 import { formatMoney, lifeSpan } from '../utils/formatters.js'
 import UiDot from './ui/UiDot.vue'
-import UiIconButton from './ui/UiIconButton.vue'
 
 // Карта-панель «Операционной»: IBAN, карты счёта, банк, баланс. Один отрисовщик для операционки и барабана.
 // card — результат prepareAccount()/cardFromTile() (utils/accountView.js)
@@ -13,7 +12,7 @@ const props = defineProps({
   removablePans: { type: Boolean, default: false }, // × у каждой карты (редактор алиаса)
   cached: { type: Boolean, default: true } // зелёная точка: счёт есть в кэше
 })
-const emit = defineEmits(['remove-pan', 'edit'])
+const emit = defineEmits(['remove-pan'])
 </script>
 
 <template>
@@ -57,7 +56,6 @@ const emit = defineEmits(['remove-pan', 'edit'])
           {{ card.theme.tag }}
         </span>
         <span v-if="card.is_closed" class="ui-closed-tag">Закрыта</span>
-        <UiIconButton v-if="card.has_detail" icon="edit" tone="accent" :title="card.bank_key === 'binance' ? 'Портфель' : 'Журнал счёта'" @click.stop="emit('edit')" />
       </div>
     </div>
 

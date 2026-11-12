@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +30,8 @@ type Server struct {
 
 	syncMutex  sync.Mutex
 	isSyncing  bool
+	syncCancel context.CancelFunc // отменяет идущий «Разведать» (сброс кеша)
+	syncDone   chan struct{}      // закрывается, когда обход действительно остановился
 	syncStatus string
 
 	bn binanceState // Binance (read-only), см. handlers_binance.go
@@ -113,17 +116,64 @@ func (s *Server) EnableCORS(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func (s *Server) runFullCrawler() {
+// beginSync помечает «Разведать» запущенным; false — он уже идёт. ctx отменяется сбросом кеша.
+func (s *Server) beginSync() (ctx context.Context, done chan struct{}, ok bool) {
+	s.syncMutex.Lock()
+	defer s.syncMutex.Unlock()
+	if s.isSyncing {
+		return nil, nil, false
+	}
+	ctx, s.syncCancel = context.WithCancel(context.Background())
+	s.isSyncing, s.syncStatus, s.syncDone = true, "Инициализация API...", make(chan struct{})
+	return ctx, s.syncDone, true
+}
+
+// abortSync останавливает идущий «Разведать» и ждёт, пока он отпустит кеш (не дольше нескольких секунд).
+// Остановленный обход сам ничего не пишет в кеш и не трогает состояние: оно уже сброшено здесь.
+func (s *Server) abortSync() {
+	s.syncMutex.Lock()
+	cancel, done, was := s.syncCancel, s.syncDone, s.isSyncing
+	if was {
+		s.isSyncing, s.syncStatus, s.syncCancel = false, "СНЯТО (КЕШ СБРОШЕН)", nil
+	}
+	s.syncMutex.Unlock()
+	if !was {
+		return
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+	}
+	s.prog.reset()
+}
+
+// sleepCtx — пауза, которую прерывает отмена обхода.
+func sleepCtx(ctx context.Context, d time.Duration) {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+	case <-ctx.Done():
+	}
+}
+
+func (s *Server) runFullCrawler(ctx context.Context, done chan struct{}) {
 	s.prog.begin()
-	defer s.prog.finish()
+	defer close(done)
 	defer func() {
+		if ctx.Err() != nil { // сброс кеша уже снял состояние
+			return
+		}
+		s.prog.finish()
 		s.syncMutex.Lock()
 		s.isSyncing = false
 		s.syncStatus = "СНЯТО"
 		s.syncMutex.Unlock()
 	}()
 
-	if len(s.monoClients) == 0 && len(s.raifClients) == 0 && s.bn.client == nil {
+	hasBinance := s.bn.client != nil && s.storage.HasBinance()
+	if len(s.monoClients) == 0 && len(s.raifClients) == 0 && !hasBinance {
 		s.updateStatus("ОТСУТСТВУЮТ КЛЮЧИ API")
 		return
 	}
@@ -135,13 +185,13 @@ func (s *Server) runFullCrawler() {
 		go func() { defer wg.Done(); f() }()
 	}
 	for i, c := range s.monoClients {
-		run(func() { s.crawlBank(s.monoSpec(c, i+1, len(s.monoClients))) })
+		run(func() { s.crawlBank(ctx, s.monoSpec(c, i+1, len(s.monoClients))) })
 	}
 	for i, c := range s.raifClients {
-		run(func() { s.crawlBank(s.raifSpec(c, i+1, len(s.raifClients))) })
+		run(func() { s.crawlBank(ctx, s.raifSpec(c, i+1, len(s.raifClients))) })
 	}
-	if s.bn.client != nil {
-		run(s.crawlBinance)
+	if hasBinance {
+		run(func() { s.crawlBinance(ctx) })
 	}
 	wg.Wait()
 }
@@ -222,7 +272,7 @@ func networkOrFatal(err error) errKind {
 }
 
 // crawlBank — «Разведать» для одного ключа любого банка: счета → закрытые → выписка каждого счёта окнами.
-func (s *Server) crawlBank(sp bankSpec) {
+func (s *Server) crawlBank(ctx context.Context, sp bankSpec) {
 	kindUp := strings.ToUpper(sp.kind)
 	ownerName, accounts, err := sp.info()
 	if err != nil {
@@ -233,6 +283,9 @@ func (s *Server) crawlBank(sp bankSpec) {
 	}
 	if ownerName == "" {
 		ownerName = sp.fallbackName()
+	}
+	if ctx.Err() != nil { // кеш сбросили, пока банк отвечал: его ответ в чистую базу не пишем
+		return
 	}
 	if err := s.storage.SaveAccounts(accounts, ownerName); err != nil {
 		log.Printf("[Sync Error] [%s] Save accounts: %v", ownerName, err)
@@ -254,15 +307,19 @@ func (s *Server) crawlBank(sp bankSpec) {
 	}
 
 	var cur *accProg
-	coolSleep := func(d time.Duration) { s.prog.cool(cur, d); time.Sleep(d); s.prog.fetching(cur) }
+	coolSleep := func(d time.Duration) { s.prog.cool(cur, d); sleepCtx(ctx, d); s.prog.fetching(cur) }
 	pace := newPacer(sp.pause, coolSleep)
 	for i, acc := range accounts {
+		if ctx.Err() != nil {
+			return
+		}
 		cur = progs[i]
 		label := fmt.Sprintf("[%s] СЧЕТ %d/%d (%s)%s", ownerName, i+1, len(accounts), acc.Type, sp.suffix())
 		s.updateStatus(label)
 
 		accID := acc.ID
 		st, err := s.walkAccount(accID, walkCfg{
+			ctx:       ctx,
 			label:     label,
 			pageLimit: sp.pageLimit,
 			pause:     sp.pause,
@@ -275,6 +332,9 @@ func (s *Server) crawlBank(sp bankSpec) {
 			now:       time.Now,
 			status:    s.updateStatus,
 		})
+		if errors.Is(err, errStopped) {
+			return
+		}
 		s.prog.accDone(cur, st, err)
 		if errors.Is(err, errOffline) {
 			s.abortOffline(progs, i+1)
@@ -658,17 +718,13 @@ func (s *Server) HandleFullHistoricalSync(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	s.syncMutex.Lock()
-	if s.isSyncing {
-		s.syncMutex.Unlock()
+	ctx, done, ok := s.beginSync()
+	if !ok {
 		http.Error(w, "Синхронизация уже выполняется", http.StatusConflict)
 		return
 	}
-	s.isSyncing = true
-	s.syncStatus = "Инициализация API..."
-	s.syncMutex.Unlock()
 
-	go s.runFullCrawler()
+	go s.runFullCrawler(ctx, done)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
@@ -747,6 +803,7 @@ func (s *Server) HandleWipeCache(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.abortSync() // идущий «Разведать» снимается: иначе он дописал бы данные в чистую базу, а кнопка так и висела бы «РАЗВЕДЫВАЮ…»
 	if err := s.storage.WipeCache(); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

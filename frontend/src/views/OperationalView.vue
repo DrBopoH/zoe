@@ -3,8 +3,6 @@ import { computed, ref } from 'vue'
 import { prepareAccount } from '../utils/accountView.js'
 import AccountPanel from '../components/AccountPanel.vue'
 import AccountHistoryTable from '../components/AccountHistoryTable.vue'
-import IcuLedgerModal from '../components/IcuLedgerModal.vue'
-import BinanceModal from '../components/BinanceModal.vue'
 
 const props = defineProps({
   accounts: { type: Array, default: () => [] },
@@ -21,10 +19,6 @@ const toggle = (acc) => {
     ? selectedIds.value.filter(id => id !== acc.key)
     : [...selectedIds.value, acc.key]
 }
-
-// ICU: журнал открывается карандашом на карточке (сам счёт появляется, когда IBAN банка ICU привязан к алиасу)
-const ledgerId = ref(null)
-const ledgerAcc = computed(() => props.accounts.find(a => a.id === ledgerId.value) || null)
 
 const selectedAccounts = computed(() =>
   preparedAccounts.value
@@ -53,14 +47,11 @@ const selectedAccounts = computed(() =>
         tabindex="0"
         :aria-checked="isSelected(acc)"
         @click="toggle(acc)"
-        @edit="ledgerId = acc.id"
         @keydown.enter.prevent="toggle(acc)"
         @keydown.space.prevent="toggle(acc)"
       />
     </div>
 
     <AccountHistoryTable :transactions="transactions" :selected="selectedAccounts" @clear="selectedIds = []" />
-    <BinanceModal v-if="ledgerAcc?.bank_key === 'binance'" :account="ledgerAcc" :is-open="true" @close="ledgerId = null" />
-    <IcuLedgerModal v-else :account="ledgerAcc" :is-open="!!ledgerAcc" @close="ledgerId = null" />
   </main>
 </template>

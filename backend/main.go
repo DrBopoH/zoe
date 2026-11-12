@@ -66,14 +66,8 @@ func main() {
 		log.Printf("INFO: Loaded %d Raiffeisen Bank API key(s)", len(raifClients))
 	}
 
-	// 3. Binance (read-only ключ: BINANCE_API_KEY + BINANCE_API_SECRET)
-	var binanceClient *binance.Client
-	if k, sec := os.Getenv("BINANCE_API_KEY"), os.Getenv("BINANCE_API_SECRET"); strings.TrimSpace(k) != "" && strings.TrimSpace(sec) != "" {
-		binanceClient = binance.NewClient(k, sec)
-		log.Println("INFO: Binance API key loaded (read-only)")
-	} else {
-		log.Println("INFO: No Binance API key provided")
-	}
+	// 3. Binance: выписка (CSV) + публичные минутные цены, ключей нет
+	binanceClient := binance.NewClient()
 
 	cacheDBPath := os.Getenv("CACHE_DB_PATH")
 	if cacheDBPath == "" {
@@ -97,13 +91,6 @@ func main() {
 
 	server := api.NewServer(storage, monoClients, raifClients)
 	server.SetBinance(binanceClient)
-	if v := strings.TrimSpace(os.Getenv("BINANCE_HISTORY_FROM")); v != "" { // ГГГГ-ММ-ДД: с какой даты искать движения
-		if t, err := time.Parse("2006-01-02", v); err == nil {
-			server.SetBinanceHistoryFrom(t)
-		} else {
-			log.Printf("WARN: BINANCE_HISTORY_FROM: %v", err)
-		}
-	}
 	if o := os.Getenv("ALLOWED_ORIGINS"); o != "" {
 		server.SetAllowedOrigins(strings.Split(o, ","))
 	}

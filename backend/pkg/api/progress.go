@@ -36,11 +36,7 @@ type accProg struct {
 	Note     string
 	AxisFrom int64   // начало оси (unix); 0 — горизонт поиска
 	FlowAt   []int64 // моменты движений (unix) — клетки с ними зелёные, остальные косые
-	Cov      int64   // просмотрено от этого момента до сейчас (unix, обход справа налево); 0 — заливка по Pct
-	Step     int64   // длина окна запроса, сек (для оценки времени); 0 — не окна
-	Mult     int     // сколько обходов окнами (P2P: покупка и продажа)
-	Left     int     // сколько запросов осталось, если окнами не считается (пары сделок, монеты цен)
-	Ahead    bool    // зелёные клетки видны и впереди заливки (сделки: пары приходят вразнобой по времени)
+	Left     int     // сколько запросов осталось (монеты цен)
 }
 
 type clientProg struct {
@@ -76,6 +72,13 @@ func (p *progress) begin() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.running, p.startedAt, p.clients = true, time.Now().Unix(), nil
+}
+
+// reset убирает панель прогресса: «Разведать» снят сбросом кеша, показывать нечего.
+func (p *progress) reset() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.running, p.clients, p.last = false, nil, nil
 }
 
 func (p *progress) client(name, kind string, pause time.Duration) *clientProg {
@@ -351,20 +354,15 @@ func (s *Server) accTimeline(a *accProg, now int64) accView {
 	return av
 }
 
-// customAccView — таймлайн источника без таблицы покрытия (Binance), по тем же правилам, что у банков:
-// ось [начало … сейчас]; в просмотренной части зелёная клетка — в ней были движения, косая — не было; окно — реальный
-// период, который только что просмотрен/качается.
+// customAccView — таймлайн источника без таблицы покрытия (Binance): ось [первое движение … сейчас], заливка — по проценту
+// оценки; зелёная клетка — в ней были движения журнала, косая — не было.
 func (s *Server) customAccView(a *accProg, now int64) accView {
 	lo := a.AxisFrom
-	if lo <= 0 || lo >= now { // начало истории ещё не найдено — показываем горизонт поиска
-		lo = s.binanceFrom().Unix()
+	if lo <= 0 || lo >= now { // начало истории ещё не известно — показываем последние 90 суток
+		lo = now - 90*86400
 	}
 	span := now - lo
 	pct := a.Pct
-	rtl := a.Cov > 0 && a.State != "done"
-	if rtl {
-		pct = int((now - a.Cov) * 100 / span)
-	}
 	if a.State == "done" {
 		pct = 100
 	}
@@ -380,15 +378,9 @@ func (s *Server) customAccView(a *accProg, now int64) accView {
 	for i := range cells {
 		ca, cb := lo+span*int64(i)/timelineCells, lo+span*int64(i+1)/timelineCells
 		filled := i*100 < pct*timelineCells
-		if rtl { // заливка растёт от «сейчас» к началу, как у банков
-			filled = i*100 >= (100-pct)*timelineCells
-		}
-		if a.Ahead { // пары сделок идут не по времени: пока не закончили, «просмотренной» части оси нет — только найденные сделки
-			filled = a.State == "done"
-		}
 		j := sort.Search(len(flows), func(k int) bool { return flows[k] >= ca })
 		switch hasFlow := j < len(flows) && flows[j] < cb; {
-		case hasFlow && (filled || a.Ahead) && a.State != "queued":
+		case hasFlow && filled && a.State != "queued":
 			cells[i] = '1'
 		case filled:
 			cells[i] = '2'
@@ -400,20 +392,8 @@ func (s *Server) customAccView(a *accProg, now int64) accView {
 	if a.State == "fetch" || a.State == "cooling" {
 		av.Win = a.Win
 	}
-	// сколько запросов осталось (для «закончится ≈»): окнами по времени, либо явным счётчиком (пары сделок, монеты цен)
-	if a.State != "done" && a.State != "error" {
-		switch {
-		case a.Left > 0:
-			av.remaining = a.Left
-		case a.Step > 0:
-			to := now // осталось от начала оси до границы просмотренного
-			if a.Cov > 0 && a.Cov < to {
-				to = a.Cov
-			}
-			if to > lo {
-				av.remaining = int((to-lo+a.Step-1)/a.Step) * max1(a.Mult)
-			}
-		}
+	if a.State != "done" && a.State != "error" { // сколько запросов осталось (для «закончится ≈»)
+		av.remaining = a.Left
 	}
 	return av
 }

@@ -1,156 +1,133 @@
 package binance
 
 import (
-	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"strconv"
+	"math"
+	"os"
 	"strings"
 	"testing"
 	"time"
 )
 
-const stmtSample = "\ufeffІдентифікатор користувача,Час,Акаунт,Операція,Монета,Змінити,Примітка\n" +
-	"1,2026-05-24 07:49:32,Spot,Transfer Between Spot and Strategy,USDT,-80.5,\n" +
-	"1,2026-05-24 07:49:32,Strategy,Transfer Between Spot and Strategy,USDT,80.5,\n" + // сторона Strategy — не наша
-	"1,2026-05-24 08:00:00,Spot,Transaction Buy,BTC,0.001,\n" + // сделки уже приходят из API
-	"1,2026-05-25 08:00:00,Spot,Simple Earn Flexible Interest,USDT,0.1,\n" + // и Earn тоже
-	"1,2026-05-29 01:25:02,USD-M Futures,Fee,USDT,-1,\n" +
-	"1,2026-06-01 10:00:00,Spot,Small Assets Exchange BNB,FIDA,-0.09,\n" +
-	"1,2026-06-01 10:00:00,Spot,Small Assets Exchange BNB,BNB,0.001,\n" +
-	"1,2026-06-02 10:00:00,Spot,SOL Staking - Purchase,SOL,-0.2,\n"
-
-func TestStatementKeepsOnlyWhatAPIMisses(t *testing.T) {
-	loc := StatementZone("Binance-Історія-транзакцій-202611111427(UTC+2)-part1-of1.csv")
-	fl, total, err := ParseStatement(strings.NewReader(stmtSample), loc)
+func fixture(t *testing.T) *Statement {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/statement.csv")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if total != 8 || len(fl) != 4 {
-		t.Fatalf("строк %d, движений %d: %+v", total, len(fl), fl)
+	if !IsStatement(raw) {
+		t.Fatal("фикстура должна распознаваться как выписка")
 	}
-	if fl[0].Kind != "strategy" || fl[0].Asset != "USDT" || fl[0].Delta != -80.5 {
-		t.Fatalf("перевод в Strategy: %+v", fl[0])
+	st, err := ParseStatement(strings.NewReader(string(raw)), StatementZone("Binance-Історія-транзакцій-202611111427(UTC+2)-part1-of1.csv"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if want := time.Date(2026, 5, 24, 5, 49, 32, 0, time.UTC).UnixMilli(); fl[0].T != want { // UTC+2 → UTC
-		t.Fatalf("время: %d != %d", fl[0].T, want)
+	return st
+}
+
+func TestParseKeepsEveryRow(t *testing.T) {
+	st := fixture(t)
+	if st.UserID != "1000000001" || ProfileID(st.UserID) != "BN1000000001" {
+		t.Fatalf("профиль: %q", st.UserID)
 	}
-	if fl[1].Kind != "stmt:dust" || fl[3].Kind != "stmt:staking" {
-		t.Fatalf("виды: %+v", fl)
+	if len(st.Rows) != 66 {
+		t.Fatalf("все строки должны быть прочитаны, без белого списка: %d", len(st.Rows))
+	}
+	first := st.Rows[0]
+	// 08:05:59 по UTC+2 — это 06:05:59 UTC
+	if first.Account != "Funding" || first.Op != "P2P Trading" || first.Asset != "USDT" || first.Delta != 25.06 || first.T != 1779170759000 {
+		t.Fatalf("первая строка: %+v", first)
 	}
 }
 
-func TestStatementDetectionAndZone(t *testing.T) {
-	if !IsStatement([]byte(stmtSample)) || !IsStatement([]byte("User_ID,UTC_Time,Account,Operation,Coin,Change,Remark\n")) {
-		t.Fatal("выписку Binance нужно узнавать (укр. и англ. заголовок, BOM)")
+func TestStatementZoneFromFileName(t *testing.T) {
+	if off := offsetOf(StatementZone("x(UTC+2)y")); off != 2*3600 {
+		t.Fatalf("UTC+2: %d", off)
 	}
-	if IsStatement([]byte("Дата,Опис,Сума\n")) || IsStatement([]byte("%PDF-1.4")) {
-		t.Fatal("банковские файлы не должны узнаваться как Binance")
+	if off := offsetOf(StatementZone("x(UTC-3:30)y")); off != -(3*3600 + 1800) {
+		t.Fatalf("UTC-3:30: %d", off)
 	}
-	if _, _, err := ParseStatement(strings.NewReader("a,b\n"), nil); err == nil {
-		t.Fatal("чужой файл — ошибка")
-	}
-	if StatementZone("x.csv") != time.UTC {
-		t.Fatal("без пометки — UTC")
-	}
-	if _, off := time.Date(2026, 1, 1, 0, 0, 0, 0, StatementZone("a(UTC-5:30)b")).Zone(); off != -(5*3600 + 1800) {
-		t.Fatalf("смещение: %d", off)
+	if off := offsetOf(StatementZone("Мій файл.csv")); off != 0 {
+		t.Fatalf("без пояса — UTC: %d", off)
 	}
 }
 
-// Выписка не дублирует API: событие «stmt:X» отбрасывается, если рядом по времени есть X из API; иначе берётся как X.
-func TestMergeStatementDropsWhatAPIAlreadyHas(t *testing.T) {
-	fl := []Flow{
-		{T: 10_000, Asset: "USDT", Delta: -20, Kind: "futures"},      // из API
-		{T: 10_400, Asset: "USDT", Delta: -20, Kind: "stmt:futures"}, // то же событие из выписки (секунды vs мс)
-		{T: 900_000, Asset: "USDT", Delta: 5, Kind: "stmt:futures"},  // API этого не показал (старше 6 месяцев)
-		{T: 50_000, Asset: "FIDA", Delta: -1, Kind: "stmt:dust"},     // пыли из API нет вовсе
-		{T: 60_000, Asset: "USDT", Delta: -80, Kind: "strategy"},     // у Strategy API нет: остаётся как есть
+func TestOneUserPerStatement(t *testing.T) {
+	_, err := ParseStatement(strings.NewReader("Ідентифікатор користувача,Час,Акаунт,Операція,Монета,Змінити,Примітка\n"+
+		"1,2026-01-01 00:00:00,Spot,Deposit,USDT,5,\n2,2026-01-01 00:00:00,Spot,Deposit,USDT,5,\n"), nil)
+	if err == nil {
+		t.Fatal("два пользователя в одном файле — ошибка")
 	}
-	got := mergeStatement(fl)
-	if len(got) != 4 {
-		t.Fatalf("ожидали 4 движения: %+v", got)
-	}
-	kinds := map[int64]string{}
-	for _, f := range got {
-		kinds[f.T] = f.Kind
-	}
-	if kinds[10_400] != "" || kinds[900_000] != "futures" || kinds[50_000] != "dust" || kinds[60_000] != "strategy" {
-		t.Fatalf("после слияния: %+v", got)
+	if _, err := ParseStatement(strings.NewReader("a,b\n1,2\n"), nil); err == nil {
+		t.Fatal("чужой CSV — ошибка")
 	}
 }
 
-// Источники API для фьючерсов, пыли и стейкинга: разбор ответов и знак движений; границы глубины истории.
-func TestTransferDustStakingFetchers(t *testing.T) {
-	now := time.Now().UTC().Truncate(time.Minute)
-	at := now.Add(-48 * time.Hour).UnixMilli()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		st, _ := strconv.ParseInt(q.Get("startTime"), 10, 64)
-		en, _ := strconv.ParseInt(q.Get("endTime"), 10, 64)
-		if r.URL.Path != "/sapi/v1/time" && (at < st || at > en) { // событие отдаётся только окну, в которое оно попадает
-			fmt.Fprint(w, `{"total":0,"rows":[],"userAssetDribblets":[]}`)
-			return
+func TestKindsOfOperations(t *testing.T) {
+	cases := []struct {
+		r    Row
+		want string
+	}{
+		{Row{Account: "Spot", Op: "Deposit"}, KindDeposit},
+		{Row{Account: "Funding", Op: "P2P Trading"}, KindP2P},
+		{Row{Account: "Spot", Op: "Cashback Voucher"}, KindBonus},
+		{Row{Account: "Spot", Op: "Simple Earn Flexible Interest"}, KindDividend},
+		{Row{Account: "Spot", Op: "Simple Earn Locked Rewards"}, KindDividend},
+		{Row{Account: "Spot", Op: "Transfer Between Spot and Strategy"}, ""}, // переводы между кошельками — внутри портфеля
+		{Row{Account: "Strategy", Op: "Transfer Between Spot and Strategy"}, ""},
+		{Row{Account: "Spot", Op: "Transfer Between Spot and UM Futures"}, ""},
+		{Row{Account: "Spot", Op: "Transaction Buy"}, ""},
+		{Row{Account: "Spot", Op: "Binance Convert"}, ""},
+		{Row{Account: "Spot", Op: "Simple Earn Flexible Subscription"}, ""},
+	}
+	for _, c := range cases {
+		if got := Kind(c.r); got != c.want {
+			t.Errorf("%s/%s: %q, ждали %q", c.r.Account, c.r.Op, got, c.want)
 		}
-		switch r.URL.Path {
-		case "/sapi/v1/asset/transfer":
-			if q.Get("type") == "MAIN_UMFUTURE" {
-				fmt.Fprintf(w, `{"total":2,"rows":[{"asset":"USDT","amount":"20","type":"MAIN_UMFUTURE","status":"CONFIRMED","tranId":1,"timestamp":%d},{"asset":"USDT","amount":"7","type":"MAIN_UMFUTURE","status":"FAILED","tranId":2,"timestamp":%d}]}`, at, at)
-			} else {
-				fmt.Fprintf(w, `{"total":1,"rows":[{"asset":"USDT","amount":"3","type":"UMFUTURE_MAIN","status":"CONFIRMED","tranId":3,"timestamp":%d}]}`, at+1000)
-			}
-		case "/sapi/v1/asset/dribblet":
-			fmt.Fprintf(w, `{"total":1,"userAssetDribblets":[{"operateTime":%d,"userAssetDribbletDetails":[{"amount":"0.09","transferedAmount":"0.001","fromAsset":"FIDA","targetAsset":"BNB","operateTime":%d}]}]}`, at, at)
-		case "/sapi/v1/sol-staking/sol/history/stakingHistory":
-			fmt.Fprintf(w, `{"total":1,"rows":[{"time":%d,"asset":"SOL","amount":"0.2","distributeAsset":"BNSOL","distributeAmount":"0.177","status":"SUCCESS"}]}`, at)
-		case "/sapi/v1/sol-staking/sol/history/redemptionHistory":
-			fmt.Fprint(w, `{"total":0,"rows":[]}`)
-		default:
-			w.WriteHeader(404)
-		}
-	}))
-	defer srv.Close()
-	c := NewClient("K", "S")
-	c.SetBaseURL(srv.URL)
-	c.Sleep = func(time.Duration) {}
-	from := now.Add(-2000 * day)
-
-	sum := func(fl []Flow, kind, asset string) (n int, v float64) {
-		for _, f := range fl {
-			if f.Kind == kind && f.Asset == asset {
-				n++
-				v += f.Delta
-			}
-		}
-		return
-	}
-	fut, err := c.FuturesTransfers(from, now)
-	if n, v := sum(fut, "futures", "USDT"); err != nil || n != 2 || v != -17 { // −20 туда, +3 обратно; FAILED не считаем
-		t.Fatalf("фьючерсы: %+v %v", fut, err)
-	}
-	dust, err := c.Dust(from, now)
-	if n, v := sum(dust, "dust", "FIDA"); err != nil || n != 1 || v != -0.09 {
-		t.Fatalf("пыль: %+v %v", dust, err)
-	}
-	if _, v := sum(dust, "dust", "BNB"); v != 0.001 {
-		t.Fatalf("BNB от пыли: %+v", dust)
-	}
-	st, err := c.SolStaking(from, now)
-	if _, v := sum(st, "staking", "SOL"); err != nil || v != -0.2 {
-		t.Fatalf("стейкинг: %+v %v", st, err)
-	}
-	if _, v := sum(st, "staking", "BNSOL"); v != 0.177 {
-		t.Fatalf("BNSOL: %+v", st)
-	}
-
-	// глубина истории: фьючерсы — 6 месяцев, пыль — с 2020-12-01, SOL — с 2024; сетка остаётся от общего начала
-	if s := StageStart("фьючерсы", from, now); s.Before(now.Add(-futuresBack)) || s.After(now.Add(-futuresBack).Add(29*day)) || s.Sub(from)%(29*day) != 0 {
-		t.Fatalf("старт фьючерсов: %v", s)
-	}
-	if s := StageStart("пыль", time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC), now); s.Before(dustSince) {
-		t.Fatalf("старт пыли: %v", s)
-	}
-	if !StageStart("депозиты", from, now).IsZero() {
-		t.Fatal("у депозитов ограничений нет")
 	}
 }
+
+// Портфель = Spot + Funding + Strategy + Futures + Earn. Переводы между ними внутри журнала не меняют сумму «по монетам»:
+// остатки из HoldingsOf и нарастающий итог Flows обязаны совпадать — иначе график разошёлся бы с модалкой.
+func TestHoldingsAgreeWithFlows(t *testing.T) {
+	st := fixture(t)
+	total := map[string]float64{}
+	for _, f := range Flows(st.Rows) {
+		total[f.Asset] += f.Delta
+	}
+	for a, w := range HoldingsOf(st.Rows) {
+		if math.Abs(w.Total()-total[a]) > 1e-9 {
+			t.Errorf("%s: кошельки %.9f, движения %.9f", a, w.Total(), total[a])
+		}
+		delete(total, a)
+	}
+	for a, v := range total {
+		if math.Abs(v) > 1e-9 {
+			t.Errorf("%s: движения %.9f, а в остатках нет", a, v)
+		}
+	}
+}
+
+// Деньги в боте и на фьючерсах остаются в портфеле: перевод туда не «уход», а результат их работы двигает остаток.
+func TestStrategyAndFuturesAreWalletsOfPortfolio(t *testing.T) {
+	rows := []Row{
+		{T: 1, Account: "Spot", Op: "Transfer Between Spot and Strategy", Asset: "USDT", Delta: -10},
+		{T: 1, Account: "Strategy", Op: "Transfer Between Spot and Strategy", Asset: "USDT", Delta: 10},
+		{T: 2, Account: "Strategy", Op: "Transaction Buy", Asset: "BNB", Delta: 1},
+		{T: 2, Account: "Strategy", Op: "Transaction Spend", Asset: "USDT", Delta: -6},
+		{T: 3, Account: "USD-M Futures", Op: "Realized Profit and Loss", Asset: "USDT", Delta: 4},
+		{T: 4, Account: "Spot", Op: "Simple Earn Flexible Subscription", Asset: "USDT", Delta: -5},
+	}
+	fl := Flows(rows) // перевода нет, остальное двигает портфель
+	if len(fl) != 3 || fl[0].Asset != "BNB" || fl[1].Delta != -6 || fl[2].Delta != 4 {
+		t.Fatalf("движения: %+v", fl)
+	}
+	h := HoldingsOf(rows)
+	if w := h["USDT"]; w == nil || w.Spot != -15 || w.Strategy != 4 || w.Futures != 4 || w.Earn != 5 || w.Total() != -2 {
+		t.Fatalf("кошельки USDT: %+v", h["USDT"])
+	}
+	if w := h["BNB"]; w == nil || w.Strategy != 1 {
+		t.Fatalf("BNB бота в портфеле: %+v", h["BNB"])
+	}
+}
+
+func offsetOf(l *time.Location) int { _, o := time.Unix(0, 0).In(l).Zone(); return o }
