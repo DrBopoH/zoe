@@ -10,6 +10,11 @@ test('итог до перезагрузки страницы не показы�
   assert.deepEqual(marketNotice(null, last(100, [ok])), { seenAt: 100, toasts: [] })
 })
 
+test('источник числовых рядов считает точки, а не бумаги', () => {
+  const r = marketNotice(100, last(200, [{ id: 'macro', title: 'Ставки и инфляция · НБУ', state: 'done', fetched: 312, unit: 'точек' }]))
+  assert.deepEqual(r.toasts[0].lines, ['Точек в кеше: 312'])
+})
+
 test('нет итога или старый итог — тостов нет', () => {
   assert.deepEqual(marketNotice(100, null), { seenAt: 100, toasts: [] })
   assert.deepEqual(marketNotice(100, last(100, [ok])), { seenAt: 100, toasts: [] })

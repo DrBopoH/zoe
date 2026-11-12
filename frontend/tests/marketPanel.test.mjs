@@ -29,3 +29,8 @@ test('прошедшее время м:сс', () => {
   assert.equal(elapsedText(100, 165_000), '1:05')
   assert.equal(elapsedText(100, 50_000), '0:00') // часы клиента отстали — не уходим в минус
 })
+
+test('строка источника числовых рядов: единица из поля unit', () => {
+  assert.equal(feedView({ state: 'done', fetched: 312, unit: 'точек' }).text, 'Точек: 312')
+  assert.equal(feedView({ state: 'done', fetched: 5 }).text, 'Бумаг: 5')
+})

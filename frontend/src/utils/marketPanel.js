@@ -9,7 +9,7 @@ export const marketPanelOpen = (market, dismissedAt) =>
 // pct — заливка по проценту; done — сплошной; error — красный.
 export const feedView = (f) => {
   if (f.state === 'error') return { mode: 'error', pct: 0, text: f.error || 'ошибка источника' }
-  if (f.state === 'done') return { mode: 'done', pct: 100, text: `Бумаг: ${f.fetched}` }
+  if (f.state === 'done') return { mode: 'done', pct: 100, text: `${(f.unit || 'бумаг').replace(/^./, (c) => c.toUpperCase())}: ${f.fetched}` }
   if (f.state === 'queued') return { mode: 'queued', pct: 0, text: 'в очереди' }
   const pct = Math.min(100, Math.max(0, Math.round(f.pct || 0)))
   return { mode: pct > 0 ? 'pct' : 'run', pct, text: f.note || '' }

@@ -23,6 +23,7 @@ const marketFeedTimeout = 90 * time.Second
 type feedState struct {
 	ID      string `json:"id"`
 	Title   string `json:"title"`
+	Unit    string `json:"unit,omitempty"` // что считает источник: «бумаг», «точек»
 	State   string `json:"state"`          // queued | fetch | done | error
 	Pct     int    `json:"pct,omitempty"`  // ход долгого источника, 0 — неизвестен (бегущая полоса)
 	Note    string `json:"note,omitempty"` // что идёт сейчас («аукционы: 10.11»)
@@ -80,7 +81,7 @@ func (s *Server) startMarket(ctx context.Context, only string) bool {
 	m.running, m.startedAt = true, time.Now().Unix()
 	m.feeds = make([]*feedState, len(feeds))
 	for i, f := range feeds {
-		m.feeds[i] = &feedState{ID: f.ID, Title: f.Title, State: "queued"}
+		m.feeds[i] = &feedState{ID: f.ID, Title: f.Title, State: "queued", Unit: f.Unit}
 	}
 	states := m.feeds
 	m.wg.Add(1)
@@ -99,14 +100,27 @@ func (s *Server) startMarket(ctx context.Context, only string) bool {
 				m.mu.Unlock()
 				fctx, cancel := context.WithTimeout(ctx, marketFeedTimeout)
 				defer cancel()
-				list, res := f.Fetch(fctx, func(pct int, note string) {
+				rep := func(pct int, note string) {
 					m.mu.Lock()
 					st.Pct, st.Note = pct, note
 					m.mu.Unlock()
-				})
-				if ctx.Err() == nil && len(list) > 0 {
-					if err := s.storage.SaveMarketBonds(list, time.Now().Unix()); err != nil {
-						res.Error = strings.TrimSpace(res.Error + " сохранение: " + err.Error())
+				}
+				var res market.Result
+				if f.Series != nil {
+					var pts []market.SeriesPoint
+					pts, res = f.Series(fctx, rep)
+					if ctx.Err() == nil && len(pts) > 0 {
+						if err := s.storage.SaveMacroSeries(pts, time.Now().Unix()); err != nil {
+							res.Error = strings.TrimSpace(res.Error + " сохранение: " + err.Error())
+						}
+					}
+				} else {
+					var list []market.Security
+					list, res = f.Fetch(fctx, rep)
+					if ctx.Err() == nil && len(list) > 0 {
+						if err := s.storage.SaveMarketBonds(list, time.Now().Unix()); err != nil {
+							res.Error = strings.TrimSpace(res.Error + " сохранение: " + err.Error())
+						}
 					}
 				}
 				m.mu.Lock()
@@ -173,7 +187,7 @@ func (s *Server) HandleMarketBonds(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, list)
 }
 
-// POST /api/market/sync[?source=nbu|ust] — запустить опрос отдельно от «Разведать». Ответ сразу, ход и итог —
+// POST /api/market/sync[?source=nbu|ust|macro] — запустить опрос отдельно от «Разведать». Ответ сразу, ход и итог —
 // в "market" из /api/sync/status. Уже идёт — 409.
 func (s *Server) HandleMarketSync(w http.ResponseWriter, r *http.Request) {
 	if !allow(w, r, http.MethodPost) {
@@ -184,8 +198,8 @@ func (s *Server) HandleMarketSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	src := strings.ToLower(r.URL.Query().Get("source"))
-	if src != "" && src != market.SourceNBU && src != market.SourceUST {
-		fail(w, http.StatusBadRequest, "source: nbu или ust")
+	if src != "" && !market.IsSource(src) {
+		fail(w, http.StatusBadRequest, "source: nbu, ust или macro")
 		return
 	}
 	s.syncMutex.Lock()
@@ -288,4 +302,24 @@ func (s *Server) HandleMarketCurve(w http.ResponseWriter, r *http.Request) {
 	default:
 		fail(w, http.StatusMethodNotAllowed, "GET, PUT")
 	}
+}
+
+// GET /api/macro[?series=policy_rate,cpi_yoy] — макро-ряды из кеша (ставки НБУ, инфляция): {"series":{"policy_rate":[{"d":"2026-01-01","v":15.5}]},"updated_at":…}.
+// Ставки — только даты смены значения (действует до следующей точки), инфляция — помесячно. Пусто, пока не было «Разведать».
+func (s *Server) HandleMacro(w http.ResponseWriter, r *http.Request) {
+	if !allow(w, r, http.MethodGet) {
+		return
+	}
+	var ids []string
+	for _, id := range strings.Split(r.URL.Query().Get("series"), ",") {
+		if id = strings.ToLower(strings.TrimSpace(id)); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	series, updated, err := s.storage.MacroSeries(ids)
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"series": series, "updated_at": updated})
 }

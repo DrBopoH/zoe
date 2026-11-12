@@ -150,6 +150,7 @@ func (s *Storage) initCache() error {
 		binanceCacheSchema,
 		icuCacheSchema,
 		marketCacheSchema,
+		macroCacheSchema,
 	}
 	for _, q := range stmts {
 		if _, err := s.cacheDB.Exec(q); err != nil {

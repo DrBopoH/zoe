@@ -15,6 +15,7 @@ export const COLUMNS = [
   { key: 'maturity', label: 'Погашение', num: false },
   { key: 'coupon_rate', label: 'Ставка', num: true },
   { key: 'yield', label: 'Доходность', num: true },
+  { key: 'real', label: 'Реальная', num: true, signed: true }, // доходность минус инфляция; бывает отрицательной и нулевой, это не «пусто»
   { key: 'last_auction', label: 'Аукцион', num: false },
   { key: 'nominal', label: 'Номинал', num: true },
   { key: 'future', label: 'Через 10 л.', num: true },
@@ -148,7 +149,8 @@ export function sortBonds(list, key, dir = 'asc') {
   const sign = dir === 'desc' ? -1 : 1
   return [...list].sort((a, b) => {
     const x = a[key], y = b[key]
-    const ex = isEmpty(x), ey = isEmpty(y)
+    const empty = col.signed ? (v) => v === null || v === undefined || Number.isNaN(v) : isEmpty
+    const ex = empty(x), ey = empty(y)
     if (ex || ey) return ex === ey ? 0 : ex ? 1 : -1
     if (col.num) return (x - y) * sign
     return String(x).localeCompare(String(y), 'ru') * sign

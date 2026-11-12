@@ -21,6 +21,14 @@ func newMarketServer(t *testing.T, usUp bool) *Server {
 			w.Write([]byte(`[{"cpcode":"UA4000000001","cpdescr":"ОВДП тест","val_code":"UAH","nominal":1000,"auk_proc":16.4,"pgs_date":"2030-02-20"}]`))
 		case "/NBU_ovdp":
 			w.Write([]byte(`[]`))
+		case "/NBUStatService/v1/statdirectory/key":
+			w.Write([]byte(`[{"dt":"20260101","id_api":"KEY_PolicyRate","value":15.5},{"dt":"20260102","id_api":"KEY_PolicyRate","value":15.5}]`))
+		case "/NBUStatService/v1/statdirectory/inflation":
+			if strings.HasPrefix(r.URL.Query().Get("start"), "2020") {
+				w.Write([]byte(`[{"dt":"20260901","txt":"Індекс споживчих цін ","ku":null,"mcrd081":"Total","mcrk110":"NULL","tzep":"DTPY_","value":6.1}]`))
+			} else {
+				w.Write([]byte(`[]`))
+			}
 		case "/v1/accounting/od/auctions_query":
 			if !usUp {
 				http.Error(w, "down", http.StatusBadGateway) // US лежит — НБУ всё равно должен сохраниться
@@ -102,6 +110,23 @@ func TestMarketSyncRunsFeedsIndependently(t *testing.T) {
 	}
 }
 
+func TestMacroSyncOnlyAndEmptyCache(t *testing.T) {
+	s := newMarketServer(t, true)
+	if code, body := call(t, s.HandleMacro, http.MethodGet, "/api/macro", ""); code != 200 || !strings.Contains(string(body), `"series":{}`) {
+		t.Fatalf("пустой кеш: %d %s", code, body)
+	}
+	if code, _ := call(t, s.HandleMacro, http.MethodPost, "/api/macro", ""); code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST на macro: %d", code)
+	}
+	if code, _ := call(t, s.HandleMarketSync, http.MethodPost, "/api/market/sync?source=macro", ""); code != 200 {
+		t.Fatalf("source=macro: %d", code)
+	}
+	last := waitMarketLast(t, s)
+	if fs := last["feeds"].([]any); len(fs) != 1 || feedByID(last, "macro")["state"] != "done" {
+		t.Fatalf("должен идти только macro: %+v", last)
+	}
+}
+
 func TestMarketSyncWithoutClient(t *testing.T) {
 	s := newMarketServer(t, true)
 	s.SetMarket(nil)
@@ -117,8 +142,19 @@ func TestFullSyncStartsMarketToo(t *testing.T) {
 		t.Fatalf("sync/full: %d", code)
 	}
 	last := waitMarketLast(t, s)
-	if len(last["feeds"].([]any)) != 2 || feedByID(last, "ust")["state"] != "done" || feedByID(last, "nbu")["state"] != "done" {
-		t.Fatalf("оба фида должны отработать: %+v", last)
+	if len(last["feeds"].([]any)) != 3 || feedByID(last, "ust")["state"] != "done" || feedByID(last, "nbu")["state"] != "done" || feedByID(last, "macro")["state"] != "done" {
+		t.Fatalf("все фиды должны отработать: %+v", last)
+	}
+	if m := feedByID(last, "macro"); m["unit"] != "точек" || m["fetched"].(float64) != 2 {
+		t.Fatalf("macro: ставка (1 точка смены) + инфляция (1 точка): %+v", m)
+	}
+	_, mb := call(t, s.HandleMacro, http.MethodGet, "/api/macro?series=policy_rate,cpi_yoy", "")
+	var mac struct {
+		Series    map[string][]db.MacroPoint `json:"series"`
+		UpdatedAt int64                      `json:"updated_at"`
+	}
+	if json.Unmarshal(mb, &mac) != nil || len(mac.Series["policy_rate"]) != 1 || mac.Series["policy_rate"][0].Value != 15.5 || mac.Series["cpi_yoy"][0].Date != "2026-09-01" || mac.UpdatedAt == 0 {
+		t.Fatalf("/api/macro: %s", mb)
 	}
 	if feedByID(last, "nbu")["pct"].(float64) != 100 {
 		t.Fatalf("готовый фид — 100%%: %+v", last)
