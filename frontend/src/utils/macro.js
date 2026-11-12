@@ -15,12 +15,18 @@ export const SERIES = {
   usd_uah: { label: 'Доллар США', color: '#34d399', step: false },
   eur_uah: { label: 'Евро', color: '#38bdf8', step: false },
   xau_uah: { label: 'Золото, ₴ за унцию', color: '#fbbf24', step: false },
-  xau_usd: { label: 'Золото, $ за унцию', color: '#fbbf24', step: false }
+  xau_usd: { label: 'Золото, $ за унцию', color: '#fbbf24', step: false },
+  fed_funds: { label: 'Ставка ФРС (факт)', color: '#a78bfa', step: false },
+  fed_target: { label: 'ФРС: верх коридора', color: '#34d399', step: true },
+  ust_10y: { label: 'Treasury 10 л.', color: '#38bdf8', step: false, thin: true },
+  us_cpi_yoy: { label: 'Инфляция США г/г', color: '#fbbf24', step: false },
+  us_cpi_mom: { label: 'Инфляция США м/м', color: '#fb923c', step: false }
 }
 
 // Ряды по группам: для запроса /macro (ставки и инфляция — малые, курсы — тысячи точек, грузятся отдельно)
 export const MACRO_IDS = ['policy_rate', 'overnight_cd', 'overnight_loans', 'cpi_yoy', 'cpi_mom', 'core_yoy', 'core_mom']
 export const FX_IDS = ['usd_uah', 'eur_uah', 'xau_uah']
+export const US_IDS = ['fed_funds', 'fed_target', 'ust_10y', 'us_cpi_yoy', 'us_cpi_mom']
 
 // Число для оси и подсказки по единице ряда: «%» — процент, «₴»/«$» — деньги (тысячи сокращаются: 183 562 → «184 тыс.»)
 export function unitText(v, unit = '%') {

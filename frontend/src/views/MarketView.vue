@@ -5,10 +5,11 @@ import BondsView from './BondsView.vue'
 import MacroRatesView from './MacroRatesView.vue'
 import MacroInflationView from './MacroInflationView.vue'
 import MacroFxView from './MacroFxView.vue'
+import MacroUsView from './MacroUsView.vue'
 import { useSection } from '../composables/useSection.js'
 import { useMacro } from '../composables/useMacro.js'
 import { toLocalDateStr } from '../utils/formatters.js'
-import { FX_IDS } from '../utils/macro.js'
+import { FX_IDS, US_IDS } from '../utils/macro.js'
 import { MARKET_TREE, MARKET_SECTIONS, isBondSection } from '../utils/marketNav.js'
 
 // Оболочка вкладки «Рынок»: шторка с группами («Ценные бумаги», «Макро») и экран выбранного раздела.
@@ -21,11 +22,13 @@ const props = defineProps({
 
 const section = useSection('economic_market_section', MARKET_SECTIONS, 'nbu')
 const macro = useMacro()
-// Курсы тяжёлые (тысячи точек): читаются только на экране «Курсы»
+// Курсы и США тяжёлые (тысячи точек): читаются только на своих экранах
 const fx = useMacro(FX_IDS)
-onMounted(() => { macro.load(); if (section.value === 'fx') fx.load() })
-watch(() => props.dataVersion, () => { macro.load(); if (section.value === 'fx') fx.load() })
-watch(section, (s) => { if (s === 'fx' && !Object.keys(fx.series.value).length) fx.load() })
+const us = useMacro(US_IDS)
+const heavy = { fx, fed: us }
+onMounted(() => { macro.load(); heavy[section.value]?.load() })
+watch(() => props.dataVersion, () => { macro.load(); heavy[section.value]?.load() })
+watch(section, (s) => { const h = heavy[s]; if (h && !Object.keys(h.series.value).length) h.load() })
 const today = computed(() => toLocalDateStr(new Date()))
 const bondSection = computed(() => (isBondSection(section.value) ? section.value : null))
 </script>
@@ -39,5 +42,6 @@ const bondSection = computed(() => (isBondSection(section.value) ? section.value
     <MacroRatesView v-if="section === 'rates'" :series="macro.series.value" :today="today" :running="running" />
     <MacroInflationView v-else-if="section === 'inflation'" :series="macro.series.value" :today="today" :running="running" />
     <MacroFxView v-else-if="section === 'fx'" :fx="fx.series.value" :macro="macro.series.value" :today="today" :running="running" />
+    <MacroUsView v-else-if="section === 'fed'" :us="us.series.value" :macro="macro.series.value" :today="today" :running="running" />
   </div>
 </template>

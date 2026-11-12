@@ -187,7 +187,7 @@ func (s *Server) HandleMarketBonds(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, list)
 }
 
-// POST /api/market/sync[?source=nbu|ust|macro|fx] — запустить опрос отдельно от «Разведать». Ответ сразу, ход и итог —
+// POST /api/market/sync[?source=nbu|ust|macro|fx|us] — запустить опрос отдельно от «Разведать». Ответ сразу, ход и итог —
 // в "market" из /api/sync/status. Уже идёт — 409.
 func (s *Server) HandleMarketSync(w http.ResponseWriter, r *http.Request) {
 	if !allow(w, r, http.MethodPost) {
@@ -199,7 +199,7 @@ func (s *Server) HandleMarketSync(w http.ResponseWriter, r *http.Request) {
 	}
 	src := strings.ToLower(r.URL.Query().Get("source"))
 	if src != "" && !market.IsSource(src) {
-		fail(w, http.StatusBadRequest, "source: nbu, ust, macro или fx")
+		fail(w, http.StatusBadRequest, "source: nbu, ust, macro, fx или us")
 		return
 	}
 	s.syncMutex.Lock()
