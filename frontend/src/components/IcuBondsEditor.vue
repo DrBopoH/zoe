@@ -1,9 +1,10 @@
 <script setup>
-import { ref, inject, computed } from 'vue'
+import { ref, inject, computed, watch } from 'vue'
 import { apiGetJson, apiSend, q } from '../utils/api.js'
 import UiButton from './ui/UiButton.vue'
 import UiIconButton from './ui/UiIconButton.vue'
 import { parseDateText, isoToText } from '../utils/dateText.js'
+import { ISIN_LEN, normIsin, findMarketBond, fillFromMarket } from '../utils/bondLookup.js'
 
 // Справочник облигаций вместо ввода карт: плитка на каждую ОВДП (ISIN, погашение, ставка, номинал).
 // В брокерском отчёте этих данных нет; один справочник на всех счетах. Пишется сразу (не ждёт «Сохранить» алиаса).
@@ -25,10 +26,27 @@ const load = async () => {
 }
 load()
 
+// Автозаполнение по ISIN из скачанного реестра НБУ (кеш «Разведать»): подставляет только пустые поля.
+// found — из реестра взято; none — в кеше этого ISIN нет (реестр не скачан или бумага не ОВДП) — вводим руками.
+const lookup = ref('') // '' | 'found' | 'none'
+watch(() => form.value && form.value.isin, async (raw) => {
+  const isin = normIsin(raw)
+  if (!form.value || isin.length !== ISIN_LEN) { lookup.value = ''; return }
+  try {
+    const list = await apiGetJson(`/market/bonds?source=nbu&q=${q(isin)}`)
+    if (!form.value || normIsin(form.value.isin) !== isin) return // ISIN уже поменяли, пока шёл запрос
+    const hit = findMarketBond(list, isin)
+    lookup.value = hit ? 'found' : 'none'
+    if (hit) form.value = fillFromMarket(form.value, hit)
+  } catch {
+    lookup.value = ''
+  }
+})
+
 const blank = () => ({ isin: '', name: '', maturity: '', coupon_rate: null, nominal: 1000 })
 // дата в форме — строкой ДД.ММ.ГГГГ; название и номинал (всегда 1000) не спрашиваем
 const editing = ref(null) // ISIN правимой облигации; null при создании новой
-const edit = (b) => { editing.value = b ? b.isin : null; form.value = b ? { ...b, maturity: isoToText(b.maturity) } : blank() }
+const edit = (b) => { lookup.value = ''; editing.value = b ? b.isin : null; form.value = b ? { ...b, maturity: isoToText(b.maturity) } : blank() }
 // форма открывается на месте плитки, которую правим; новая — в конце списка
 const rows = computed(() => (form.value && editing.value === null ? [...bonds.value, { isin: '', isNew: true }] : bonds.value))
 const showForm = (r) => form.value && (r.isNew || r.isin === editing.value)
@@ -75,7 +93,9 @@ const fmtDate = (iso) => iso.split('-').reverse().join('.')
           <label class="space-y-1"><span class="ui-label">Погашение</span><input v-model="form.maturity" inputmode="numeric" class="ui-input" :class="form.maturity && !parseDateText(form.maturity) && 'ui-input--invalid'" placeholder="ДД.ММ.ГГГГ" @keyup.enter="ok && save()" /></label>
           <label class="space-y-1"><span class="ui-label">Ставка, %</span><input v-model.number="form.coupon_rate" type="number" step="0.01" class="ui-input" placeholder="16.44" @keyup.enter="ok && save()" /></label>
         </div>
-        <div class="text-[10px] text-slate-600">номинал ₴ 1000; купон раз в 182 дня назад от погашения</div>
+        <div v-if="lookup === 'found'" class="text-[10px] text-emerald-400">из реестра НБУ: погашение и ставка подставлены, проверь и сохрани</div>
+        <div v-else-if="lookup === 'none'" class="text-[10px] text-amber-400">в кеше реестра НБУ такого ISIN нет — нажми «Разведать» или введи вручную</div>
+        <div v-else class="text-[10px] text-slate-600">номинал ₴ 1000; купон раз в 182 дня назад от погашения</div>
         <div class="flex justify-end gap-2">
           <UiButton variant="cancel" size="sm" @click="form = null">Отмена</UiButton>
           <UiButton variant="primary" size="sm" :disabled="busy || !ok" @click="save">Сохранить</UiButton>
