@@ -332,10 +332,38 @@ cmd_rollback() {
 }
 
 # ------------------------------------------------ branch
+# ---- именованные коммиты (заморозка фичи): «сводка | vR.B.C+T.<полный хэш замороженного коммита>»
+NAMED_RE='\| v[0-9A-Za-z.]+\.[0-9]+\+[0-9]+\.[0-9a-f]{7,40}$'
+VER_RE='v([0-9A-Za-z.]+)\.([0-9]+)\+([0-9]+)\.[0-9a-f]{7,40}$'
+is_named() { [[ $(git log -1 --format=%s "$1" 2>/dev/null) =~ $NAMED_RE ]]; }
+last_named() { git log -E --grep="$NAMED_RE" -1 --format=%H "${1:-HEAD}" 2>/dev/null || true; }
+
+# от чего начинать новую ветку: свежий dev (после PR он содержит именованные коммиты), иначе последний именованный коммит, иначе HEAD
+base_ref() {
+  if git rev-parse -q --verify refs/remotes/origin/dev >/dev/null; then echo origin/dev
+  elif git rev-parse -q --verify refs/heads/dev >/dev/null; then echo dev
+  else
+    local n; n=$(last_named HEAD)
+    echo "${n:-HEAD}"
+  fi
+}
+
 cmd_branch() {
   local w="${1:-}"
   [[ $w =~ ^[a-z0-9-]+$ ]] || die "слово: латиница строчными, цифры, дефис. Пример: ./${SELF} branch icu-ledger"
-  git switch -c "wip/$(date +%F)-$w"
+  local b; b=$(base_ref)
+  git switch -c "wip/$(date +%F)-$w" "$b"
+  echo "● ветка $(cur_branch) ← $b"
+}
+
+# ./clc.sh next <слово> — новая тема после PR: git fetch, ветка от свежего dev (или последнего именованного коммита)
+cmd_next() {
+  [[ -z $(git status --porcelain --untracked-files=no) ]] || die "есть незакоммиченные правки: закоммить или ./${SELF} park"
+  git fetch -q origin 2>/dev/null || echo "(fetch не удался — беру локальное состояние)"
+  if git rev-parse -q --verify refs/heads/dev >/dev/null && git rev-parse -q --verify refs/remotes/origin/dev >/dev/null; then
+    git branch -f dev origin/dev 2>/dev/null || true
+  fi
+  cmd_branch "${1:-}"
 }
 
 # ------------------------------------------------ git-инструменты
@@ -349,8 +377,9 @@ ensure_wip() {
   if [[ $br == wip/* ]]; then return 0; fi
   if [[ -n $w ]]; then
     [[ $w =~ ^[a-z0-9-]+$ ]] || die "слово ветки: латиница строчными, цифры, дефис"
-    git switch -qc "wip/$(date +%F)-$w"
-    echo "● ветка $(cur_branch)"
+    local b; b=$(base_ref)
+    git switch -qc "wip/$(date +%F)-$w" "$b"
+    echo "● ветка $(cur_branch) ← $b"
     return 0
   fi
   if is_protected "$br"; then die "в $br коммитит только автоматика. Добавь -b <слово>"; fi
@@ -413,13 +442,14 @@ cmd_commit() {
   warn_leftover
 }
 
-# ./clc.sh ship <be|fe|docs|all> "тип: что сделано" [-b слово] [-p] [-f] [-n]
+# ./clc.sh ship <be|fe|docs|all> "тип: что сделано" [-b слово] [-p] [-f] [-n] [-z "сводка фичи" [-v R.B]]
+#   -z: этим коммитом фича закончена — сразу влить ветку в dev одним именованным коммитом (см. land)
 #   всё одной строкой: (ветка) → apply всех патчей из Downloads → проверки → коммит → (-p) push пакета в буфер
 #   -f apply --force, -n без проверок
 cmd_ship() {
-  local nocheck=0 bword="" dopush=0 force=0 args=()
+  local nocheck=0 bword="" dopush=0 force=0 zsum="" zver="" args=()
   while (( $# )); do
-    case "$1" in -n) nocheck=1 ;; -b) shift; bword=${1:-} ;; -p) dopush=1 ;; -f) force=1 ;; *) args+=("$1") ;; esac
+    case "$1" in -n) nocheck=1 ;; -b) shift; bword=${1:-} ;; -p) dopush=1 ;; -f) force=1 ;; -z) shift; zsum=${1:-} ;; -v) shift; zver=${1:-} ;; *) args+=("$1") ;; esac
     shift
   done
   local scope="${args[0]:-}" msg="${args[1]:-}"
@@ -441,8 +471,73 @@ cmd_ship() {
   git diff --cached --quiet && die "в $scope нечего коммитить"
   git commit -q -m "$msg"
   git log --oneline -n 1
+  if [[ -n $zsum ]]; then if [[ -n $zver ]]; then cmd_land "$zsum" -v "$zver"; else cmd_land "$zsum"; fi; fi
   warn_leftover
   if (( dopush )); then cmd_push; fi
+}
+
+# next_version [R.B] [rev] — следующая строка версии «vR.B.C+T» по последнему именованному коммиту в rev (по умолчанию HEAD).
+# Другая сборка B (-v) обнуляет C, T идёт дальше. Первое вливание в репо — только с -v.
+next_version() {
+  local want=${1:-} n subj base="" c=0 t=0
+  n=$(last_named "${2:-HEAD}")
+  if [[ -n $n ]]; then
+    subj=$(git log -1 --format=%s "$n")
+    if [[ $subj =~ $VER_RE ]]; then base=${BASH_REMATCH[1]}; c=${BASH_REMATCH[2]}; t=${BASH_REMATCH[3]}; fi
+  fi
+  if [[ -n $want && $want != "$base" ]]; then base=$want; c=0; fi
+  [[ -n $base ]] || die "первое вливание в репо: добавь -v R.B (например -v 1.a1)"
+  echo "v${base}.$((c + 1))+$((t + 1))"
+}
+
+# land_one <родитель> <коммит-фичи> "сводка" [R.B] — сжатый именованный коммит: дерево коммита-фичи, родитель = текущий dev,
+# сообщение «сводка | vR.B.C+T.<короткий хэш (7) последнего атомарного коммита фичи>». Печатает хэш нового коммита.
+land_one() {
+  local parent=$1 feat=$2 sum=$3 ver=${4:-} v
+  v=$(next_version "$ver" "$parent")
+  git commit-tree "$feat^{tree}" -p "$parent" -m "$sum | $v.$(git rev-parse --short=7 "$feat")"
+}
+
+# ./clc.sh land "сводка фичи" [-v R.B]            — вливание текущей wip-ветки в dev ОДНИМ именованным коммитом (аналог PR → Squash and merge)
+# ./clc.sh land --plan <файл> [-v R.B]            — то же для готовой истории: по строке «<хэш> сводка» на фичу (строки «f …» и «#» пропускаются)
+#   Атомарные коммиты и wip-ветка остаются локально как есть; dev получает только именованные коммиты. Файлы в рабочем дереве не трогаются.
+#   Когда у проекта появится remote, dev меняется только через PR на GitHub — land тогда отказывается.
+cmd_land() {
+  local ver="" plan="" args=()
+  while (( $# )); do case "$1" in -v) shift; ver=${1:-} ;; --plan) shift; plan=${1:-} ;; *) args+=("$1") ;; esac; shift; done
+  if git remote get-url origin >/dev/null 2>&1; then die "есть remote: dev меняется только через PR (Squash and merge, в заголовке — версия)"; fi
+  [[ $(cur_branch) == wip/* ]] || die "только из wip-ветки"
+  # план может лежать в Downloads как patch.zip (.commits/regroup.txt) — забираем его тем же apply, что и ship
+  if [[ -n $plan ]] && has_patches; then QUIET=1; cmd_apply --force; QUIET=0; fi
+  local tip="" base
+  if git rev-parse -q --verify refs/heads/dev >/dev/null; then
+    tip=$(git rev-parse dev)
+    git merge-base --is-ancestor "$tip" HEAD || die "ветка не от текущего dev — новые темы начинай через ./${SELF} next <слово>"
+  else
+    base=$(git merge-base HEAD main 2>/dev/null) || die "нет main — не от чего начинать dev"
+    tip=$base
+  fi
+  local old=""; git rev-parse -q --verify refs/heads/dev >/dev/null && old=$(git rev-parse dev)
+  if [[ -n $plan ]]; then
+    [[ -f $plan ]] || die "нет файла $plan"
+    local line h rest n=0
+    while IFS= read -r line; do
+      [[ -z $line || $line == \#* || $line =~ ^f[[:space:]] ]] && continue
+      h=${line%% *}; rest=${line#* }; [[ $h != "$line" ]] || die "строка без сводки: $line"
+      git cat-file -e "$h^{commit}" 2>/dev/null || die "нет коммита $h"
+      git merge-base --is-ancestor "$h" HEAD || die "$h не в этой ветке"
+      tip=$(land_one "$tip" "$h" "$rest" "$ver"); n=$((n + 1))
+    done < "$plan"
+    (( n > 0 )) || die "в плане нет строк «<хэш> сводка»"
+  else
+    local sum="${args[0]:-}"
+    [[ -n $sum ]] || die "формат: ./${SELF} land \"сводка фичи\" [-v R.B]"
+    [[ $(git rev-parse "HEAD^{tree}") != $(git rev-parse "$tip^{tree}") ]] || die "в ветке нет изменений относительно dev"
+    tip=$(land_one "$tip" HEAD "$sum" "$ver")
+  fi
+  if [[ -n $old ]]; then git update-ref refs/heads/dev "$tip" "$old"; else git update-ref refs/heads/dev "$tip"; fi
+  echo "✓ dev:"; git log --oneline -n "${n:-1}" dev
+  echo "Дальше: ./${SELF} next <слово> — новая тема от dev"
 }
 
 # ./clc.sh amend [be|fe|docs|all] ["новое сообщение"] — добавить правки в последний коммит (если он ещё не на remote)
@@ -532,7 +627,11 @@ Git
   ./${SELF} ship <be|fe|docs|all> "тип: что" [-b слово] [-p] [-f] [-n]
                                          ветка → apply → проверки → коммит → (-p) push пакета
   ./${SELF} commit <be|fe|docs|all> "тип: что" [-b слово] [-n]   проверки → коммит
-  ./${SELF} branch <слово>               wip/<дата>-<слово>
+  ./${SELF} branch <слово>               wip/<дата>-<слово> от свежего dev / последнего именованного коммита
+  ./${SELF} next <слово>                 после PR: fetch + новая ветка от dev (не от старой wip!)
+  ./${SELF} land "сводка" [-v R.B]       фича готова: wip-ветка → dev одним именованным коммитом (как PR + Squash and merge)
+  ./${SELF} land --plan <файл> [-v R.B]  то же для готовой истории: по строке «<хэш> сводка» на фичу
+  (ship ... -z "сводка" [-v R.B])        коммит и сразу land
   ./${SELF} amend [scope] ["сообщение"]  дополнить последний коммит (пока не на remote)
   ./${SELF} undo                         снять последний коммит, правки остаются в индексе
   ./${SELF} park [имя] | park list | unpark   спрятать / вернуть незакоммиченное
@@ -554,6 +653,8 @@ case "${1:-help}" in
   branch)   shift; cmd_branch "$@" ;;
   commit)   shift; cmd_commit "$@" ;;
   ship)     shift; cmd_ship "$@" ;;
+  next)     shift; cmd_next "$@" ;;
+  land)     shift; cmd_land "$@" ;;
   amend)    shift; cmd_amend "$@" ;;
   undo)     cmd_undo ;;
   park)     shift; cmd_park "$@" ;;
