@@ -110,6 +110,8 @@ func main() {
 	// Binance (только чтение кеша; обновляется через «Разведать»)
 	mux.HandleFunc("/api/binance", server.EnableCORS(server.HandleBinance))
 	mux.HandleFunc("/api/binance/candles", server.EnableCORS(server.HandleBinanceCandles)) // свечи оценки портфеля для графика
+	mux.HandleFunc("/api/binance/moves", server.EnableCORS(server.HandleBinanceMoves))     // переводы между кошельками для истории
+	mux.HandleFunc("/api/binance/trades", server.EnableCORS(server.HandleBinanceTrades))   // покупки и продажи монет для истории
 
 	// API Роуты Синхронизации и Очистки Кэша
 	mux.HandleFunc("/api/sync/status", server.EnableCORS(server.HandleGetStatus))

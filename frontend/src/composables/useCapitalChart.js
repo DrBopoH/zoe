@@ -33,7 +33,40 @@ export function useCapitalChart(accounts, transactions, pickedIds = ref([])) {
   // Выплаты по облигациям брокерских счетов (купоны и погашения) — маркеры на графике и таймлайн вперёд.
   // Счета обновляются вместе с версией данных, поэтому перечитываем при каждой новой загрузке.
   const allPayEvents = ref([])
-  const bondOps = ref([]) // покупки/продажи/полученные выплаты — справочные строки истории (в потоке операций и на графике их нет)
+  const icuOps = ref([]) // покупки/продажи/полученные выплаты — справочные строки истории (в потоке операций и на графике их нет)
+  // Переводы между кошельками Binance — тоже справочные строки истории (капитал не меняют)
+  const bnMoves = ref([])
+  const bnTrades = ref([]) // покупки и продажи монет внутри кошельков
+  watch(accounts, async (list) => {
+    const bn = (list || []).find(a => a.bank_key === 'binance')
+    if (!bn) { bnTrades.value = []; return }
+    try {
+      const trades = await apiGetJson('/binance/trades')
+      bnTrades.value = (trades || []).map(x => ({
+        id: `bntr_${x.id}`, account_id: bn.id, time: new Date(x.t).toISOString(), amount: 0, currency_code: 980,
+        memo: 'trade', exact: true, side: x.side, wallet: x.wallet,
+        description: `${x.qty} ${x.asset} ${x.side === 'buy' ? 'за' : '→'} ${x.quote_qty} ${x.quote}`
+      }))
+    } catch (e) {
+      console.error('Binance trades error:', e)
+    }
+  }, { immediate: true })
+
+  watch(accounts, async (list) => {
+    const bn = (list || []).find(a => a.bank_key === 'binance')
+    if (!bn) { bnMoves.value = []; return }
+    try {
+      const moves = await apiGetJson('/binance/moves')
+      // автоподписка (проценты сами легли обратно в Earn) — не перевод: её роль уже показывает начисление с бейджем EARN
+      bnMoves.value = (moves || []).filter(m => !m.auto).map(m => ({
+        id: `bnmv_${m.id}`, account_id: bn.id, time: new Date(m.t).toISOString(), amount: 0, currency_code: 980,
+        memo: 'move', exact: true, from: m.from, to: m.to, description: `${m.qty} ${m.asset}`
+      }))
+    } catch (e) {
+      console.error('Binance moves error:', e)
+    }
+  }, { immediate: true })
+
   watch(accounts, async (list) => {
     const manual = (list || []).filter(a => a.bank_key === 'icu')
     const ops = []
@@ -45,7 +78,7 @@ export function useCapitalChart(accounts, transactions, pickedIds = ref([])) {
         return (ov.events || []).map(e => ({ ...e, color, account_id: a.id }))
       }))
       allPayEvents.value = all.flat()
-      bondOps.value = ops
+      icuOps.value = ops
     } catch (e) {
       console.error('ICU events error:', e)
     }
@@ -70,6 +103,8 @@ export function useCapitalChart(accounts, transactions, pickedIds = ref([])) {
   // Операции Binance — обычная история счёта: свечи двигаются по ним сразу, пока разведка идёт. Когда собран минутный ряд
   // оценки, скачки депозитов уже в нём, и график сам перестаёт считать эти операции второй раз (CandleChart, binanceIds).
   const binanceIdList = computed(() => chartAccounts.value.filter(a => a.bank_key === 'binance').map(a => a.id))
+
+  const bondOps = computed(() => [...icuOps.value, ...bnMoves.value, ...bnTrades.value]) // имя прежнее: справочные строки истории всех счетов
 
   return { bondOps, uahAccounts, uahTransactions, chartTransactions, chartTotalUAH, binanceIdList, payEvents }
 }

@@ -177,7 +177,7 @@ type icuMatcher struct {
 func (s *Storage) newIcuMatcher(accs []Account) *icuMatcher {
 	m := &icuMatcher{ibans: map[string]string{}, byAlias: map[string]string{}}
 	for _, a := range accs {
-		if a.Type == ICUAccountType && a.IBAN != "" {
+		if (a.Type == ICUAccountType || a.Type == BinanceAccountType) && a.IBAN != "" { // и брокерский счёт, и Binance (BN<id>): зеркало на карте находится по алиасу
 			m.ibans[normID(a.IBAN)] = a.ID
 		}
 	}
@@ -241,10 +241,16 @@ func (s *Storage) GetAllTransactions(limit int) ([]Transaction, error) {
 	if err != nil {
 		return nil, err
 	}
-	for i := range list { // внешние движения Binance — перемещение капитала в оценку портфеля, а не доход/расход месяца
-		if list[i].AccountID == BinanceAccountID {
-			list[i].Internal = true
+	metas := s.binanceMetas()
+	for i := range list {
+		if list[i].AccountID != BinanceAccountID {
+			continue
 		}
+		m := metas[list[i].ID]
+		k := m.Kind
+		list[i].Kind, list[i].Wallet = k, m.Wallet
+		// депозит, вывод и P2P — перемещение капитала в оценку портфеля, а не доход/расход месяца; проценты Earn и бонусы — настоящий доход
+		list[i].Internal = k != KindDividendBN && k != KindBonusBN
 	}
 	accs, err := s.GetAllAccounts()
 	if err != nil {

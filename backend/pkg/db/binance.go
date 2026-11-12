@@ -39,6 +39,12 @@ DROP TABLE IF EXISTS binance_flows;
 DROP TABLE IF EXISTS binance_coverage;
 `
 
+// Виды движений Binance, от которых зависит учёт (те же строки, что в binance.Kind*; db от пакета binance не зависит).
+const (
+	KindDividendBN = "dividend"
+	KindBonusBN    = "bonus"
+)
+
 const (
 	BinanceAccountID   = "binance"
 	BinanceAccountType = "binance"
@@ -437,4 +443,24 @@ func (s *Storage) migrateBinanceModel() error {
 	}
 	_, err := s.cacheDB.Exec(`INSERT INTO binance_state(k,v) VALUES('model',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`, binanceModel)
 	return err
+}
+
+type binanceMeta struct{ Kind, Wallet string }
+
+// binanceMetas — вид движения и кошелёк (Spot, Funding, Strategy, USD-M Futures) по id операции счёта ("binance_"+id строки журнала).
+func (s *Storage) binanceMetas() map[string]binanceMeta {
+	out := map[string]binanceMeta{}
+	rows, err := s.cacheDB.Query(`SELECT 'binance_' || id, kind, account FROM binance_ledger WHERE kind != ''`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var m binanceMeta
+		if rows.Scan(&id, &m.Kind, &m.Wallet) == nil {
+			out[id] = m
+		}
+	}
+	return out
 }

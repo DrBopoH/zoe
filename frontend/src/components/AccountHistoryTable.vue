@@ -4,6 +4,7 @@ import { formatMoney, formatMaskedIBAN } from '../utils/formatters.js'
 import { counterpartyName, isPersonTransaction } from '../utils/personLayout.js'
 import UiButton from './ui/UiButton.vue'
 import { effectiveTimes, isDateOnly } from '../utils/historyOrder.js'
+import { tagsFor, cleanTitle } from '../utils/txTags.js'
 
 const props = defineProps({
   transactions: { type: Array, default: () => [] },
@@ -78,12 +79,6 @@ const timeStr = (iso) => {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-const MEMO_TAG = {
-  buy: ['ПОКУПКА', 'bg-sky-500/15 text-sky-300 border-sky-500/30'],
-  sell: ['ПРОДАЖА', 'bg-amber-500/15 text-amber-300 border-amber-500/30'],
-  coupon: ['КУПОН', 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'],
-  redemption: ['ПОГАШЕНИЕ', 'bg-violet-500/15 text-violet-300 border-violet-500/30']
-}
 const title = (t) => (t.counter_name || '').trim() || (t.description || '').trim() || '—'
 const subtitle = (t) => {
   const d = (t.description || '').trim()
@@ -167,8 +162,7 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
               </td>
               <td class="p-3 max-w-[360px]">
                 <div class="font-bold text-slate-200 truncate">
-                  <span v-if="t.memo" class="mr-1.5 text-[9px] px-1.5 py-0.5 rounded border font-normal" :class="MEMO_TAG[t.memo][1]">{{ MEMO_TAG[t.memo][0] }}</span>
-                  <span v-else-if="t.internal" class="mr-1.5 text-[9px] px-1.5 py-0.5 rounded border font-normal bg-blue-500/15 text-blue-300 border-blue-500/30">ИНВЕСТИЦИЯ</span>{{ title(t) }}
+                  <template v-for="(g, i) in tagsFor(t)" :key="i"><span v-if="g.sep" class="mr-1.5 text-[10px] text-slate-500 font-normal">{{ g.label }}</span><span v-else class="mr-1.5 text-[9px] px-1.5 py-0.5 rounded border font-normal" :class="g.cls">{{ g.label }}</span></template>{{ cleanTitle(t, title(t)) }}
                 </div>
                 <div v-if="subtitle(t)" class="text-[10px] text-slate-500 truncate">{{ subtitle(t) }}</div>
               </td>
@@ -180,7 +174,8 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
                 <span v-else class="text-slate-600">—</span>
               </td>
               <td class="p-3 text-right whitespace-nowrap font-bold" :class="tone(t.amount)">
-                <span :class="(t.internal || t.memo) && 'opacity-60'">{{ money(t.amount, t) }}</span>
+                <span v-if="t.memo === 'move' || t.memo === 'trade'" class="text-slate-600 font-normal">—</span>
+                <span v-else :class="(t.internal || t.memo) && 'opacity-60'">{{ money(t.amount, t) }}</span>
                 <span v-if="t.is_hold" class="ml-1 text-[9px] text-amber-400 font-normal">HOLD</span>
               </td>
             </tr>

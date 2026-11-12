@@ -86,4 +86,8 @@ type Transaction struct {
 	// Перемещение между своими счетами (на брокерский счёт и записи его журнала): не доход и не расход.
 	Internal        bool   `json:"internal,omitempty"`
 	LinkedAccountID string `json:"linked_account_id,omitempty"` // куда ушла операция кеша (брокерский счёт)
+
+	// Вид операции счёта-«не банка» (считается на чтении): у Binance deposit | withdraw | p2p | dividend | bonus. Карточные операции без вида.
+	Kind   string `json:"kind,omitempty"`
+	Wallet string `json:"wallet,omitempty"` // у Binance: кошелёк, где произошло движение (Spot, Funding, Strategy, USD-M Futures)
 }

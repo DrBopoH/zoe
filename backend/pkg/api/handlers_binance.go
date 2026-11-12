@@ -294,3 +294,57 @@ func (s *Server) HandleBinanceCandles(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
 }
+
+// bnRows — журнал выписки в виде строк пакета binance.
+func (s *Server) bnRows() ([]binance.Row, error) {
+	ledger, err := s.storage.BinanceLedger()
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]binance.Row, len(ledger))
+	for i, r := range ledger {
+		rows[i] = binance.Row{T: r.T, Account: r.Account, Op: r.Op, Asset: r.Asset, Delta: r.Delta, Note: r.Note}
+	}
+	return rows, nil
+}
+
+// GET /api/binance/moves — переводы между кошельками (Spot ↔ Funding/Strategy/Futures/Earn) из журнала: строки истории для «Операционной».
+func (s *Server) HandleBinanceMoves(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	rows, err := s.bnRows()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	moves := binance.Moves(rows)
+	if moves == nil {
+		moves = []binance.Move{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(moves)
+}
+
+// tradeWallets — кошельки, чьи сделки показываем в истории.
+var tradeWallets = []string{binance.WalletSpot}
+
+// GET /api/binance/trades — покупки и продажи монет внутри кошельков (сейчас Spot): строки истории, капитал не меняют.
+func (s *Server) HandleBinanceTrades(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	rows, err := s.bnRows()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	trades := binance.Trades(rows, tradeWallets...)
+	if trades == nil {
+		trades = []binance.Trade{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(trades)
+}

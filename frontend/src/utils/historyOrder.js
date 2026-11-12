@@ -7,7 +7,7 @@ const RANK = { deposit: 0, buy: 1, sell: 2, coupon: 3, redemption: 4, withdraw: 
 const STEP = 1000 // мс между соседними шагами цепочки
 
 // запись брокерского журнала (дата без времени): зачисление/вывод из журнала и справочные строки облигаций
-export const isDateOnly = (t) => !!t.memo || String(t.id).startsWith('ledger_')
+export const isDateOnly = (t) => (!!t.memo && !t.exact) || String(t.id).startsWith('ledger_')
 
 const rankOf = (t) => (t.memo ? RANK[t.memo] ?? 4 : t.amount >= 0 ? RANK.deposit : RANK.withdraw)
 const dayKey = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}` }
@@ -24,8 +24,9 @@ export function effectiveTimes(transactions, memo = []) {
       bankByAcc.get(t.linked_account_id).push({ t, ms })
     }
   }
+  for (const t of memo) eff.set(t.id, new Date(t.time).getTime()) // справочные строки с точным временем (переводы Binance) — как есть
   const groups = new Map()
-  for (const t of [...transactions.filter(isDateOnly), ...memo]) {
+  for (const t of [...transactions.filter(isDateOnly), ...memo.filter(isDateOnly)]) {
     const ms = new Date(t.time).getTime()
     const k = t.account_id + '|' + dayKey(ms)
     if (!groups.has(k)) groups.set(k, [])

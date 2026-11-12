@@ -251,3 +251,68 @@ func TestBinanceModelMigrationDropsStaleSeries(t *testing.T) {
 		t.Fatalf("старая модель: ряд %d, операций %d, журнал %v", n, tx, s.HasBinance())
 	}
 }
+
+// Вид движения доходит до операции: депозит/вывод/P2P — перемещение капитала, проценты Earn и бонусы — настоящий доход.
+func TestBinanceTxKindAndInternal(t *testing.T) {
+	s, _, _ := newS(t)
+	t0 := int64(1_700_000_000_000)
+	rows := []BinanceRow{
+		{T: t0, Account: "Spot", Op: "Deposit", Asset: "USDT", Delta: 100, Kind: "deposit"},
+		{T: t0 + 1000, Account: "Funding", Op: "P2P Trading", Asset: "USDT", Delta: 50, Kind: "p2p"},
+		{T: t0 + 2000, Account: "Spot", Op: "Simple Earn Flexible Interest", Asset: "USDT", Delta: 0.01, Kind: "dividend"},
+		{T: t0 + 3000, Account: "Spot", Op: "Cashback Voucher", Asset: "USDT", Delta: 0.5, Kind: "bonus"},
+	}
+	if err := s.SaveBinanceStatement(bnFile, bnProfile, rows); err != nil {
+		t.Fatal(err)
+	}
+	fl, _ := s.BinanceUnvaluedFlows([]string{"deposit", "withdraw", "p2p", "dividend", "bonus"})
+	var txs []BinanceTx
+	for _, f := range fl {
+		txs = append(txs, BinanceTx{FlowID: f.ID, T: f.T, Desc: "Binance: x " + f.Kind, UAH: 40 * f.Delta})
+	}
+	if err := s.SaveBinanceTxs(txs); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.GetAllTransactions(10)
+	if len(got) != 4 {
+		t.Fatalf("операции: %+v", got)
+	}
+	for _, x := range got {
+		if x.Wallet == "" {
+			t.Fatalf("кошелёк операции не определён: %+v", x)
+		}
+		want := x.Kind == "deposit" || x.Kind == "p2p" || x.Kind == "withdraw"
+		if x.Kind == "" || x.Internal != want {
+			t.Fatalf("вид %q: internal=%v, ждали %v", x.Kind, x.Internal, want)
+		}
+	}
+}
+
+// Зеркало P2P на карте находится по алиасу, привязанному к идентификатору Binance (BN<id>) — так же, как переводы на брокерский счёт.
+func TestBinanceMirrorOnCardViaAlias(t *testing.T) {
+	s, _, _ := newS(t)
+	_ = s.SaveBinanceStatement(bnFile, bnProfile, bnRows())
+	seedRaifTransfers(t, s)
+	if x, _ := txByID(mustAll(t, s), "x1"); x.Internal {
+		t.Fatal("без алиаса перевод — обычный расход")
+	}
+	if err := s.LinkAccount("", icuAlias, bnProfile, ""); err != nil {
+		t.Fatal(err)
+	}
+	x, _ := txByID(mustAll(t, s), "x1")
+	if !x.Internal || x.LinkedAccountID != BinanceAccountID {
+		t.Fatalf("зеркало P2P должно быть внутренним и вести на Binance: %+v", x)
+	}
+	if y, _ := txByID(mustAll(t, s), "x4"); y.Internal {
+		t.Fatal("магазин — не зеркало")
+	}
+}
+
+func mustAll(t *testing.T, s *Storage) []Transaction {
+	t.Helper()
+	list, err := s.GetAllTransactions(1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return list
+}
