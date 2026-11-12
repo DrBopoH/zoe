@@ -5,6 +5,7 @@ import (
 	"errors"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -24,23 +25,33 @@ func (s *Storage) initMarketLists() error {
 	return err
 }
 
-// MarketList — ISIN списка по имени (нет списка — пусто).
-func (s *Storage) MarketList(name string) ([]string, error) {
+// Записи списка: «ISIN» или «ISIN=цена» (цена с рынка брокера, чистая сумма за бумагу; по ней считается доходность).
+
+// MarketList — ISIN списка по имени (нет списка — пусто) и известные цены.
+func (s *Storage) MarketList(name string) ([]string, map[string]float64, error) {
 	if !marketListName.MatchString(name) {
-		return nil, errors.New("имя списка: a-z, 0-9, _ и -")
+		return nil, nil, errors.New("имя списка: a-z, 0-9, _ и -")
 	}
 	var raw string
 	err := s.coreDB.QueryRow(`SELECT isins FROM market_lists WHERE name = ?`, name).Scan(&raw)
 	if err != nil && err != sql.ErrNoRows {
-		return nil, err
+		return nil, nil, err
 	}
-	return strings.Fields(raw), nil
+	ids, prices := []string{}, map[string]float64{}
+	for _, tok := range strings.Fields(raw) {
+		id, price, _ := strings.Cut(tok, "=")
+		ids = append(ids, id)
+		if v, err := strconv.ParseFloat(price, 64); err == nil && v > 0 {
+			prices[id] = v
+		}
+	}
+	return ids, prices, nil
 }
 
-// SaveMarketList заменяет список целиком: ISIN приводятся к верхнему регистру, повторы убираются.
-func (s *Storage) SaveMarketList(name string, isins []string, nowUnix int64) ([]string, error) {
+// SaveMarketList заменяет список целиком: ISIN приводятся к верхнему регистру, повторы убираются, цена — только положительная.
+func (s *Storage) SaveMarketList(name string, isins []string, prices map[string]float64, nowUnix int64) ([]string, map[string]float64, error) {
 	if !marketListName.MatchString(name) {
-		return nil, errors.New("имя списка: a-z, 0-9, _ и -")
+		return nil, nil, errors.New("имя списка: a-z, 0-9, _ и -")
 	}
 	seen := map[string]bool{}
 	clean := []string{}
@@ -52,12 +63,24 @@ func (s *Storage) SaveMarketList(name string, isins []string, nowUnix int64) ([]
 		}
 	}
 	sort.Strings(clean)
+	kept := map[string]float64{}
+	toks := make([]string, 0, len(clean))
+	for _, id := range clean {
+		tok := id
+		for k, v := range prices {
+			if strings.ToUpper(strings.TrimSpace(k)) == id && v > 0 {
+				kept[id] = v
+				tok = id + "=" + strconv.FormatFloat(v, 'f', -1, 64)
+			}
+		}
+		toks = append(toks, tok)
+	}
 	defer s.bump()
 	s.coreMu.Lock()
 	defer s.coreMu.Unlock()
 	_, err := s.coreDB.Exec(`
 		INSERT INTO market_lists(name, isins, updated_at) VALUES(?,?,?)
 		ON CONFLICT(name) DO UPDATE SET isins = excluded.isins, updated_at = excluded.updated_at`,
-		name, strings.Join(clean, " "), nowUnix)
-	return clean, err
+		name, strings.Join(toks, " "), nowUnix)
+	return clean, kept, err
 }

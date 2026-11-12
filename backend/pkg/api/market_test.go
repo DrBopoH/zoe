@@ -148,11 +148,14 @@ func TestMarketListsPersistAndNormalize(t *testing.T) {
 	if _, body := call(t, s.HandleMarketLists, http.MethodGet, "/api/market/lists?name=icu", ""); !strings.Contains(string(body), `"isins":[]`) {
 		t.Fatalf("пустой список должен быть [], а не null: %s", body)
 	}
-	code, body := call(t, s.HandleMarketLists, http.MethodPut, "/api/market/lists?name=icu", `{"isins":["ua4000239040"," UA4000239008","UA4000239040",""]}`)
+	code, body := call(t, s.HandleMarketLists, http.MethodPut, "/api/market/lists?name=icu", `{"isins":["ua4000239040"," UA4000239008","UA4000239040",""],"prices":{"ua4000239040":1011.12,"UA4000239008":-5,"UA9999999999":1}}`)
 	if code != 200 || !strings.Contains(string(body), `["UA4000239008","UA4000239040"]`) {
 		t.Fatalf("сохранение: %d %s", code, body)
 	}
-	if _, body = call(t, s.HandleMarketLists, http.MethodGet, "/api/market/lists?name=icu", ""); !strings.Contains(string(body), "UA4000239040") {
+	if !strings.Contains(string(body), `"prices":{"UA4000239040":1011.12}`) {
+		t.Fatalf("цена: только положительная и только у бумаги из списка: %s", body)
+	}
+	if _, body = call(t, s.HandleMarketLists, http.MethodGet, "/api/market/lists?name=icu", ""); !strings.Contains(string(body), "UA4000239040") || !strings.Contains(string(body), "1011.12") {
 		t.Fatalf("список не сохранился: %s", body)
 	}
 	if code, _ = call(t, s.HandleMarketLists, http.MethodGet, "/api/market/lists?name=../x", ""); code != http.StatusBadRequest {
