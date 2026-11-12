@@ -240,6 +240,13 @@ CREATE TABLE IF NOT EXISTS iban_pans (
 	pan     TEXT NOT NULL,
 	iban    TEXT NOT NULL
 );
+-- Скрытый вид IBAN. Полный номер (iban) и скрытый (masked) хранятся раздельно.
+-- custom=0: сгенерировано из цифр («UA44-322001-0000-9976», флаг и значок банка рисует фронт); custom=1: свой псевдоним-имя счёта.
+CREATE TABLE IF NOT EXISTS iban_masks (
+	iban   TEXT PRIMARY KEY,
+	masked TEXT NOT NULL,
+	custom INTEGER NOT NULL DEFAULT 0
+);
 -- Ручные правки счёта (лимит, IBAN, PAN) — это пользовательские данные, им не место в кеше.
 CREATE TABLE IF NOT EXISTS account_overrides (
 	account_id TEXT PRIMARY KEY,

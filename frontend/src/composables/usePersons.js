@@ -3,6 +3,7 @@ import { usePersonsData } from './usePersonsData.js'
 import { useOrphans } from './useOrphans.js'
 import { useLinkEditor } from './useLinkEditor.js'
 import { buildAliasGraph } from '../utils/personLayout.js'
+import { pushToast } from './useToasts.js'
 
 export function usePersons(props, emit) {
   const expandedIbans = ref(new Set())
@@ -28,6 +29,7 @@ export function usePersons(props, emit) {
       expandedIbans.value.add(iban)
       navigator.clipboard?.writeText(iban).catch(() => {})
       copiedIban.value = iban
+      pushToast({ kind: 'ok', title: 'Скопировано', ttl: 1500 })
       setTimeout(() => {
         copiedIban.value = ''
       }, 1200)

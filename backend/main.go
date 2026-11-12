@@ -129,6 +129,7 @@ func main() {
 	mux.HandleFunc("/api/users/alias", server.EnableCORS(server.HandleAddAlias))
 	mux.HandleFunc("/api/users/link-account", server.EnableCORS(server.HandleLinkAccount))
 	mux.HandleFunc("/api/alias-structures", server.EnableCORS(server.HandleAliasStructures))
+	mux.HandleFunc("/api/iban-masks", server.EnableCORS(server.HandleIBANMasks))
 
 	mux.HandleFunc("/api/sync/import-csv", server.EnableCORS(server.HandleImportCSV))
 

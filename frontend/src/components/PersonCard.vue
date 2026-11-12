@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { formatMaskedIBAN, lifeSpan } from '../utils/formatters.js'
+import MaskedId from './ui/MaskedId.vue'
 import { buildPersonLayout } from '../utils/personLayout.js'
 import { bankTheme } from '../utils/bankTheme.js'
 import { readClipboardText } from '../utils/clipboard.js'
@@ -258,10 +259,9 @@ const onPasteName = () => pasteFromClipboard('paste-name')
                   class="flex items-center gap-1 min-w-0 text-[9px] font-bold cursor-pointer select-none"
                 >
                   <UiDot :cached="isSignatureInCache(tile.iban)" />
-                  <span class="tracking-wide" :class="expandedIbans.has(tile.iban) ? 'break-all' : 'truncate'">
-                    {{ expandedIbans.has(tile.iban) ? tile.iban : formatMaskedIBAN(tile.iban) }}
+                  <span class="tracking-wide" :class="[expandedIbans.has(tile.iban) ? 'break-all' : 'truncate', copiedIban === tile.iban && 'text-emerald-300']">
+                    <template v-if="expandedIbans.has(tile.iban)">{{ tile.iban }}</template><MaskedId v-else :id="tile.iban" compact />
                   </span>
-                  <span v-if="copiedIban === tile.iban" class="text-emerald-400 shrink-0">✓</span>
                 </div>
                 <span v-else class="text-[8px] font-bold tracking-widest opacity-50 select-none">КАРТА</span>
 
@@ -280,10 +280,9 @@ const onPasteName = () => pasteFromClipboard('paste-name')
                   v-if="tile.mainPan"
                   @click="emit('click-iban', tile.mainPan)"
                   class="text-[11px] font-semibold tracking-wider cursor-pointer select-none"
-                  :class="expandedIbans.has(tile.mainPan) ? 'break-all' : 'truncate'"
+                  :class="[expandedIbans.has(tile.mainPan) ? 'break-all' : 'truncate', copiedIban === tile.mainPan && 'text-emerald-300']"
                 >
                   {{ expandedIbans.has(tile.mainPan) ? tile.mainPan : formatMaskedIBAN(tile.mainPan) }}
-                  <span v-if="copiedIban === tile.mainPan" class="text-emerald-400 text-[9px] font-bold">✓</span>
                 </div>
 
                 <div v-if="tile.otherPans.length > 0" class="flex flex-wrap items-center gap-1 text-[8px]">
@@ -293,9 +292,9 @@ const onPasteName = () => pasteFromClipboard('paste-name')
                     :key="otherPan"
                     @click="emit('click-iban', otherPan)"
                     class="px-1 py-px rounded border border-white/15 bg-black/20 cursor-pointer select-none hover:border-white/40 transition-colors truncate max-w-full"
+                    :class="copiedIban === otherPan && 'text-emerald-300 border-emerald-400/50'"
                   >
                     {{ expandedIbans.has(otherPan) ? otherPan : formatMaskedIBAN(otherPan) }}
-                    <span v-if="copiedIban === otherPan" class="text-emerald-400 font-bold ml-0.5">✓</span>
                   </span>
                 </div>
               </div>

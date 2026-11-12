@@ -13,6 +13,8 @@ export const prepareAccount = (acc) => {
     key: acc.id || acc.iban,
     // без идентификатора в алиасе файла имя счёта не показываем: как у любой карты без IBAN — «КАРТА»
     displayIban: noIban ? 'КАРТА' : formatMaskedIBAN(rawIban),
+    rawIban: noIban ? '' : rawIban, // полный номер: для разворота, копирования и скрытого вида
+    rawPans: pans,
     pans: pans.map(formatMaskedIBAN),
     ids: [rawIban, ...pans].filter(x => x && (isIbanLike(x) || isPanLike(x))), // для сопоставления контрагента операций
     theme
@@ -26,6 +28,8 @@ export const cardFromTile = (t) => ({
   id: t.cacheAcc?.id || null,
   balance: t.cacheAcc ? t.cacheAcc.balance : null,
   displayIban: t.iban ? formatMaskedIBAN(t.iban) : 'КАРТА',
+  rawIban: t.iban || '',
+  rawPans: t.pans || [],
   pans: (t.pans || []).map(formatMaskedIBAN),
   ids: [t.iban, ...(t.pans || [])].filter(Boolean), // все идентификаторы для сопоставления контрагента
   theme: bankTheme(t.bankKey, t.type)

@@ -11,6 +11,7 @@ import OperationalView from './views/OperationalView.vue'
 import PersonsView from './views/PersonsView.vue'
 import { cleanPersonName, isP2PTransaction } from './utils/formatters.js'
 import { API_BASE } from './utils/api.js'
+import { loadMasks } from './composables/useIbanMasks.js'
 
 const STORAGE_ACTIVE_TAB = 'economic_active_tab'
 
@@ -114,6 +115,7 @@ const loadData = async () => {
     if (accRes.ok) accounts.value = (await accRes.json()) || []
     if (txRes.ok) transactions.value = (await txRes.json()) || []
     errorMsg.value = ''
+    loadMasks() // новые счета после синхронизации получают скрытый вид на бэкенде
   } catch (err) {
     errorMsg.value = err.message
   }

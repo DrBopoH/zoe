@@ -1,6 +1,7 @@
 <script setup>
 import { lifeSpan, money, signed, formatMoney } from '../utils/formatters.js'
 import UiDot from './ui/UiDot.vue'
+import MaskedId from './ui/MaskedId.vue'
 import { computed } from 'vue'
 import { walletName, walletText, fmtQty, walletsOf, bondsOf } from '../utils/portfolioView.js'
 
@@ -36,10 +37,11 @@ const dlt = (uah) => (rate.value ? signed(uah / rate.value) : signed(uah))
         <div class="flex items-center gap-2 min-w-0">
           <UiDot :cached="cached" />
           <div
-            class="truncate"
-            :class="card.displayIban === 'КАРТА' ? 'text-sm font-bold tracking-wide opacity-50 select-none' : 'text-sm font-bold tracking-wide'"
+            class="min-w-0 text-sm font-bold tracking-wide"
+            :class="card.displayIban === 'КАРТА' && 'truncate opacity-50 select-none'"
           >
-            {{ card.displayIban }}
+            <MaskedId v-if="card.rawIban" :id="card.rawIban" interactive />
+            <template v-else>{{ card.displayIban }}</template>
           </div>
         </div>
 
@@ -51,7 +53,8 @@ const dlt = (uah) => (rate.value ? signed(uah / rate.value) : signed(uah))
           :class="i === 0 ? 'opacity-80' : 'opacity-50'"
         >
           <span class="opacity-50 select-none">└─</span>
-          <span class="tracking-wider">{{ pan }}</span>
+          <MaskedId v-if="card.rawPans && card.rawPans[i]" class="tracking-wider" :id="card.rawPans[i]" interactive />
+          <span v-else class="tracking-wider">{{ pan }}</span>
           <button v-if="removablePans" type="button" class="pan-x" title="Отвязать карту" @click.stop="emit('remove-pan', i)">×</button>
         </div>
       </div>

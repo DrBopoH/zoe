@@ -759,3 +759,35 @@ func (s *Server) abortOffline(progs []*accProg, from int) {
 		s.prog.accDone(progs[j], walkStats{}, errOffline)
 	}
 }
+
+// HandleIBANMasks — GET /api/iban-masks: скрытые виды IBAN (нет записи — генерируется и сохраняется);
+// POST/PUT {iban, masked}: свой псевдоним-имя счёта, пустой masked — вернуть автоматическую маску.
+func (s *Server) HandleIBANMasks(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	switch r.Method {
+	case http.MethodGet:
+		m, err := s.storage.IBANMasks()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(m)
+	case http.MethodPost, http.MethodPut:
+		var req struct {
+			IBAN   string `json:"iban"`
+			Masked string `json:"masked"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.IBAN) == "" {
+			http.Error(w, "Invalid payload", http.StatusBadRequest)
+			return
+		}
+		m, err := s.storage.SetIBANMask(req.IBAN, req.Masked)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(m)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
