@@ -97,8 +97,8 @@ func TestBinanceIdentityComesFromStatement(t *testing.T) {
 	}
 }
 
-// Оценка портфеля (минутный ряд и баланс) пишется отдельно от журнала; новая выписка сбрасывает ряд до пересборки.
-func TestBinanceSeriesIsRebuiltAfterNewStatement(t *testing.T) {
+// Оценка портфеля (минутный ряд и баланс) пишется отдельно от журнала.
+func TestBinanceSeriesSurvivesRepeatedStatement(t *testing.T) {
 	s, _, _ := newS(t)
 	_ = s.SaveBinanceStatement(bnFile, bnProfile, bnRows())
 	t0 := int64(1_700_000_000) / 60 * 60
@@ -111,9 +111,42 @@ func TestBinanceSeriesIsRebuiltAfterNewStatement(t *testing.T) {
 	if len(s.BinanceDetail()) == 0 {
 		t.Fatal("разбор не сохранён")
 	}
+	_ = s.SaveBinanceStatement(bnFile, bnProfile, bnRows()) // та же выписка: новых строк нет — ряд не трогаем
+	if _, _, n := s.BinanceSeriesInfo(); n != 3 {
+		t.Fatalf("повторная загрузка не должна сбрасывать ряд, точек: %d", n)
+	}
+}
+
+// Новая выписка с более поздними строками обрезает ряд только с минуты первой новой строки: раньше — остаётся.
+func TestBinanceSeriesIsTrimmedFromFirstNewRow(t *testing.T) {
+	s, _, _ := newS(t)
 	_ = s.SaveBinanceStatement(bnFile, bnProfile, bnRows())
+	t0 := int64(1_700_000_000) / 60 * 60
+	// ряд на 10 минут от первой строки журнала
+	vals := make([]float64, 10)
+	for i := range vals {
+		vals[i] = float64(100 + i)
+	}
+	if err := s.SaveBinance(BinanceSave{Portfolio: 109, Start: t0, Vals: vals, Replace: true, Origin: 90}); err != nil {
+		t.Fatal(err)
+	}
+	later := []BinanceRow{{T: (t0 + 5*60) * 1000, Account: "Spot", Op: "Deposit", Asset: "USDT", Delta: 5, Kind: "deposit"}}
+	_ = s.SaveBinanceStatement("Binance Тест 2.csv", bnProfile, append(bnRows(), later...)) // старые строки перекрываются, новая — одна
+	first, last, n := s.BinanceSeriesInfo()
+	if first != t0 || last != t0+4*60 || n != 5 {
+		t.Fatalf("ряд должен остаться до минуты новой строки: %d–%d, точек %d", first, last, n)
+	}
+	if _, ok := s.binanceOrigin(); !ok {
+		t.Fatal("оценка до начала ряда должна сохраниться, ряд не пересобирается с нуля")
+	}
+	// строка раньше начала ряда меняет всё прошлое — ряд сбрасывается целиком
+	earlier := []BinanceRow{{T: (t0 - 600) * 1000, Account: "Spot", Op: "Deposit", Asset: "USDT", Delta: 1, Kind: "deposit"}}
+	_ = s.SaveBinanceStatement("Binance Тест 3.csv", bnProfile, earlier)
 	if _, _, n := s.BinanceSeriesInfo(); n != 0 {
-		t.Fatal("ряд должен быть сброшен до пересборки")
+		t.Fatalf("новая строка раньше начала ряда: ряд должен сброситься, точек %d", n)
+	}
+	if _, ok := s.binanceOrigin(); ok {
+		t.Fatal("origin сбрасывается вместе с рядом")
 	}
 }
 

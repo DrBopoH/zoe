@@ -188,15 +188,38 @@ func TestBinanceStatementThenCrawlerIntoCache(t *testing.T) {
 		t.Fatalf("операции задвоились: %+v", txs)
 	}
 
-	// повторная загрузка того же файла журнал не задваивает, ряд сбрасывается до пересборки
+	// повторная загрузка того же файла журнал не задваивает и ряд не трогает: новых строк нет
 	if _, err := s.importSource(stmtName, []byte(stmtFor(dep, trd))); err != nil {
 		t.Fatal(err)
 	}
 	if rows, _ := st.BinanceLedger(); len(rows) != 3 {
 		t.Fatalf("журнал: %d строк", len(rows))
 	}
-	if _, _, n := st.BinanceSeriesInfo(); n != 0 {
-		t.Fatal("после выписки ряд сброшен до пересборки")
+	_, lastBefore, nBefore := st.BinanceSeriesInfo()
+	if nBefore < 180 {
+		t.Fatalf("повторная загрузка не должна сбрасывать ряд: %d точек", nBefore)
+	}
+
+	// выписка с новой, более поздней строкой (депозит 10 USDT): ряд обрезается с её минуты, раньше остаётся
+	extra := now.Add(-30 * time.Minute)
+	if _, err := s.importSource("Binance-2-(UTC+0).csv", []byte(stmtFor(dep, trd)+"7,"+extra.Format("2006-01-02 15:04:05")+",Spot,Deposit,USDT,10,\n")); err != nil {
+		t.Fatal(err)
+	}
+	cut := extra.Unix() / 60 * 60
+	first, lastTrim, nTrim := st.BinanceSeriesInfo()
+	if first != dep.Unix() || lastTrim != cut-60 || nTrim >= nBefore {
+		t.Fatalf("ряд должен кончаться за минуту до новой строки: first=%d last=%d (ждали %d) n=%d", first, lastTrim, cut-60, nTrim)
+	}
+	crawlBinanceOnce(s) // дорисовывает хвост по таймлайне: внутри хвоста депозит, остатки не «текущие» на весь хвост
+	first, last, n := st.BinanceSeriesInfo()
+	if first != dep.Unix() || last < lastBefore-60 || n < nBefore {
+		t.Fatalf("после «Разведать» ряд должен быть целым: first=%d last=%d n=%d", first, last, n)
+	}
+	if _, v, _ := st.BinanceLastMinute(); v != 40400 { // (1000−600+10) USDT + 0.01 BTC·60000 = 1010 $ × 40
+		t.Fatalf("последняя точка %.2f, ждали 40400", v)
+	}
+	if cs, has, err := st.BinanceCandles([]int64{cut - 120}, cut-60); err != nil || !has[0] || cs[0][3] != 40000 { // до депозита портфель прежний
+		t.Fatalf("до новой строки значение изменилось: %v %v %v", cs, has, err)
 	}
 
 	// вайп кеша сносит Binance целиком; «Загрузить» и «Разведать» восстанавливают

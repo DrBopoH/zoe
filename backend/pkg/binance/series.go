@@ -395,20 +395,6 @@ func ones(n int) []float64 {
 	return o
 }
 
-// ExtendSeries дописывает ряд от fromMs до endMs при неизменных остатках cur (пока нет новых движений, они те же).
-func (c *Client) ExtendSeries(cur map[string]float64, fromMs, endMs int64) (*SeriesResult, error) {
-	syms, err := c.Symbols()
-	if err != nil {
-		return nil, err
-	}
-	g0 := fromMs / minute * minute
-	end := endMs / minute * minute
-	if end < g0 {
-		return &SeriesResult{StartMs: g0}, nil
-	}
-	return c.Series([]Point{{T: g0, H: cur}}, g0, end, syms, nil)
-}
-
 type histErr string
 
 func (e histErr) Error() string { return string(e) }

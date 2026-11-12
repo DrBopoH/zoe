@@ -101,7 +101,7 @@ func (s *Server) crawlBinance(ctx context.Context) {
 	}
 }
 
-// syncBinance: журнал из кеша → остатки → оценка в ₴ → минутный ряд (с нуля, если в кеше его нет; иначе дописать до сейчас) → кеш.
+// syncBinance: журнал из кеша → остатки → оценка в ₴ → минутный ряд (с нуля, если в кеше его нет; иначе дописать хвост до сейчас) → кеш.
 func (s *Server) syncBinance(ctx context.Context, progress func(done, total int)) error {
 	c := s.bn.client
 	if c == nil {
@@ -141,27 +141,30 @@ func (s *Server) syncBinance(ctx context.Context, progress func(done, total int)
 		vals    []float64
 		replace bool
 	)
-	totals := map[string]float64{}
-	for a, w := range h {
-		if t := w.Total(); t != 0 {
-			totals[a] = t
-		}
-	}
+	syms := func() (map[string]binance.Sym, error) { return c.Symbols() }
+	end := now.UnixMilli() / 60_000 * 60_000
 	if last, _, have := s.storage.BinanceLastMinute(); have {
-		res, err := c.ExtendSeries(totals, last*1000, now.UnixMilli())
+		// ряд уже есть (целиком или обрезанный новой выпиской с минуты первой новой строки): дорисовываем хвост от последней
+		// минуты. Остатки берём из настоящей таймлайны — после новой выписки внутри хвоста есть движения, текущие остатки не годятся.
+		sm, err := syms()
 		if err != nil {
+			warns = append(warns, "минутный ряд: "+err.Error())
+		} else if res, err := c.Series(binance.Timeline(flows, now.UnixMilli()), last*1000, end, sm, progress); err != nil {
 			warns = append(warns, "минутный ряд: "+err.Error())
 		} else if len(res.Values) > 0 {
 			start, vals = res.StartMs/1000, res.Values
+			if len(res.Unpriced) > 0 {
+				warns = append(warns, "нет минутных цен: "+strings.Join(res.Unpriced, ", "))
+			}
 		}
 	} else if len(flows) > 0 {
-		syms, err := c.Symbols()
+		sm, err := syms()
 		if err != nil {
 			return err
 		}
 		pts := binance.Timeline(flows, now.UnixMilli())
 		g0 := pts[0].T / 60_000 * 60_000
-		res, err := c.Series(pts, g0, now.UnixMilli()/60_000*60_000, syms, progress)
+		res, err := c.Series(pts, g0, end, sm, progress)
 		if err != nil {
 			return err
 		}

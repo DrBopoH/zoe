@@ -101,13 +101,18 @@ func (s *Storage) saveBinanceStatement(filename, profile string, rows []BinanceR
 	}
 	defer tx.Rollback()
 	seen := map[string]int{}
+	var firstNew int64 // самая ранняя из действительно новых строк (мс); 0 — новых нет
 	for _, r := range rows {
 		base := rowID(r, 0)
 		occ := seen[base]
 		seen[base]++
-		if _, err := tx.Exec(`INSERT OR IGNORE INTO binance_ledger(id,t,account,op,asset,delta,kind,note) VALUES(?,?,?,?,?,?,?,?)`,
-			rowID(r, occ), r.T, r.Account, r.Op, r.Asset, r.Delta, r.Kind, r.Note); err != nil {
+		res, err := tx.Exec(`INSERT OR IGNORE INTO binance_ledger(id,t,account,op,asset,delta,kind,note) VALUES(?,?,?,?,?,?,?,?)`,
+			rowID(r, occ), r.T, r.Account, r.Op, r.Asset, r.Delta, r.Kind, r.Note)
+		if err != nil {
 			return err
+		}
+		if n, _ := res.RowsAffected(); n > 0 && (firstNew == 0 || r.T < firstNew) {
+			firstNew = r.T
 		}
 	}
 	if _, err := tx.Exec(`INSERT INTO binance_state(k,v) VALUES('profile',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`, profile); err != nil {
@@ -119,13 +124,36 @@ func (s *Storage) saveBinanceStatement(filename, profile string, rows []BinanceR
 	if _, err := tx.Exec(`UPDATE accounts SET opened_at = COALESCE((SELECT MIN(t)/1000 FROM binance_ledger), 0) WHERE id = ?`, BinanceAccountID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM binance_minutes`); err != nil { // новые строки меняют прошлое: ряд соберётся заново при «Разведать»
-		return err
-	}
-	if _, err := tx.Exec(`DELETE FROM binance_state WHERE k = 'origin'`); err != nil {
+	if err := trimSeriesFrom(tx, firstNew); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// trimSeriesFrom: минутный ряд зависит только от журнала до своей минуты, поэтому новые строки портят его только от самой
+// ранней из них. Всё раньше остаётся, обрезается хвост — «Разведать» дорисует его, а не соберёт ряд с нуля.
+// Строк новых нет (выписку загрузили повторно) — ряд не трогаем. Новая строка раньше начала ряда — ряд собирается заново.
+func trimSeriesFrom(tx *sql.Tx, firstNewMs int64) error {
+	if firstNewMs == 0 {
+		return nil
+	}
+	cut := firstNewMs / 60_000 * 60 // минута, в которой лежит новая строка (unix, сек)
+	var first sql.NullInt64
+	if err := tx.QueryRow(`SELECT MIN(ts) FROM binance_minutes`).Scan(&first); err != nil {
+		return err
+	}
+	if !first.Valid {
+		return nil
+	}
+	if cut <= first.Int64 {
+		if _, err := tx.Exec(`DELETE FROM binance_minutes`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`DELETE FROM binance_state WHERE k = 'origin'`) // «оценка до начала ряда» теряет смысл вместе с рядом
+		return err
+	}
+	_, err := tx.Exec(`DELETE FROM binance_minutes WHERE ts >= ?`, cut)
+	return err
 }
 
 // BinanceLedger — весь журнал по времени.
