@@ -319,3 +319,17 @@ func TestLegacyICUTablesAreKeptAndBondsCopied(t *testing.T) {
 		t.Fatalf("данные старого журнала должны сохраниться: %v %v", amount, err)
 	}
 }
+
+// Карточка брокерского счёта: свободные деньги отдельно от стоимости облигаций, вместе они дают баланс счёта.
+func TestICUPortfolioCashAndBonds(t *testing.T) {
+	s, _, _ := newS(t)
+	seedReport(t, s)
+	acc := icuAccount(t, s)
+	p := acc.Portfolio
+	if p == nil || p.Kind != "bonds" {
+		t.Fatalf("состав счёта: %+v", p)
+	}
+	if d := p.Cash + p.Invested - acc.Balance; d > 0.011 || d < -0.011 {
+		t.Fatalf("деньги %.2f + облигации %.2f ≠ баланс %.2f", p.Cash, p.Invested, acc.Balance)
+	}
+}

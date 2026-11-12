@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { formatMoney } from '../utils/formatters.js'
+import { moneySigned, curSym } from '../utils/formatters.js'
 
 // История выбранной карты. Рядки-контрагенты — цели для drop карты (привязка к алиасу контрагента).
 const props = defineProps({
@@ -30,9 +30,7 @@ const onDrop = (e, r) => {
   emit('drop-row', r)
 }
 
-const CURRENCY = { 980: '₴', 840: '$', 978: '€', 985: 'zł' }
-const cur = (t) => CURRENCY[t.currency_code] || (t.currency_code ? String(t.currency_code) : '₴')
-const money = (t) => `${t.amount > 0 ? '+' : t.amount < 0 ? '−' : ''}${formatMoney(Math.abs(t.amount))} ${cur(t)}`
+const money = (t) => moneySigned(t.amount, curSym(t.currency_code))
 const tone = (v) => (v > 0 ? 'text-emerald-400' : v < 0 ? 'text-rose-400' : 'text-slate-400')
 const pad = (n) => String(n).padStart(2, '0')
 const dateStr = (iso) => { const d = new Date(iso); return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}` }

@@ -24,7 +24,7 @@ const tag = (label, style) => ({ label, cls: STYLE[style] })
 const ARROW = { label: '→', sep: true }
 
 // Кошельки Binance (названия из журнала выписки)
-const WALLET = {
+export const WALLET = {
   Spot: ['SPOT', 'spot'],
   Funding: ['FUNDING', 'funding'],
   Strategy: ['STRATEGY', 'strategy'],

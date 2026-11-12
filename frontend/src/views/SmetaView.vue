@@ -1,6 +1,6 @@
 <script setup>
 import { computed, toRef } from 'vue'
-import { formatMoney } from '../utils/formatters.js'
+import { money, signed } from '../utils/formatters.js'
 import CandleChart from '../components/CandleChart.vue'
 import { useCapitalChart } from '../composables/useCapitalChart.js'
 
@@ -49,15 +49,7 @@ const monthlyDelta = computed(() => {
     <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       <div class="bg-slate-900/60 border border-slate-800 p-5 rounded space-y-2">
         <span class="text-[10px] text-slate-500 uppercase tracking-wider block">Капитал</span>
-        <div class="flex flex-wrap items-baseline gap-3">
-          <span class="text-2xl font-bold text-white">{{ formatMoney(totalValueUAH) }} ₴</span>
-          <span
-            class="text-xs font-bold px-2 py-0.5 rounded border"
-            :class="monthlyDelta >= 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20'"
-          >
-            {{ monthlyDelta >= 0 ? '+' : '' }}{{ formatMoney(monthlyDelta) }} ₴
-          </span>
-        </div>
+        <div class="text-2xl font-bold text-white">{{ money(totalValueUAH) }}<sub class="font-bold ml-1" style="font-size:11px;vertical-align:baseline;position:relative;top:0.35em" :class="monthlyDelta >= 0 ? 'text-emerald-400' : 'text-rose-400'" title="За месяц">{{ signed(monthlyDelta) }}</sub></div>
       </div>
     </section>
 

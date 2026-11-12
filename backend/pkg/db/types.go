@@ -1,5 +1,7 @@
 package db
 
+import "encoding/json"
+
 // ───────── Статика (core.db): то, что нельзя терять ─────────
 
 // AliasLink — запомненная связь «алиас → счёт/карта».
@@ -61,6 +63,29 @@ type Account struct {
 
 	BankKey   string `json:"bank_key,omitempty"`   // бренд счёта-«не банка»: icu (брокерский отчёт) или binance
 	HasDetail bool   `json:"has_detail,omitempty"` // у счёта есть своя модалка (журнал ICU, портфель Binance)
+
+	Portfolio *PortfolioView `json:"portfolio,omitempty"` // состав счёта для карточки (считается на чтении): облигации ICU или кошельки Binance
+}
+
+// PortfolioView — что лежит на счёте-«не банке».
+//
+//	bonds   — свободные деньги, стоимость всех облигаций и позиции (штуки, ISIN, накопленный купон)
+//	wallets — Binance: кошелёк → монета (JSON из последней «Разведки»: binance.WalletLine)
+type PortfolioView struct {
+	Kind     string          `json:"kind"`
+	Cash     float64         `json:"cash"`
+	Invested float64         `json:"invested"`
+	Bonds    []BondLine      `json:"bonds,omitempty"`
+	Wallets  json.RawMessage `json:"wallets,omitempty"`
+	USDTUAH  float64         `json:"usdt_uah,omitempty"` // курс из последней «Разведки»: баланс Binance на карточке показывается в долларах
+}
+
+// BondLine — позиция по облигации: накопленный купон (НКД) на всю позицию.
+type BondLine struct {
+	ISIN    string  `json:"isin"`
+	Name    string  `json:"name"`
+	Qty     float64 `json:"qty"`
+	Accrued float64 `json:"accrued"`
 }
 
 type Transaction struct {

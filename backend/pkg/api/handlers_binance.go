@@ -176,6 +176,7 @@ func (s *Server) syncBinance(ctx context.Context, progress func(done, total int)
 	}
 	detail := map[string]any{
 		"taken_at": now.Unix(), "total": v.TotalUAH, "usdt_uah": v.USDTUAH, "items": v.Items, "unpriced": v.Unpriced,
+		"wallets":  binance.WalletLines(h, rows, prices), // позиции по кошелькам для карточки счёта
 		"history":  map[string]any{"flows": len(flows), "at": now.Unix(), "flow_at": secs(flowAt)},
 		"warnings": warns,
 	}

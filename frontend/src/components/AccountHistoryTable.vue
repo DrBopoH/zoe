@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { formatMoney, formatMaskedIBAN } from '../utils/formatters.js'
+import { formatMoney, formatMaskedIBAN, money as fmtMoney, moneySigned, curSym } from '../utils/formatters.js'
 import { counterpartyName, isPersonTransaction } from '../utils/personLayout.js'
 import UiButton from './ui/UiButton.vue'
 import { effectiveTimes, isDateOnly } from '../utils/historyOrder.js'
@@ -63,10 +63,9 @@ const totals = computed(() => {
   return { income: r(income), expense: r(expense), net: r(income + expense) }
 })
 
-const CURRENCY = { 980: '₴', 840: '$', 978: '€', 985: 'zł' }
-const cur = (t) => CURRENCY[t.currency_code] || (t.currency_code ? String(t.currency_code) : '₴')
+const cur = (t) => curSym(t.currency_code)
 
-const money = (v, t) => `${v > 0 ? '+' : v < 0 ? '−' : ''}${formatMoney(Math.abs(v))} ${cur(t)}`
+const money = (v, t) => moneySigned(v, cur(t))
 const tone = (v) => (v > 0 ? 'text-emerald-400' : v < 0 ? 'text-rose-400' : 'text-slate-400')
 
 const pad = (n) => String(n).padStart(2, '0')
@@ -98,8 +97,8 @@ const details = (t) => {
     ['Счёт контрагента', t.counter_iban],
     ['MCC', t.mcc || ''],
     ['Сумма операции', t.operation_amount && t.operation_amount !== t.amount ? money(t.operation_amount, t) : ''],
-    ['Комиссия', t.commission ? `${formatMoney(t.commission)} ${cur(t)}` : ''],
-    ['Кэшбэк', t.cashback ? `${formatMoney(t.cashback)} ${cur(t)}` : ''],
+    ['Комиссия', t.commission ? fmtMoney(t.commission, cur(t)) : ''],
+    ['Кэшбэк', t.cashback ? fmtMoney(t.cashback, cur(t)) : ''],
     ['Статус', t.is_hold ? 'Холд (не проведена)' : ''],
     ['ID', t.id]
   ]

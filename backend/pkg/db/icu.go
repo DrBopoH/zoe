@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -156,7 +157,10 @@ func (s *Storage) GetAllAccounts() ([]Account, error) {
 			list[i].IBAN = s.icuIBAN(list[i])
 			if st, err := s.accountState(list[i].ID); err == nil {
 				list[i].Balance = st.Balance
+				list[i].Portfolio = bondsPortfolio(st)
 			}
+		case BinanceAccountType:
+			list[i].Portfolio = s.walletsPortfolio()
 		}
 	}
 	return list, nil
@@ -363,4 +367,28 @@ func (s *Storage) ICUOverview(accountID string) (ICUOverview, error) {
 		return ov, err
 	}
 	return ov, nil
+}
+
+// bondsPortfolio — карточка брокерского счёта: свободные деньги отдельно от стоимости облигаций (Balance = Cash + Invested).
+func bondsPortfolio(st AccountState) *PortfolioView {
+	p := &PortfolioView{Kind: "bonds", Cash: round2(st.Cash) + 0}
+	for _, pos := range st.Positions {
+		p.Invested += pos.Value
+		p.Bonds = append(p.Bonds, BondLine{ISIN: pos.ISIN, Name: pos.Name, Qty: pos.Qty, Accrued: round2(pos.Qty * pos.Accrued)})
+	}
+	p.Invested = round2(p.Invested)
+	return p
+}
+
+// walletsPortfolio — позиции Binance по кошелькам из последней «Разведки» (нет — карточка без состава).
+func (s *Storage) walletsPortfolio() *PortfolioView {
+	var d struct {
+		Wallets json.RawMessage `json:"wallets"`
+		USDTUAH float64         `json:"usdt_uah"`
+	}
+	raw := s.BinanceDetail()
+	if len(raw) == 0 || json.Unmarshal(raw, &d) != nil || len(d.Wallets) == 0 || string(d.Wallets) == "null" {
+		return nil
+	}
+	return &PortfolioView{Kind: "wallets", Wallets: d.Wallets, USDTUAH: d.USDTUAH}
 }

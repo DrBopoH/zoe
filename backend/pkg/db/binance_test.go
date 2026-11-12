@@ -316,3 +316,21 @@ func mustAll(t *testing.T, s *Storage) []Transaction {
 	}
 	return list
 }
+
+// Состав Binance для карточки берётся из последней «Разведки»; до неё карточка без состава.
+func TestBinancePortfolioFromDetail(t *testing.T) {
+	s, _, _ := newS(t)
+	_ = s.SaveBinanceStatement(bnFile, bnProfile, bnRows())
+	if accs, _ := s.GetAllAccounts(); accs[0].Portfolio != nil {
+		t.Fatalf("до разведки состава нет: %+v", accs[0].Portfolio)
+	}
+	wallets := []map[string]any{{"wallet": "Spot", "items": []map[string]any{{"asset": "SOL", "qty": 0.333}}}}
+	if err := s.SaveBinance(BinanceSave{Portfolio: 100, Detail: map[string]any{"wallets": wallets}}); err != nil {
+		t.Fatal(err)
+	}
+	accs, _ := s.GetAllAccounts()
+	p := accs[0].Portfolio
+	if p == nil || p.Kind != "wallets" || len(p.Wallets) == 0 {
+		t.Fatalf("состав: %+v", p)
+	}
+}

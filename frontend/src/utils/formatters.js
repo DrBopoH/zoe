@@ -123,3 +123,11 @@ export const formatDuration = (sec) => {
   if (m < 60) return `${m} мин`
   return `${Math.floor(m / 60)} ч ${String(m % 60).padStart(2, '0')} мин`
 }
+
+// Валюта ВСЕГДА перед числом: «₴ 1 234,50», «−$ 5,00». Знак — перед символом.
+export const CUR = { 980: '₴', 840: '$', 978: '€', 985: 'zł', UAH: '₴', USD: '$', EUR: '€' }
+export const curSym = (code, fallback = '₴') => CUR[code] || (code ? String(code) : fallback)
+export const money = (val, sym = '₴') => `${sym}\u00A0${formatMoney(val)}`
+export const moneySigned = (val, sym = '₴') => `${val > 0 ? '+' : val < 0 ? '−' : ''}${sym}\u00A0${formatMoney(Math.abs(val))}`
+// Дельта — дочерняя от основного числа: без символа валюты («+1,20»)
+export const signed = (val) => `${val > 0 ? '+' : val < 0 ? '−' : ''}${formatMoney(Math.abs(val))}`

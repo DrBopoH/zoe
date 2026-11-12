@@ -723,7 +723,7 @@ watch(() => (series.value ? series.value.n : 0), (n) => {
         <span class="text-slate-200 font-bold">{{ formatDateLong(hoveredMarker.date) }}</span>
         <span :style="{ color: hoveredMarker.color || '#fbbf24' }">{{ hoveredMarker.kind === 'coupon' ? 'Купон' : 'Погашение' }}</span>
         <span class="text-slate-400">{{ hoveredMarker.isin }}</span>
-        <strong class="text-emerald-400">+{{ formatMoney(hoveredMarker.amount) }} ₴</strong>
+        <strong class="text-emerald-400">+₴ {{ formatMoney(hoveredMarker.amount) }}</strong>
         <span class="text-slate-500">за 1 шт. ({{ hoveredMarker.unit }} из {{ hoveredMarker.of }})</span>
         <span class="text-slate-500">{{ hoveredMarker.done ? 'получено' : 'по графику' }}</span>
       </div>
