@@ -4,16 +4,13 @@ package novapay
 
 import (
 	"bytes"
-	"crypto/sha1"
+	"economic/pkg/stmtkit"
 	"encoding/csv"
-	"encoding/hex"
 	"fmt"
-	"math"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
-	_ "time/tzdata" // Europe/Kyiv и на системах без базы часовых поясов
 
 	"economic/pkg/mono"
 )
@@ -32,13 +29,6 @@ var (
 	reMCC         = regexp.MustCompile(`,\s*(\d{4}),\s*від\s`)
 	reLegalForm   = regexp.MustCompile(`(?i)^\s*товариство\s+з\s+обмеженою\s+відповідальністю\s*`)
 )
-
-var kyiv = func() *time.Location {
-	if l, err := time.LoadLocation("Europe/Kyiv"); err == nil {
-		return l
-	}
-	return time.Local
-}()
 
 type Result struct {
 	IBAN         string
@@ -87,15 +77,15 @@ func ParseCSV(raw []byte) (*Result, error) {
 		if len(row) < 5 {
 			continue
 		}
-		ts, err := time.ParseInLocation("02.01.2006 15:04", strings.TrimSpace(row[0]), kyiv)
+		ts, err := time.ParseInLocation("02.01.2006 15:04", strings.TrimSpace(row[0]), stmtkit.Kyiv)
 		if err != nil {
 			continue
 		}
 		desc := strings.TrimSpace(row[3])
-		cents := toCents(amount(row[4]))
+		cents := stmtkit.Cents(amount(row[4]))
 		fee := int64(0)
 		if len(row) > 5 {
-			fee = toCents(amount(row[5])) // «-» → 0; суммы комиссий в выписке идут отдельными строками
+			fee = stmtkit.Cents(amount(row[5])) // «-» → 0; суммы комиссий в выписке идут отдельными строками
 		}
 		it := mono.StatementItemDTO{
 			ID: id(res.IBAN, ts.Unix(), cents, desc, seen), Time: ts.Unix(), Description: desc,
@@ -121,8 +111,6 @@ func amount(s string) float64 {
 	return v
 }
 
-func toCents(v float64) int64 { return int64(math.Round(v * 100)) }
-
 // CounterCard — маска карты контрагента из описания («414951***5262» → «4149****5262»), пусто если её нет.
 // Своя карта в описании зачисления («на карту № 517547******0170») идёт раньше карты отправителя — берётся последняя.
 func CounterCard(desc string) string {
@@ -134,14 +122,7 @@ func CounterCard(desc string) string {
 	return m[1] + "****" + m[2]
 }
 
-// id стабилен между выгрузками; одинаковые операции в одну минуту различаются суффиксом.
+// id стабилен между выгрузками (см. stmtkit.StableID).
 func id(account string, ts, cents int64, desc string, seen map[string]int) string {
-	sum := sha1.Sum([]byte(fmt.Sprintf("%s|%d|%d|%s", account, ts, cents, desc)))
-	base := hex.EncodeToString(sum[:])[:20]
-	n := seen[base]
-	seen[base]++
-	if n == 0 {
-		return "csv_novapay_" + base
-	}
-	return fmt.Sprintf("csv_novapay_%s_%d", base, n)
+	return stmtkit.StableID("csv_novapay_", fmt.Sprintf("%s|%d|%d|%s", account, ts, cents, desc), seen)
 }

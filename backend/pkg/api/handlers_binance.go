@@ -229,13 +229,11 @@ func (s *Server) valueBinanceTxs(ctx context.Context, c *binance.Client) {
 
 // GET /api/binance — что запомнил кеш: разбор по монетам и пределы минутного ряда. Ничего не опрашивает.
 func (s *Server) HandleBinance(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !allow(w, r, http.MethodGet) {
 		return
 	}
 	first, last, n := s.storage.BinanceSeriesInfo()
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	writeJSON(w, map[string]any{
 		"loaded": s.storage.HasBinance(), "profile": s.storage.BinanceProfile(), "detail": s.storage.BinanceDetail(),
 		"first": first, "last": last, "points": n,
 	})
@@ -243,8 +241,7 @@ func (s *Server) HandleBinance(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/binance/candles {starts:[unix…], end:unix} → has/first/last/last_value и свечи оценки портфеля по корзинам [starts[i], starts[i+1]).
 func (s *Server) HandleBinanceCandles(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !allow(w, r, http.MethodPost) {
 		return
 	}
 	var in struct {
@@ -252,7 +249,7 @@ func (s *Server) HandleBinanceCandles(w http.ResponseWriter, r *http.Request) {
 		End    int64   `json:"end"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 8<<20)).Decode(&in); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		fail(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	out := map[string]any{"has": false}
@@ -265,7 +262,7 @@ func (s *Server) HandleBinanceCandles(w http.ResponseWriter, r *http.Request) {
 			}
 			c, has, err := s.storage.BinanceCandles(in.Starts, in.End)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				failErr(w, err)
 				return
 			}
 			list := make([]any, len(c))
@@ -277,8 +274,7 @@ func (s *Server) HandleBinanceCandles(w http.ResponseWriter, r *http.Request) {
 			out["candles"] = list
 		}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(out)
+	writeJSON(w, out)
 }
 
 // bnRows — журнал выписки в виде строк пакета binance.
@@ -294,23 +290,26 @@ func (s *Server) bnRows() ([]binance.Row, error) {
 	return rows, nil
 }
 
-// GET /api/binance/moves — переводы между кошельками (Spot ↔ Funding/Strategy/Futures/Earn) из журнала: строки истории для «Операционной».
-func (s *Server) HandleBinanceMoves(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+// bnList — общий GET-хендлер строк истории из журнала Binance: journal → build → JSON (nil → []).
+func bnList[T any](s *Server, w http.ResponseWriter, r *http.Request, build func([]binance.Row) []T) {
+	if !allow(w, r, http.MethodGet) {
 		return
 	}
 	rows, err := s.bnRows()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		failErr(w, err)
 		return
 	}
-	moves := binance.Moves(rows)
-	if moves == nil {
-		moves = []binance.Move{}
+	out := build(rows)
+	if out == nil {
+		out = []T{}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(moves)
+	writeJSON(w, out)
+}
+
+// GET /api/binance/moves — переводы между кошельками (Spot ↔ Funding/Strategy/Futures/Earn) из журнала: строки истории для «Операционной».
+func (s *Server) HandleBinanceMoves(w http.ResponseWriter, r *http.Request) {
+	bnList(s, w, r, binance.Moves)
 }
 
 // tradeWallets — кошельки, чьи сделки показываем в истории.
@@ -318,38 +317,10 @@ var tradeWallets = []string{binance.WalletSpot}
 
 // GET /api/binance/trades — покупки и продажи монет внутри кошельков (сейчас Spot): строки истории, капитал не меняют.
 func (s *Server) HandleBinanceTrades(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	rows, err := s.bnRows()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	trades := binance.Trades(rows, tradeWallets...)
-	if trades == nil {
-		trades = []binance.Trade{}
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(trades)
+	bnList(s, w, r, func(rows []binance.Row) []binance.Trade { return binance.Trades(rows, tradeWallets...) })
 }
 
 // GET /api/binance/swaps — обмены монет внутри кошельков (Convert, пыль → BNB, стейкинг): строки истории, капитал не меняют.
 func (s *Server) HandleBinanceSwaps(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	rows, err := s.bnRows()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	swaps := binance.Swaps(rows)
-	if swaps == nil {
-		swaps = []binance.Swap{}
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(swaps)
+	bnList(s, w, r, binance.Swaps)
 }

@@ -28,8 +28,7 @@ jobs:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
       - name: gofmt
-        # пока предупреждение; когда дерево отформатировано (gofmt -w backend), убрать continue-on-error
-        continue-on-error: true
+        # формат обязателен: дерево отформатировано (gofmt -w backend)
         run: |
           out=$(gofmt -l .)
           if [ -n "$out" ]; then echo "не отформатировано:"; echo "$out"; exit 1; fi

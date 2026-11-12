@@ -1,6 +1,7 @@
 package db
 
 import (
+	"economic/pkg/stmtkit"
 	"errors"
 	"fmt"
 	"math"
@@ -164,11 +165,11 @@ func ComputeState(rows []LedgerRow, bonds []Bond, now time.Time) AccountState {
 				}
 				amt := q * b.coupon()
 				st.Cash += amt
-				st.Events = append(st.Events, PayEvent{Date: dayString(d), Kind: "coupon", ISIN: b.ISIN, Name: b.Name, Amount: round2(amt), Qty: q, Done: true})
+				st.Events = append(st.Events, PayEvent{Date: dayString(d), Kind: "coupon", ISIN: b.ISIN, Name: b.Name, Amount: stmtkit.Round2(amt), Qty: q, Done: true})
 				if isRedemption {
 					red := q * b.Nominal
 					st.Cash += red
-					st.Events = append(st.Events, PayEvent{Date: dayString(d), Kind: "redemption", ISIN: b.ISIN, Name: b.Name, Amount: round2(red), Qty: q, Done: true})
+					st.Events = append(st.Events, PayEvent{Date: dayString(d), Kind: "redemption", ISIN: b.ISIN, Name: b.Name, Amount: stmtkit.Round2(red), Qty: q, Done: true})
 				}
 				continue
 			}
@@ -176,9 +177,9 @@ func ComputeState(rows []LedgerRow, bonds []Bond, now time.Time) AccountState {
 				nextDay = d
 			}
 			if held > 0 {
-				st.Events = append(st.Events, PayEvent{Date: dayString(d), Kind: "coupon", ISIN: b.ISIN, Name: b.Name, Amount: round2(held * b.coupon()), Qty: held})
+				st.Events = append(st.Events, PayEvent{Date: dayString(d), Kind: "coupon", ISIN: b.ISIN, Name: b.Name, Amount: stmtkit.Round2(held * b.coupon()), Qty: held})
 				if isRedemption {
-					st.Events = append(st.Events, PayEvent{Date: dayString(d), Kind: "redemption", ISIN: b.ISIN, Name: b.Name, Amount: round2(held * b.Nominal), Qty: held})
+					st.Events = append(st.Events, PayEvent{Date: dayString(d), Kind: "redemption", ISIN: b.ISIN, Name: b.Name, Amount: stmtkit.Round2(held * b.Nominal), Qty: held})
 				}
 			}
 		}
@@ -189,14 +190,14 @@ func ComputeState(rows []LedgerRow, bonds []Bond, now time.Time) AccountState {
 		p := Position{Bond: b, Qty: held}
 		if nextDay != 0 {
 			prev := nextDay - couponPeriodDays
-			p.Accrued = round2(b.coupon() * float64(today-prev) / couponPeriodDays)
+			p.Accrued = stmtkit.Round2(b.coupon() * float64(today-prev) / couponPeriodDays)
 			p.NextDate = dayString(nextDay)
-			p.NextAmount = round2(held * b.coupon())
+			p.NextAmount = stmtkit.Round2(held * b.coupon())
 			if nextDay == matDay {
-				p.NextAmount = round2(held * (b.coupon() + b.Nominal))
+				p.NextAmount = stmtkit.Round2(held * (b.coupon() + b.Nominal))
 			}
 		}
-		p.Value = round2(held * (b.Nominal + p.Accrued))
+		p.Value = stmtkit.Round2(held * (b.Nominal + p.Accrued))
 		st.Positions = append(st.Positions, p)
 		st.Balance += p.Value
 	}
@@ -229,13 +230,13 @@ func ComputeState(rows []LedgerRow, bonds []Bond, now time.Time) AccountState {
 		if c.held <= 0 || c.bought <= 0 {
 			continue
 		}
-		v := round2(c.held * c.spent / c.bought)
+		v := stmtkit.Round2(c.held * c.spent / c.bought)
 		st.Positions = append(st.Positions, Position{Bond: Bond{ISIN: isin, Name: "условия не заданы"}, Qty: c.held, Value: v, NoTerms: true})
 		st.Balance += v
 	}
 	sort.SliceStable(st.Events, func(i, j int) bool { return st.Events[i].Date < st.Events[j].Date })
-	st.Cash = round2(st.Cash)
-	st.Balance = round2(st.Balance + st.Cash)
+	st.Cash = stmtkit.Round2(st.Cash)
+	st.Balance = stmtkit.Round2(st.Balance + st.Cash)
 	return st
 }
 

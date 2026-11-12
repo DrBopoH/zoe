@@ -341,12 +341,7 @@ func (s *Server) accTimeline(a *accProg, now int64) accView {
 			cells[i] = '0'
 			continue
 		}
-		j := sort.Search(len(txs), func(k int) bool { return txs[k] >= ca })
-		if j < len(txs) && txs[j] < cb {
-			cells[i] = '1'
-		} else {
-			cells[i] = '2'
-		}
+		cells[i] = txCell(txs, ca, cb)
 	}
 	av.Cells = string(cells)
 
@@ -493,4 +488,13 @@ func max1(n int) int {
 		return 1
 	}
 	return n
+}
+
+// txCell — клетка шкалы для снятого отрезка [ca, cb): '1' — в нём есть операции (txs отсортирован), '2' — снято, но пусто.
+func txCell(txs []int64, ca, cb int64) byte {
+	j := sort.Search(len(txs), func(k int) bool { return txs[k] >= ca })
+	if j < len(txs) && txs[j] < cb {
+		return '1'
+	}
+	return '2'
 }

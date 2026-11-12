@@ -2,17 +2,14 @@ package raif
 
 import (
 	"bytes"
-	"crypto/sha1"
+	"economic/pkg/stmtkit"
 	"encoding/csv"
-	"encoding/hex"
 	"fmt"
 	"io"
-	"math"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
-	_ "time/tzdata" // Europe/Kyiv и на системах без базы часовых поясов
 
 	"economic/pkg/mono"
 )
@@ -24,14 +21,6 @@ var (
 	reEndBalance = regexp.MustCompile(`(?i)Баланс на кінець періоду:\s*([-−]?[\d \x{a0}]+(?:[.,]\d+)?)`)
 	reDateOnly   = regexp.MustCompile(`^\d{2}\.\d{2}\.\d{4}`)
 )
-
-// Время в выписке — киевское, не зависим от часового пояса сервера.
-var kyiv = func() *time.Location {
-	if l, err := time.LoadLocation("Europe/Kyiv"); err == nil {
-		return l
-	}
-	return time.Local
-}()
 
 type ParsedCSVResult struct {
 	IBAN         string
@@ -243,9 +232,9 @@ func ParseCSV(r io.Reader) (*ParsedCSVResult, error) {
 			realAmountFloat -= feeFloat
 		}
 
-		amountCents := toCents(realAmountFloat)
-		feeCents := toCents(feeFloat)
-		opCents := toCents(amountFloat)
+		amountCents := stmtkit.Cents(realAmountFloat)
+		feeCents := stmtkit.Cents(feeFloat)
+		opCents := stmtkit.Cents(amountFloat)
 
 		desc := ""
 		if len(row) > descCol {
@@ -304,7 +293,7 @@ func parseRaifDate(s string) time.Time {
 	}
 	clean := strings.TrimSpace(s)
 	for _, l := range layouts {
-		if t, err := time.ParseInLocation(l, clean, kyiv); err == nil {
+		if t, err := time.ParseInLocation(l, clean, stmtkit.Kyiv); err == nil {
 			return t
 		}
 	}
@@ -318,18 +307,7 @@ func parseRaifAmount(s string) float64 {
 }
 
 // toCents — float → целые копейки без потери (int64(54.10*100) давал 5409).
-func toCents(v float64) int64 { return int64(math.Round(v * 100)) }
-
-// txID — стабильный ID: повторный импорт той же или перекрывающейся выписки даёт те же ID
-// (раньше в ID входил номер строки файла — сдвиг строк между выгрузками создавал дубли).
-// Одинаковые операции в одну минуту различаются порядковым суффиксом.
+// txID — ID операции для выписки Райффайзена (см. stmtkit.StableID).
 func txID(account string, ts, op, fee int64, desc string, seen map[string]int) string {
-	sum := sha1.Sum([]byte(fmt.Sprintf("%s|%d|%d|%d|%s", account, ts, op, fee, desc)))
-	base := hex.EncodeToString(sum[:])[:20]
-	n := seen[base]
-	seen[base] = n + 1
-	if n == 0 {
-		return "csv_raif_" + base
-	}
-	return fmt.Sprintf("csv_raif_%s_%d", base, n)
+	return stmtkit.StableID("csv_raif_", fmt.Sprintf("%s|%d|%d|%d|%s", account, ts, op, fee, desc), seen)
 }
