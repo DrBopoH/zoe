@@ -700,18 +700,24 @@ cmd_build() {
   # заморозка = мерж-коммит dev → build с именованным заголовком (PR из самой dev, без временных веток)
   git rev-parse -q --verify refs/remotes/origin/build >/dev/null || die "нет origin/build"
   (( $(git rev-list --count origin/build..origin/dev) > 0 )) || die "в dev нет ничего нового относительно build — замораживать нечего"
-  if [[ $(gh pr view dev --json state,baseRefName -q 'select(.baseRefName=="build") | .state' 2>/dev/null || true) != OPEN ]]; then
-    gh pr create --base build --head dev --title "$title" --body "" >/dev/null
+  # PR ищем по номеру: имя «dev» неоднозначно (у dev есть и свои push-проверки), а нужны проверки именно этого PR
+  local pr
+  pr=$(gh pr list --base build --head dev --state open --json number -q '.[0].number' 2>/dev/null || true)
+  if [[ -n $pr ]]; then
+    gh pr edit "$pr" --title "$title" >/dev/null
   else
-    gh pr edit dev --title "$title" >/dev/null
+    gh pr create --base build --head dev --title "$title" --body "" >/dev/null
+    pr=$(gh pr list --base build --head dev --state open --json number -q '.[0].number')
   fi
-  gh pr view dev --json url -q .url
-  for i in $(seq 1 20); do
-    gh pr checks dev 2>&1 | grep -qi 'no checks reported' && sleep 3 || break
+  [[ -n $pr ]] || die "не нашёл PR dev → build"
+  gh pr view "$pr" --json url -q .url
+  # проверки PR появляются не сразу: ждём, пока они хотя бы встанут в очередь
+  for i in $(seq 1 30); do
+    gh pr checks "$pr" 2>&1 | grep -qiE 'no checks reported|no required checks' && sleep 3 || break
   done
-  echo "… жду проверки PR"
-  gh pr checks dev --watch --interval 5 || die "проверки PR не прошли — билд не вливаю. Смотри: gh pr checks dev"
-  gh pr merge dev --merge --subject "$title" --body "" >/dev/null
+  echo "… жду проверки PR #$pr"
+  gh pr checks "$pr" --watch --interval 5 || die "проверки PR не прошли — билд не вливаю. Смотри: gh pr checks $pr"
+  gh pr merge "$pr" --merge --subject "$title" --body "" >/dev/null || die "GitHub не дал смержить PR #$pr (правила ветки): смотри его в вебе и запусти ./${SELF} build ещё раз — он продолжит с этого PR"
   git fetch -q --prune origin
   local m; m=$(git rev-parse origin/build)
   git tag -a "$tag" -m "$sum" "$m"
