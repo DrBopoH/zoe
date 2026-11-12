@@ -24,6 +24,7 @@ func (s *Server) Handler() http.Handler {
 		{"/api/market/bonds", s.HandleMarketBonds},
 		{"/api/market/sync", s.HandleMarketSync},
 		{"/api/market/lists", s.HandleMarketLists}, // свои списки ISIN (например «icu» — доступно к покупке в брокере)
+		{"/api/market/curve", s.HandleMarketCurve}, // кривая доходности рынка (точки срок → %) для оценки бумаг без цены
 
 		// Binance (только чтение кеша; обновляется через «Разведать»)
 		{"/api/binance", s.HandleBinance},
