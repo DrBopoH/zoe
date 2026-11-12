@@ -30,6 +30,10 @@ const SHAPES = {
   ],
   bond: [{ d: 'M4 4h16v16H4z' }, { d: 'M8 9h8' }, { d: 'M8 13h8' }, { d: 'M8 17h5' }],
   usa: [{ circle: { cx: 12, cy: 12, r: 9 } }, { d: 'M3 12h18' }, { d: 'M12 3a14 14 0 010 18' }, { d: 'M12 3a14 14 0 000 18' }],
+  macro: [{ d: 'M3 3v18h18' }, { d: 'M7 15l4-5 3 3 5-7' }],
+  rate: [{ circle: { cx: 7, cy: 7, r: 2.5 } }, { circle: { cx: 17, cy: 17, r: 2.5 } }, { d: 'M19 5L5 19' }],
+  inflation: [{ d: 'M3 17l6-6 4 4 8-8' }, { d: 'M15 7h6v6' }],
+  chevron: [{ d: 'M9 6l6 6-6 6' }],
   paste: [
     { d: 'M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2' },
     { rect: { x: 8, y: 2, width: 8, height: 4, rx: 1, ry: 1 } }
