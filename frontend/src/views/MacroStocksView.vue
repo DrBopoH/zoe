@@ -45,7 +45,7 @@ const has = computed(() => Object.values(props.stocks).some((a) => a && a.length
     </section>
     <div v-if="startError" class="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-3 rounded text-xs">{{ startError }}</div>
 
-    <MacroPanel title="S&P 500, пункты (с 1871 года)" unit="п." :series="stocks" :today="today" :ids="['stock_sp500']" benner :empty="EMPTY">
+    <MacroPanel title="S&P 500, пункты (с 1871 года)" unit="п." :series="stocks" :today="today" :ids="['stock_sp500']" benner log :empty="EMPTY">
       <template #summary>
         <span v-if="sp" class="text-slate-400">Сейчас <b class="text-sky-300 tabular-nums">{{ unitText(sp.v, 'п.') }}</b></span>
         <span v-if="ath" class="text-slate-400" :title="`Максимум по закрытию недели: ${unitText(ath.ath, 'п.')}, ${dateOf(ath.date)}`">От максимума <b class="tabular-nums" :class="ath.fromAth >= -1 ? 'text-emerald-400' : 'text-rose-400'">{{ signedPct(ath.fromAth) }}</b></span>
@@ -53,14 +53,14 @@ const has = computed(() => Object.values(props.stocks).some((a) => a && a.length
       </template>
     </MacroPanel>
 
-    <MacroPanel title="NASDAQ Composite, пункты" unit="п." :series="stocks" :today="today" :ids="['stock_nasdaq']" benner :empty="EMPTY">
+    <MacroPanel title="NASDAQ Composite, пункты" unit="п." :series="stocks" :today="today" :ids="['stock_nasdaq']" benner log :empty="EMPTY">
       <template #summary>
         <span v-if="pt('stock_nasdaq')" class="text-slate-400">Сейчас <b class="text-violet-300 tabular-nums">{{ unitText(pt('stock_nasdaq').v, 'п.') }}</b></span>
         <span v-if="nas" class="text-slate-400">От максимума <b class="tabular-nums" :class="nas.fromAth >= -1 ? 'text-emerald-400' : 'text-rose-400'">{{ signedPct(nas.fromAth) }}</b></span>
       </template>
     </MacroPanel>
 
-    <MacroPanel title="Dow Jones, пункты" unit="п." :series="stocks" :today="today" :ids="['stock_dow']" benner :empty="EMPTY">
+    <MacroPanel title="Dow Jones, пункты" unit="п." :series="stocks" :today="today" :ids="['stock_dow']" benner log :empty="EMPTY">
       <template #summary>
         <span v-if="pt('stock_dow')" class="text-slate-400">Сейчас <b class="text-amber-300 tabular-nums">{{ unitText(pt('stock_dow').v, 'п.') }}</b></span>
         <span v-if="dow" class="text-slate-400">От максимума <b class="tabular-nums" :class="dow.fromAth >= -1 ? 'text-emerald-400' : 'text-rose-400'">{{ signedPct(dow.fromAth) }}</b></span>

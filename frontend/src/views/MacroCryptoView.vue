@@ -40,7 +40,7 @@ const has = computed(() => Object.values(props.crypto).some((a) => a && a.length
     </section>
     <div v-if="startError" class="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-3 rounded text-xs">{{ startError }}</div>
 
-    <MacroPanel title="Bitcoin, $" unit="$" :series="crypto" :today="today" :ids="['crypto_btc']" :empty="EMPTY">
+    <MacroPanel title="Bitcoin, $" unit="$" :series="crypto" :today="today" :ids="['crypto_btc']" log :empty="EMPTY">
       <template #summary>
         <span v-if="btc" class="text-slate-400">Сейчас <b class="text-orange-300 tabular-nums">{{ unitText(btc.v, '$') }}</b></span>
         <span v-if="ath" class="text-slate-400" :title="`Максимум по закрытию недели: ${unitText(ath.ath, '$')}, ${dateOf(ath.date)}`">От максимума <b class="tabular-nums" :class="ath.fromAth >= -1 ? 'text-emerald-400' : 'text-rose-400'">{{ signedPct(ath.fromAth) }}</b></span>
@@ -48,7 +48,7 @@ const has = computed(() => Object.values(props.crypto).some((a) => a && a.length
       </template>
     </MacroPanel>
 
-    <MacroPanel title="Ethereum, BNB, Solana, $" unit="$" :series="crypto" :today="today" :ids="['crypto_eth', 'crypto_bnb', 'crypto_sol']" :empty="EMPTY">
+    <MacroPanel title="Ethereum, BNB, Solana, $" unit="$" :series="crypto" :today="today" :ids="['crypto_eth', 'crypto_bnb', 'crypto_sol']" log :empty="EMPTY">
       <template #summary>
         <span v-if="coin('crypto_eth')" class="text-slate-400">ETH <b class="text-violet-300 tabular-nums">{{ unitText(coin('crypto_eth').v, '$') }}</b></span>
         <span v-if="coin('crypto_bnb')" class="text-slate-400">BNB <b class="text-amber-300 tabular-nums">{{ unitText(coin('crypto_bnb').v, '$') }}</b></span>
