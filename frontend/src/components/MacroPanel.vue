@@ -14,7 +14,7 @@ const props = defineProps({
   ids: { type: Array, required: true }, // какие ряды рисовать
   unit: { type: String, default: '%' }, // единица значения: % | ₴ | $
   empty: { type: String, default: 'Нет данных. Нажми «Обновить»: подтянутся ставки и инфляция НБУ' },
-  benner: { type: Boolean, default: true }, // полоса лет цикла Беннера внизу графика
+  benner: { type: Boolean, default: false }, // цикл Беннера (колонки и полоса лет): только на графиках фондового рынка
   hint: { type: String, default: 'Колесо: масштаб, перетаскивание: сдвиг, двойной клик: сброс' }
 })
 

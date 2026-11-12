@@ -23,12 +23,12 @@ const tip = (s) => (s.key ? `${s.from}: ${BENNER[s.kind].label} (${BENNER[s.kind
 
 <template>
   <g v-if="layer === 'bg'" pointer-events="none">
-    <rect v-for="s in spans" :key="'bg' + s.from + s.key" :x="s.x" :y="top" :width="s.w" :height="bottom - top" :fill="BENNER[s.kind].color" :fill-opacity="s.key ? 0.07 : 0" />
+    <rect v-for="s in spans" :key="'bg' + s.from + s.key" :x="s.x" :y="top" :width="s.w" :height="bottom - top" :fill="BENNER[s.kind].color" :fill-opacity="s.key ? 0.15 : 0.045" />
   </g>
   <g v-else>
     <title>Цикл Беннера (1875): A паника, B пик цен, C дно цен. Плотный — сам год, бледный — период после него. Исторический курьёз, не сигнал</title>
     <g v-for="s in spans" :key="'st' + s.from + s.key">
-      <rect :x="s.x" :y="stripY" :width="s.w" :height="stripH" :fill="BENNER[s.kind].color" :fill-opacity="s.key ? 0.75 : 0.16"><title>{{ tip(s) }}</title></rect>
+      <rect :x="s.x" :y="stripY" :width="s.w" :height="stripH" :fill="BENNER[s.kind].color" :fill-opacity="s.key ? 0.9 : 0.22"><title>{{ tip(s) }}</title></rect>
       <text v-if="s.key && s.w > 12" :x="s.x + s.w / 2" :y="stripY + stripH - 1.1" text-anchor="middle" font-size="5.5" font-weight="700" fill="#0f172a" pointer-events="none">{{ s.kind }}</text>
     </g>
   </g>
