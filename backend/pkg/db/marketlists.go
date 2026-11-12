@@ -21,14 +21,41 @@ CREATE TABLE IF NOT EXISTS market_lists (
 var marketListName = regexp.MustCompile(`^[a-z0-9_-]{1,32}$`)
 
 func (s *Storage) initMarketLists() error {
-	_, err := s.coreDB.Exec(marketListsSchema)
-	return err
+	if _, err := s.coreDB.Exec(marketListsSchema); err != nil {
+		return err
+	}
+	return s.initMarketCurves()
 }
 
-// Записи списка: «ISIN» или «ISIN=цена» (цена с рынка брокера, чистая сумма за бумагу; по ней считается доходность).
+// Записи списка: «ISIN», «ISIN=цена», «ISIN~доходность» или «ISIN=цена~доходность». Цена — с экрана брокера (за бумагу, с накопленным
+// купоном), доходность — эффективная годовая в % (показанная брокером). Нужно хоть что-то одно, чтобы оценить бумагу по рынку.
 
-// MarketList — ISIN списка по имени (нет списка — пусто) и известные цены.
-func (s *Storage) MarketList(name string) ([]string, map[string]float64, error) {
+type MarketEntry struct {
+	Price float64
+	YTM   float64
+}
+
+func parseMarketToken(tok string) (string, MarketEntry) {
+	id, rest, _ := strings.Cut(tok, "=")
+	var e MarketEntry
+	if rest == "" && strings.Contains(id, "~") {
+		id, rest, _ = strings.Cut(id, "~")
+		rest = "~" + rest
+	}
+	price, ytm, hasYTM := strings.Cut(rest, "~")
+	if v, err := strconv.ParseFloat(price, 64); err == nil && v > 0 {
+		e.Price = v
+	}
+	if hasYTM {
+		if v, err := strconv.ParseFloat(ytm, 64); err == nil && v > 0 && v < 100 {
+			e.YTM = v
+		}
+	}
+	return id, e
+}
+
+// MarketList — ISIN списка по имени (нет списка — пусто) и известные цены и доходности.
+func (s *Storage) MarketList(name string) ([]string, map[string]MarketEntry, error) {
 	if !marketListName.MatchString(name) {
 		return nil, nil, errors.New("имя списка: a-z, 0-9, _ и -")
 	}
@@ -37,19 +64,20 @@ func (s *Storage) MarketList(name string) ([]string, map[string]float64, error) 
 	if err != nil && err != sql.ErrNoRows {
 		return nil, nil, err
 	}
-	ids, prices := []string{}, map[string]float64{}
+	ids, entries := []string{}, map[string]MarketEntry{}
 	for _, tok := range strings.Fields(raw) {
-		id, price, _ := strings.Cut(tok, "=")
+		id, e := parseMarketToken(tok)
 		ids = append(ids, id)
-		if v, err := strconv.ParseFloat(price, 64); err == nil && v > 0 {
-			prices[id] = v
+		if e.Price > 0 || e.YTM > 0 {
+			entries[id] = e
 		}
 	}
-	return ids, prices, nil
+	return ids, entries, nil
 }
 
-// SaveMarketList заменяет список целиком: ISIN приводятся к верхнему регистру, повторы убираются, цена — только положительная.
-func (s *Storage) SaveMarketList(name string, isins []string, prices map[string]float64, nowUnix int64) ([]string, map[string]float64, error) {
+// SaveMarketList заменяет список целиком: ISIN приводятся к верхнему регистру, повторы убираются, цена и доходность — только
+// положительные и только у бумаг из списка.
+func (s *Storage) SaveMarketList(name string, isins []string, entries map[string]MarketEntry, nowUnix int64) ([]string, map[string]MarketEntry, error) {
 	if !marketListName.MatchString(name) {
 		return nil, nil, errors.New("имя списка: a-z, 0-9, _ и -")
 	}
@@ -63,15 +91,29 @@ func (s *Storage) SaveMarketList(name string, isins []string, prices map[string]
 		}
 	}
 	sort.Strings(clean)
-	kept := map[string]float64{}
+	byID := map[string]MarketEntry{}
+	for k, v := range entries {
+		byID[strings.ToUpper(strings.TrimSpace(k))] = v
+	}
+	kept := map[string]MarketEntry{}
 	toks := make([]string, 0, len(clean))
 	for _, id := range clean {
+		e := byID[id]
+		if !(e.Price > 0) {
+			e.Price = 0
+		}
+		if !(e.YTM > 0 && e.YTM < 100) {
+			e.YTM = 0
+		}
 		tok := id
-		for k, v := range prices {
-			if strings.ToUpper(strings.TrimSpace(k)) == id && v > 0 {
-				kept[id] = v
-				tok = id + "=" + strconv.FormatFloat(v, 'f', -1, 64)
-			}
+		if e.Price > 0 {
+			tok += "=" + strconv.FormatFloat(e.Price, 'f', -1, 64)
+		}
+		if e.YTM > 0 {
+			tok += "~" + strconv.FormatFloat(e.YTM, 'f', -1, 64)
+		}
+		if e.Price > 0 || e.YTM > 0 {
+			kept[id] = e
 		}
 		toks = append(toks, tok)
 	}

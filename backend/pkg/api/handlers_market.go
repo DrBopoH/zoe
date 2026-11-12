@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"economic/pkg/db"
 	"economic/pkg/market"
 )
 
@@ -202,32 +203,88 @@ func (s *Server) HandleMarketSync(w http.ResponseWriter, r *http.Request) {
 
 // /api/market/lists?name=icu — свой список ISIN (хранится в core.db, не в кеше).
 //
-//	GET            → {"name":"icu","isins":[…],"prices":{"UA…":1117.72}}
-//	PUT/POST       — тело {"isins":[…],"prices":{…}} заменяет список целиком; цена необязательна
+//	GET            → {"name":"icu","isins":[…],"prices":{"UA…":1117.72},"ytms":{"UA…":16.2}}
+//	PUT/POST       — тело {"isins":[…],"prices":{…},"ytms":{…}} заменяет список целиком; цена и доходность необязательны
 func (s *Server) HandleMarketLists(w http.ResponseWriter, r *http.Request) {
 	name := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("name")))
+	reply := func(ids []string, entries map[string]db.MarketEntry) {
+		prices, ytms := map[string]float64{}, map[string]float64{}
+		for id, e := range entries {
+			if e.Price > 0 {
+				prices[id] = e.Price
+			}
+			if e.YTM > 0 {
+				ytms[id] = e.YTM
+			}
+		}
+		writeJSON(w, map[string]any{"name": name, "isins": ids, "prices": prices, "ytms": ytms})
+	}
 	switch r.Method {
 	case http.MethodGet:
-		ids, prices, err := s.storage.MarketList(name)
+		ids, entries, err := s.storage.MarketList(name)
 		if err != nil {
 			fail(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		writeJSON(w, map[string]any{"name": name, "isins": ids, "prices": prices})
+		reply(ids, entries)
 	case http.MethodPut, http.MethodPost:
 		var body struct {
 			ISINs  []string           `json:"isins"`
 			Prices map[string]float64 `json:"prices"`
+			YTMs   map[string]float64 `json:"ytms"`
 		}
 		if !readJSON(w, r, &body) {
 			return
 		}
-		ids, prices, err := s.storage.SaveMarketList(name, body.ISINs, body.Prices, time.Now().Unix())
+		entries := map[string]db.MarketEntry{}
+		for id, v := range body.Prices {
+			e := entries[strings.ToUpper(strings.TrimSpace(id))]
+			e.Price = v
+			entries[strings.ToUpper(strings.TrimSpace(id))] = e
+		}
+		for id, v := range body.YTMs {
+			e := entries[strings.ToUpper(strings.TrimSpace(id))]
+			e.YTM = v
+			entries[strings.ToUpper(strings.TrimSpace(id))] = e
+		}
+		ids, kept, err := s.storage.SaveMarketList(name, body.ISINs, entries, time.Now().Unix())
 		if err != nil {
 			fail(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		writeJSON(w, map[string]any{"name": name, "isins": ids, "prices": prices})
+		reply(ids, kept)
+	default:
+		fail(w, http.StatusMethodNotAllowed, "GET, PUT")
+	}
+}
+
+// /api/market/curve?name=icu — кривая доходности рынка, заданная пользователем: точки срок (годы) → доходность (%).
+//
+//	GET            → {"name":"icu","points":[{"years":1,"ytm":15.3}]}
+//	PUT/POST       — тело {"points":[…]} заменяет кривую целиком
+func (s *Server) HandleMarketCurve(w http.ResponseWriter, r *http.Request) {
+	name := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("name")))
+	switch r.Method {
+	case http.MethodGet:
+		pts, err := s.storage.MarketCurve(name)
+		if err != nil {
+			fail(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"name": name, "points": pts})
+	case http.MethodPut, http.MethodPost:
+		var body struct {
+			Points []db.CurvePoint `json:"points"`
+		}
+		if !readJSON(w, r, &body) {
+			return
+		}
+		pts, err := s.storage.SaveMarketCurve(name, body.Points, time.Now().Unix())
+		if err != nil {
+			fail(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"name": name, "points": pts})
 	default:
 		fail(w, http.StatusMethodNotAllowed, "GET, PUT")
 	}
