@@ -2,13 +2,11 @@ package api
 
 import (
 	"encoding/json"
-	"math"
 	"net/http"
 	"strings"
 
 	"economic/pkg/db"
 	"economic/pkg/icu"
-	"economic/pkg/mono"
 )
 
 func icuJSON(w http.ResponseWriter, v any) {
@@ -16,34 +14,9 @@ func icuJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// importICUReport — брокерский отчёт ICU → счёт и журнал в кеше. Идёт тем же путём, что выписки банков
-// (importSource → кэш источников → «Загрузить»): ничего не вводится руками, привязка к лицу — алиас по имени файла.
-func (s *Server) importICUReport(filename string, raw []byte) (*importResult, error) {
-	rep, err := icu.ParseReport(raw)
-	if err != nil {
-		return nil, &importError{http.StatusBadRequest, "Failed to parse ICU report: " + err.Error()}
-	}
-	return s.saveICUReport(filename, rep)
-}
-
-// saveICUReport кладёт разобранный отчёт в кеш: счёт (имя = имя файла, ключ = номер договора) и журнал.
+// saveICUReport кладёт разобранный отчёт в кеш (тот же путь, что у файла-источника).
 func (s *Server) saveICUReport(filename string, rep *icu.Report) (*importResult, error) {
-	accID := db.ICUAccountID(rep.Contract)
-	acc := mono.AccountDTO{
-		ID: accID, Type: db.ICUAccountType, CurrencyCode: 980,
-		Balance: int64(math.Round(rep.Cash.End * 100)), // баланс счёта считается на чтении; здесь — свободные деньги на конец периода
-	}
-	if err := s.storage.SaveImportedAccount(acc, filename); err != nil {
-		return nil, &importError{http.StatusInternalServerError, "Failed to save ICU account: " + err.Error()}
-	}
-	rows := make([]db.LedgerRow, len(rep.Flows))
-	for i, f := range rep.Flows {
-		rows[i] = db.LedgerRow{ID: f.ID, AccountID: accID, Time: f.Time, Kind: f.Kind, Amount: f.Amount, Note: f.Note, ISIN: f.ISIN, Qty: f.Qty}
-	}
-	if err := s.storage.SaveICUFlows(accID, rep.ContractDate.Unix(), rows); err != nil {
-		return nil, &importError{http.StatusInternalServerError, "Failed to save ICU journal: " + err.Error()}
-	}
-	return &importResult{AccountID: accID, Card: db.ICUAccountType, Count: len(rows)}, nil
+	return s.applySource(icuFile(filename, rep))
 }
 
 // GET /api/icu/ledger?account_id=… — журнал, позиции и выплаты по графику брокерского счёта (только чтение).

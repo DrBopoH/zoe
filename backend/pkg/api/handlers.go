@@ -1,25 +1,20 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"economic/pkg/binance"
 	"economic/pkg/db"
-	"economic/pkg/icu"
 	"economic/pkg/mono"
-	"economic/pkg/privat"
 	"economic/pkg/raif"
 )
 
@@ -374,7 +369,14 @@ func (s *Server) HandleImportCSV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := s.importSource(filename, rawBytes)
+	f, err := parseSource(filename, rawBytes)
+	if err == nil {
+		err = s.enforceImportRules(f, r)
+	}
+	var res *importResult
+	if err == nil {
+		res, err = s.applySource(f)
+	}
 	if err != nil {
 		code := http.StatusInternalServerError
 		if he, ok := err.(*importError); ok {
@@ -384,9 +386,9 @@ func (s *Server) HandleImportCSV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Файл успешно разобран → если он новый (по хэшу содержимого), кладём в кэш источников на диске.
+	// Разобрано → кладём файл-источник (.zoe) на диск, если таких данных там ещё нет (по отпечатку содержимого).
 	// Это НЕ кэш-база: переживает любой сброс, из него «Загрузить» восстанавливает данные.
-	cached, aerr := archiveSource(res.Card, filename, rawBytes)
+	_, cached, aerr := store().Put(f)
 	if aerr != nil {
 		log.Printf("[Sources] не удалось сохранить источник %q: %v", filename, aerr)
 	}
@@ -412,79 +414,6 @@ func (e *importError) Error() string { return e.msg }
 type importResult struct {
 	AccountID, IBAN, Card string
 	Count                 int
-}
-
-// importSource разбирает выписку (PDF Привата / CSV Райфа / выписка Binance / брокерский отчёт ICU) и пишет её в кеш-базу.
-// Общий путь и для загрузки файла в интерфейсе, и для «Загрузить» из кэша источников.
-func (s *Server) importSource(filename string, rawBytes []byte) (*importResult, error) {
-	var accountID, targetIBAN, targetCard, bankType string
-	var balance float64
-	var transactions []mono.StatementItemDTO
-
-	// Автоопределение формата: выписка Binance, PDF (Приват) vs CSV (Райф / CSV)
-	if binance.IsStatement(rawBytes) {
-		return s.importBinanceStatement(filename, rawBytes)
-	}
-	if icu.IsReport(rawBytes) {
-		return s.importICUReport(filename, rawBytes)
-	}
-	if bytes.HasPrefix(rawBytes, []byte("%PDF")) || strings.HasSuffix(strings.ToLower(filename), ".pdf") {
-		parsed, err := privat.ParsePDF(bytes.NewReader(rawBytes))
-		if err != nil {
-			return nil, &importError{http.StatusBadRequest, fmt.Sprintf("Failed to parse Privat PDF: %v", err)}
-		}
-		targetIBAN = parsed.IBAN
-		targetCard = parsed.CardNumber
-		bankType = "privat"
-		balance = parsed.Balance
-		transactions = parsed.Transactions
-	} else {
-		parsed, err := raif.ParseCSV(bytes.NewReader(rawBytes))
-		if err != nil {
-			return nil, &importError{http.StatusBadRequest, fmt.Sprintf("Failed to parse CSV: %v", err)}
-		}
-		targetIBAN = parsed.IBAN
-		targetCard = parsed.CardNumber
-		bankType = parsed.BankType
-		balance = parsed.Balance
-		transactions = parsed.Transactions
-	}
-
-	if len(transactions) == 0 {
-		return nil, &importError{http.StatusBadRequest, "No transactions found in file"}
-	}
-
-	accountID = fmt.Sprintf("%s_%s", bankType, targetIBAN)
-	if targetIBAN == "" && targetCard != "" {
-		accountID = fmt.Sprintf("%s_%s", bankType, targetCard)
-	}
-
-	var maskedPans []string
-	if targetCard != "" {
-		maskedPans = append(maskedPans, targetCard)
-	}
-
-	currency := 980
-	if transactions[0].CurrencyCode != 0 {
-		currency = transactions[0].CurrencyCode
-	}
-
-	accDTO := mono.AccountDTO{
-		ID:           accountID,
-		IBAN:         targetIBAN,
-		MaskedPan:    maskedPans,
-		Type:         bankType,
-		CurrencyCode: currency,
-		Balance:      int64(math.Round(balance * 100)),
-	}
-
-	if err := s.storage.SaveImportedAccount(accDTO, filename); err != nil {
-		return nil, &importError{http.StatusInternalServerError, fmt.Sprintf("Failed to save account: %v", err)}
-	}
-	if err := s.storage.SaveTransactions(accountID, transactions); err != nil {
-		return nil, &importError{http.StatusInternalServerError, fmt.Sprintf("Failed to save transactions: %v", err)}
-	}
-	return &importResult{AccountID: accountID, IBAN: targetIBAN, Card: targetCard, Count: len(transactions)}, nil
 }
 
 func (s *Server) HandleUsers(w http.ResponseWriter, r *http.Request) {

@@ -117,7 +117,12 @@ func main() {
 	mux.HandleFunc("/api/sync/status", server.EnableCORS(server.HandleGetStatus))
 	mux.HandleFunc("/api/sync/full", server.EnableCORS(server.HandleFullHistoricalSync))
 	mux.HandleFunc("/api/sync/wipe-cache", server.EnableCORS(server.HandleWipeCache))
+	mux.HandleFunc("/api/sources", server.EnableCORS(server.HandleSources))
 	mux.HandleFunc("/api/sources/load", server.EnableCORS(server.HandleLoadSources))
+	mux.HandleFunc("/api/sources/reset", server.EnableCORS(server.HandleResetSources))
+	mux.HandleFunc("/api/sources/inspect", server.EnableCORS(server.HandleInspectSource))
+	mux.HandleFunc("/api/sources/save-api", server.EnableCORS(server.HandleSaveAPI))
+	mux.HandleFunc("/api/sources/file", server.EnableCORS(server.HandleDeleteSource))
 
 	// API Роуты Сущностей и Связей (Core DB: Лица / IBAN / Алиасы)
 	mux.HandleFunc("/api/users", server.EnableCORS(server.HandleUsers))

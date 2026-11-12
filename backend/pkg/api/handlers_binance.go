@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -223,23 +222,6 @@ func (s *Server) valueBinanceTxs(ctx context.Context, c *binance.Client) {
 	if err := s.storage.SaveBinanceTxs(txs); err != nil {
 		log.Printf("[Sync Error] Binance: операции счёта: %v", err)
 	}
-}
-
-// importBinanceStatement — выписка Binance в общем импорте («Дебаг → Импорт», «Загрузить»): счёт (имя = имя файла) и весь журнал
-// в кеш; привязка к лицу — алиас по имени файла, как у любого счёта. Оценку портфеля соберёт следующий «Разведать».
-func (s *Server) importBinanceStatement(filename string, raw []byte) (*importResult, error) {
-	st, err := binance.ParseStatement(bytes.NewReader(raw), binance.StatementZone(filename))
-	if err != nil {
-		return nil, &importError{http.StatusBadRequest, "Failed to parse Binance statement: " + err.Error()}
-	}
-	rows := make([]db.BinanceRow, len(st.Rows))
-	for i, r := range st.Rows {
-		rows[i] = db.BinanceRow{T: r.T, Account: r.Account, Op: r.Op, Asset: r.Asset, Delta: r.Delta, Kind: binance.Kind(r), Note: r.Note}
-	}
-	if err := s.storage.SaveBinanceStatement(filename, binance.ProfileID(st.UserID), rows); err != nil {
-		return nil, &importError{http.StatusInternalServerError, "Failed to save Binance statement: " + err.Error()}
-	}
-	return &importResult{AccountID: db.BinanceAccountID, Card: "binance", Count: len(rows)}, nil
 }
 
 // GET /api/binance — что запомнил кеш: разбор по монетам и пределы минутного ряда. Ничего не опрашивает.

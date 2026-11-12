@@ -5,5 +5,5 @@ import DebugSection from '../components/sections/DebugSection.vue'
 // Панель раздела собирается из <UiGroup title="ОБЩЕЕ"> … </UiGroup> (любое число абзацев).
 // Панель может эмитить 'refresh' — App перезагрузит данные.
 export const SECTIONS = [
-  { key: 'debug', label: 'Debug', component: DebugSection }
+  { key: 'debug', label: 'Управление', component: DebugSection }
 ]

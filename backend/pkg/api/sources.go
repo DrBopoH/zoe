@@ -1,8 +1,6 @@
 package api
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -10,17 +8,22 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
+
+	"economic/pkg/db"
+	"economic/pkg/source"
 )
 
-// ───────────── Кэш источников ─────────────
+// ───────────── Источники ─────────────
 //
-// Это НЕ кэш-база (cache.db). Это папка на диске с самими файлами выписок:
+// Это НЕ кэш-база (cache.db). Это папка на диске с файлами-источниками формата .zoe (пакет source):
 //
-//	~/.local/share/economic/sources/<PAN с маской>/<хэш>_<исходное имя>
+//	~/.local/share/economic/sources/<PAN с маской | binance | icu>/<дата-начала>_<отпечаток>.zoe
 //
-// • новизна файла определяется по хэшу СОДЕРЖИМОГО (sha256), а не по имени;
+// • в файле уже разобранные данные, а не исходный PDF/CSV; имя исходного файла (алиас) пишется один раз, при первом импорте;
+// • дубль определяется по отпечатку СОДЕРЖИМОГО, а не по имени;
 // • папка = номер карты (не IBAN: один IBAN может нести два PAN), посередине звёздочки: 516875******8629;
-// • сброс кэша-базы источники не трогает, кнопка «Загрузить» заново разбирает их все в базу.
+// • сброс кэша-базы источники не трогает, «Загрузить» кладёт их обратно в базу.
 //
 // Папку можно поменять переменной ECONOMIC_SOURCES_DIR.
 
@@ -82,136 +85,369 @@ func maskPAN(card string) string {
 	return out
 }
 
-func safeFileName(name string) string {
-	name = filepath.Base(strings.ReplaceAll(name, "\\", "/"))
-	name = strings.Map(func(r rune) rune {
-		if r == 0 || r == '/' || r == '\\' {
-			return '_'
-		}
-		return r
-	}, name)
-	if name == "" || name == "." || name == ".." {
-		name = "statement"
-	}
-	if len(name) > 150 {
-		ext := filepath.Ext(name)
-		if len(ext) > 10 {
-			ext = ""
-		}
-		name = name[:150-len(ext)] + ext
-	}
-	return name
-}
-
-func contentHash(raw []byte) string {
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:])[:20]
-}
-
-// archiveSource кладёт файл в кэш источников, если его содержимого там ещё нет (в ЛЮБОЙ папке).
-// Возвращает true, если файл был новым и записан.
-func archiveSource(card, filename string, raw []byte) (bool, error) {
-	root := sourcesDir()
-	hash := contentHash(raw)
-	if m, _ := filepath.Glob(filepath.Join(root, "*", hash+"_*")); len(m) > 0 {
-		return false, nil
-	}
-	dir := filepath.Join(root, maskPAN(card))
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return false, err
-	}
-	dst := filepath.Join(dir, hash+"_"+safeFileName(filename))
-	tmp := dst + ".tmp"
-	// файлы содержат персональные данные (ФИО, паспорт, адрес) — доступ только владельцу
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		return false, err
-	}
-	if err := os.Rename(tmp, dst); err != nil {
-		os.Remove(tmp)
-		return false, err
-	}
-	return true, nil
-}
-
-type cachedSource struct {
-	Path, Name string // Name — исходное имя файла (без хэша)
-}
-
-func listSources() ([]cachedSource, error) {
-	root := sourcesDir()
-	var out []cachedSource
-	dirs, err := os.ReadDir(root)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	for _, d := range dirs {
-		if !d.IsDir() {
-			continue
-		}
-		files, err := os.ReadDir(filepath.Join(root, d.Name()))
-		if err != nil {
-			continue
-		}
-		for _, f := range files {
-			if f.IsDir() || strings.HasSuffix(f.Name(), ".tmp") {
-				continue
-			}
-			name := f.Name()
-			if i := strings.Index(name, "_"); i == 20 {
-				name = name[i+1:]
-			}
-			out = append(out, cachedSource{Path: filepath.Join(root, d.Name(), f.Name()), Name: name})
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
-	return out, nil
-}
-
 type loadFailure struct {
 	File  string `json:"file"`
 	Error string `json:"error"`
 }
 
-// HandleLoadSources — кнопка «Загрузить»: каждый файл из кэша источников разбирается и пишется в базу.
+// accountsReq — тело запросов «Загрузить»/«Сбросить»: пусто = все счета, иначе только перечисленные.
+type accountsReq struct {
+	Accounts []string `json:"accounts"`
+}
+
+func readAccounts(r *http.Request) map[string]bool {
+	var in accountsReq
+	_ = json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)).Decode(&in)
+	if len(in.Accounts) == 0 {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, id := range in.Accounts {
+		out[id] = true
+	}
+	return out
+}
+
+// HandleLoadSources — «Загрузить»: файлы-источники кладутся в базу (все или только выбранных счетов).
 func (s *Server) HandleLoadSources(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	files, err := listSources()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	want := readAccounts(r)
+	_, failed := migrateLegacy()
+	entries, bad := store().List()
+	for p, why := range bad {
+		failed = append(failed, loadFailure{filepath.Base(p), why})
 	}
 
-	loaded, txCount := 0, 0
-	failed := []loadFailure{}
-	for _, f := range files {
-		raw, err := os.ReadFile(f.Path)
-		if err != nil {
-			failed = append(failed, loadFailure{f.Name, err.Error()})
+	sort.SliceStable(entries, func(i, j int) bool { // ряд Binance — после выписки (он строится по её журналу, а импорт выписки ряд сбрасывает)
+		return entries[i].File.Kind != source.KindSeries && entries[j].File.Kind == source.KindSeries
+	})
+
+	total, loaded, txCount := 0, 0, 0
+	for _, e := range entries {
+		if want != nil && !want[e.File.AccountID] {
 			continue
 		}
-		res, err := s.importSource(f.Name, raw)
+		total++
+		res, err := s.applySource(e.File)
 		if err != nil {
-			log.Printf("[Sources] %s: %v", f.Path, err)
-			failed = append(failed, loadFailure{f.Name, err.Error()})
+			log.Printf("[Sources] %s: %v", e.Path, err)
+			failed = append(failed, loadFailure{e.File.Name, err.Error()})
 			continue
 		}
 		loaded++
 		txCount += res.Count
 	}
+	total += len(failed)
+	if failed == nil {
+		failed = []loadFailure{}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":       "success",
-		"total":        len(files),
-		"loaded":       loaded,
-		"transactions": txCount,
-		"failed":       failed,
-		"dir":          sourcesDir(),
+		"status": "success", "total": total, "loaded": loaded, "transactions": txCount, "failed": failed, "dir": sourcesDir(),
 	})
+}
+
+// HandleResetSources — «Сбросить»: кеш-база очищается (вся или у выбранных счетов). Файлы-источники не трогаются.
+func (s *Server) HandleResetSources(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	want := readAccounts(r)
+	s.abortSync() // идущая «Разведка» дописала бы данные в только что очищенное
+	var err error
+	if want == nil {
+		err = s.storage.WipeCache()
+	} else {
+		ids := make([]string, 0, len(want))
+		for id := range want {
+			ids = append(ids, id)
+		}
+		err = s.storage.WipeAccounts(ids)
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+}
+
+// ───────────── Инвентарь: что известно об источниках ─────────────
+
+const invCells = 96
+
+type invFile struct {
+	ID      string `json:"id"` // отпечаток содержимого
+	Kind    string `json:"kind"`
+	Name    string `json:"name"`
+	Created int64  `json:"created"`
+	Origin  string `json:"origin"`
+	From    int64  `json:"from"`
+	To      int64  `json:"to"`
+	Count   int    `json:"count"`
+}
+
+type invAccount struct {
+	ID       string    `json:"id"`
+	Name     string    `json:"name"`
+	Type     string    `json:"type"`
+	Label    string    `json:"label"` // IBAN / «Binance» / договор — как опознать счёт
+	Loaded   bool      `json:"loaded"`
+	Cached   int       `json:"cached"`  // записей в кеш-базе
+	Records  int       `json:"records"` // записей во всех источниках счёта
+	Files    []invFile `json:"files"`
+	From     int64     `json:"from"` // что покрыто: от … до
+	To       int64     `json:"to"`
+	AxisFrom int64     `json:"axis_from"`
+	AxisTo   int64     `json:"axis_to"`
+	Cells    string    `json:"cells"` // 0 — данных нет, 1 — покрыто, операции есть, 2 — покрыто, операций не было
+}
+
+// coverCells раскрашивает ось: нет заливки / зелёный / косые полосы — как таймлайн синхронизации.
+func coverCells(spans []db.Span, txs []int64, lo, hi int64) string {
+	if hi <= lo {
+		hi = lo + 1
+	}
+	span := hi - lo
+	cells := make([]byte, invCells)
+	for i := range cells {
+		ca, cb := lo+span*int64(i)/invCells, lo+span*int64(i+1)/invCells
+		covered := false
+		for _, sp := range spans { // клетка закрашена, если её касается хоть один снятый отрезок (короткий отрезок не должен пропасть)
+			if sp.From < cb && sp.To >= ca {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			cells[i] = '0'
+			continue
+		}
+		j := sort.Search(len(txs), func(k int) bool { return txs[k] >= ca })
+		if j < len(txs) && txs[j] < cb {
+			cells[i] = '1'
+		} else {
+			cells[i] = '2'
+		}
+	}
+	return string(cells)
+}
+
+func mergeSpans(in []db.Span) []db.Span {
+	sort.Slice(in, func(i, j int) bool { return in[i].From < in[j].From })
+	var out []db.Span
+	for _, sp := range in {
+		if n := len(out); n > 0 && sp.From <= out[n-1].To+1 {
+			if sp.To > out[n-1].To {
+				out[n-1].To = sp.To
+			}
+			continue
+		}
+		out = append(out, sp)
+	}
+	return out
+}
+
+// HandleSources — GET /api/sources: все счета, у которых есть источник или данные в кеше, со сведениями о файлах и таймлайном.
+func (s *Server) HandleSources(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	migrated, failed := migrateLegacy()
+	entries, bad := store().List()
+	for p, why := range bad {
+		failed = append(failed, loadFailure{filepath.Base(p), why})
+	}
+	counts, _ := s.storage.CacheCounts()
+	cached, _ := s.storage.GetAccounts()
+
+	byID := map[string]*invAccount{}
+	order := []string{}
+	spans := map[string][]db.Span{}
+	times := map[string][]int64{}
+	get := func(id string) *invAccount {
+		if a, ok := byID[id]; ok {
+			return a
+		}
+		a := &invAccount{ID: id, Files: []invFile{}}
+		byID[id] = a
+		order = append(order, id)
+		return a
+	}
+	for _, e := range entries {
+		f := e.File
+		a := get(f.AccountID)
+		if a.Name == "" {
+			a.Name = f.Name
+		}
+		a.Type = f.Kind
+		if f.Account != nil {
+			a.Type = f.Account.Type
+			if f.Account.IBAN != "" {
+				a.Label = f.Account.IBAN
+			}
+		}
+		if a.Label == "" {
+			a.Label = f.Card
+		}
+		a.Files = append(a.Files, invFile{ID: f.Hash, Kind: f.Kind, Name: f.Name, Created: f.Created, Origin: f.Origin, From: f.From, To: f.To, Count: f.Count()})
+		a.Records += f.Count()
+		if from, to := f.Cover(); to > 0 {
+			spans[f.AccountID] = append(spans[f.AccountID], db.Span{From: from, To: to})
+		}
+		for _, t := range f.Txs {
+			times[f.AccountID] = append(times[f.AccountID], t.Time)
+		}
+		for _, r := range f.Rows {
+			times[f.AccountID] = append(times[f.AccountID], r.T/1000)
+		}
+		for _, fl := range f.Flows {
+			times[f.AccountID] = append(times[f.AccountID], fl.Time)
+		}
+	}
+	for _, c := range cached {
+		a := get(c.ID)
+		a.Name, a.Type = c.Name, c.Type
+		if c.IBAN != "" {
+			a.Label = c.IBAN
+		} else if a.Label == "" {
+			a.Label = c.MaskedPan
+		}
+		if cov, err := s.storage.Coverage(c.ID); err == nil { // снятое с API тоже считается покрытием
+			spans[c.ID] = append(spans[c.ID], cov...)
+		}
+		if ts, err := s.storage.TxTimes(c.ID); err == nil {
+			times[c.ID] = append(times[c.ID], ts...)
+		}
+	}
+
+	now := time.Now().Unix()
+	out := make([]*invAccount, 0, len(order))
+	for _, id := range order {
+		a := byID[id]
+		a.Cached = counts[id]
+		a.Loaded = a.Cached > 0
+		sp := mergeSpans(spans[id])
+		ts := times[id]
+		sort.Slice(ts, func(i, j int) bool { return ts[i] < ts[j] })
+		lo, hi := now, now
+		if len(sp) > 0 {
+			a.From, a.To = sp[0].From, sp[len(sp)-1].To
+			if sp[0].From > db.HistoryStart && sp[0].From < lo {
+				lo = sp[0].From
+			}
+		}
+		if len(ts) > 0 && ts[0] < lo {
+			lo = ts[0]
+		}
+		a.AxisFrom, a.AxisTo = lo, hi
+		a.Cells = coverCells(sp, ts, lo, hi)
+		out = append(out, a)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"dir": sourcesDir(), "accounts": out, "migrated": migrated, "failed": failedOrEmpty(failed)})
+}
+
+func failedOrEmpty(f []loadFailure) []loadFailure {
+	if f == nil {
+		return []loadFailure{}
+	}
+	return f
+}
+
+// HandleSaveAPI — «Сохранить с API»: то, что уже снято с API (операции банков с отрезками покрытия, минутный ряд Binance), пишется
+// в файлы-источники. Сброс кеша потом восстанавливается с диска, а снятые отрезки заново не качаются.
+// Тело: {"accounts":[…]}; пусто — все счета, у которых есть что сохранить.
+func (s *Server) HandleSaveAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	want := readAccounts(r)
+	accs, err := s.storage.GetAccounts()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	type res struct {
+		Account string `json:"account"`
+		Name    string `json:"name"`
+		Saved   bool   `json:"saved"`
+		Skipped string `json:"skipped,omitempty"`
+		Count   int    `json:"count"`
+		Error   string `json:"error,omitempty"`
+	}
+	out := []res{}
+	for _, a := range accs {
+		if want != nil && !want[a.ID] {
+			continue
+		}
+		f, err := s.snapshotAPI(a)
+		item := res{Account: a.ID, Name: a.Name}
+		switch {
+		case err != nil:
+			item.Error = err.Error()
+		case f == nil:
+			if want == nil {
+				continue // «все»: счета без данных API молча пропускаем
+			}
+			item.Skipped = "с API по этому счёту ничего не снято"
+		default:
+			_, added, perr := store().PutReplacing(f)
+			if perr != nil {
+				item.Error = perr.Error()
+			} else {
+				item.Saved, item.Count = added, f.Count()
+				if !added {
+					item.Skipped = "источник уже актуален"
+				}
+			}
+		}
+		out = append(out, item)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"status": "success", "results": out})
+}
+
+// HandleDeleteSource — DELETE /api/sources/file?id=<отпечаток>: снести файл-источник.
+// Если это снимок API, кеш забывает, что отрезок снят (и сбрасывает ряд Binance): следующая синхронизация стянет всё с API заново.
+func (s *Server) HandleDeleteSource(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	e, ok := store().Find(r.URL.Query().Get("id"))
+	if !ok {
+		http.Error(w, "источник не найден", http.StatusNotFound)
+		return
+	}
+	if err := store().Remove(e.Path); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	refetch := false
+	if e.File.Origin == source.OriginAPI {
+		s.abortSync()
+		var err error
+		if e.File.Kind == source.KindSeries {
+			err = s.storage.DropBinanceSeries()
+		} else {
+			err = s.storage.ClearCoverage(e.File.AccountID)
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		refetch = true
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"status": "success", "refetch": refetch})
 }
