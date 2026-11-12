@@ -138,3 +138,18 @@ test('только из набора; пустой набор не фильтр�
   assert.equal(restrictTo(l, new Set()).length, 3)
   assert.equal(restrictTo(undefined, new Set(['X'])), undefined)
 })
+
+import { holdingsOf, qtyText } from '../src/utils/marketTable.js'
+
+test('сколько штук куплено: позиции складываются по ISIN между счетами, нули и мусор пропускаются', () => {
+  const h = holdingsOf([
+    { positions: [{ isin: 'ua4000239040', qty: 5 }, { isin: 'UA4000239008', qty: 0 }] },
+    { positions: [{ isin: 'UA4000239040', qty: 2.5 }, { isin: '', qty: 3 }] },
+    null
+  ])
+  assert.equal(h.get('UA4000239040'), 7.5)
+  assert.equal(h.has('UA4000239008'), false)
+  assert.equal(h.size, 1)
+  assert.equal(holdingsOf(undefined).size, 0)
+  assert.match(qtyText(1250), /^1\s250 шт\.$/)
+})

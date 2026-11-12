@@ -5,13 +5,14 @@ import UiButton from '../components/ui/UiButton.vue'
 import GrowthChart from '../components/GrowthChart.vue'
 import { storageGet, storageSet } from '../utils/storage.js'
 import { useSection } from '../composables/useSection.js'
-import { apiGetJson, apiSend } from '../utils/api.js'
+import { apiGetJson, apiSend, apiJson } from '../utils/api.js'
 import { toLocalDateStr } from '../utils/formatters.js'
-import { SOURCES, MARKET_SECTIONS, COLUMNS, filterBonds, sortBonds, currenciesOf, bondCells, nextSort, parseIsins, restrictTo, scoreBonds, scoreColor, HORIZON_YEARS, moneyText, isMatured, rateOf } from '../utils/marketTable.js'
+import { SOURCES, MARKET_SECTIONS, COLUMNS, filterBonds, sortBonds, currenciesOf, bondCells, nextSort, parseIsins, holdingsOf, qtyText, restrictTo, scoreBonds, scoreColor, HORIZON_YEARS, moneyText, isMatured, rateOf } from '../utils/marketTable.js'
 
 // dataVersion растёт при любой записи в кеш (в том числе после опроса рынка) — по нему перечитываем список.
 // running — идёт ли сейчас опрос рынка (из /sync/status → market.running).
 const props = defineProps({
+  accounts: { type: Array, default: () => [] }, // счета: из брокерских (ICU) берутся уже купленные бумаги
   dataVersion: { default: null },
   running: { type: Boolean, default: false }
 })
@@ -32,7 +33,7 @@ const load = async (src) => {
     loadError.value = String(e.message || e)
   }
 }
-onMounted(() => load(section.value))
+onMounted(() => { load(section.value); loadIcu() })
 watch(section, (s) => { if (!lists.value[s]) load(s) })
 watch(() => props.dataVersion, () => load(section.value))
 
@@ -47,18 +48,49 @@ const list = computed(() => lists.value[section.value])
 const currencies = computed(() => currenciesOf(list.value))
 // Коэффициент и места считаются по всему списку источника, а не по найденному: поиск не меняет цвета и места
 // «Только ICU»: свой список ISIN (вставляется из брокера, помнится в браузере); места и «Топ 1» считаются среди этих бумаг.
-const icuIds = ref(parseIsins(storageGet('zoe.market.icu', '')))
+const icuIds = ref([]) // хранится на сервере (core.db, список «icu»): переживает смену браузера и «стереть кеш»
 const onlyIcu = ref(storageGet('zoe.market.onlyIcu', '0') === '1')
 const icuOpen = ref(false)
 const icuText = ref('')
 const icuSet = computed(() => new Set(icuIds.value))
 const icuActive = computed(() => section.value === 'nbu' && onlyIcu.value && icuSet.value.size > 0)
 watch(onlyIcu, (v) => storageSet('zoe.market.onlyIcu', v ? '1' : '0'))
-const saveIcu = () => {
-  icuIds.value = parseIsins(icuText.value)
-  storageSet('zoe.market.icu', icuIds.value.join(' '))
-  if (!icuIds.value.length) onlyIcu.value = false
-  icuOpen.value = false
+// Уже куплено (штук): позиции брокерских счетов; обновляется вместе с данными
+const holdings = ref(new Map())
+const loadHoldings = async () => {
+  const icu = (props.accounts || []).filter((a) => a.bank_key === 'icu')
+  try {
+    holdings.value = holdingsOf(await Promise.all(icu.map((a) => apiGetJson(`/icu/ledger?account_id=${encodeURIComponent(a.id)}`))))
+  } catch (e) {
+    holdings.value = new Map()
+  }
+}
+watch(() => [props.accounts, props.dataVersion], loadHoldings, { immediate: true })
+
+const icuError = ref('')
+const putIcu = async (ids) => {
+  return (await apiJson('PUT', '/market/lists?name=icu', { isins: ids })).isins || []
+}
+const loadIcu = async () => {
+  try {
+    let ids = (await apiGetJson('/market/lists?name=icu')).isins || []
+    const old = parseIsins(storageGet('zoe.market.icu', '')) // список из прошлой версии (только браузер): переносим на сервер один раз
+    if (!ids.length && old.length) { ids = await putIcu(old); storageSet('zoe.market.icu', '') }
+    icuIds.value = ids
+    if (!ids.length) onlyIcu.value = false
+  } catch (e) {
+    icuError.value = String(e.message || e)
+  }
+}
+const saveIcu = async () => {
+  try {
+    icuIds.value = await putIcu(parseIsins(icuText.value))
+    icuError.value = ''
+    if (!icuIds.value.length) onlyIcu.value = false
+    icuOpen.value = false
+  } catch (e) {
+    icuError.value = String(e.message || e)
+  }
 }
 const openIcu = () => { icuText.value = icuIds.value.join('\n'); icuOpen.value = !icuOpen.value }
 const pool = computed(() => (icuActive.value ? restrictTo(list.value, icuSet.value) : list.value))
@@ -80,7 +112,7 @@ const rows = computed(() => sortBonds(
   const c = bondCells(b)
   c.score = sc ? `${Math.round(sc.score)} %` : '—'
   c.future = sc ? moneyText(b.future, b.currency) : '—'
-  return { id: b.id, c, sc, color: sc ? scoreColor(sc.score) : null }
+  return { id: b.id, c, sc, color: sc ? scoreColor(sc.score) : null, held: holdings.value.get(String(b.id).toUpperCase()) || 0 }
 }))
 
 // Графики: бумаги одной валюты (при «ВСЕ» — самой многочисленной среди найденных). Лучшие 5 по коэффициенту — с точками.
@@ -180,11 +212,12 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
     </section>
 
     <section v-if="icuOpen && section === 'nbu'" class="bg-slate-900/60 border border-slate-800 rounded p-3 space-y-2 text-xs">
-      <div class="text-slate-400">Вставь текст из ICU (экран «Купити» → ОВДП): ISIN вытащатся сами, остальное игнорируется. Список только в этом браузере; обновляй, когда набор бумаг в ICU меняется.</div>
+      <div class="text-slate-400">Вставь текст из ICU (экран «Купити» → ОВДП): ISIN вытащатся сами, остальное игнорируется. Список хранится на сервере; сюда можно дописывать новые ISIN, а то, что ушло из ICU, удалить.</div>
       <textarea v-model="icuText" rows="4" class="ui-input !bg-slate-900 w-full font-mono" placeholder="UA4000239040&#10;UA4000239008&#10;…"></textarea>
       <div class="flex items-center gap-3">
         <UiButton variant="secondary" size="sm" @click="saveIcu">СОХРАНИТЬ</UiButton>
         <span class="text-slate-500">найдено ISIN: {{ parseIsins(icuText).length }}</span>
+        <span v-if="icuError" class="text-rose-400">{{ icuError }}</span>
         <button type="button" class="text-slate-500 hover:text-slate-300 underline cursor-pointer" @click="icuOpen = false">закрыть</button>
       </div>
     </section>
@@ -218,6 +251,7 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
                     :style="r.color ? { color: r.color.text, borderColor: r.color.border, backgroundColor: r.color.bg } : null"
                     :title="r.sc ? scoreTitle(r.sc) : 'Нет даты погашения или ставки: коэффициент не считается'"
                   >{{ r.c.name }}</span>
+                  <span v-if="r.held" class="px-1.5 py-0.5 rounded border text-[10px] font-bold text-emerald-300 border-emerald-500/50 bg-emerald-500/10" title="Уже куплено на брокерском счёте">{{ qtyText(r.held) }}</span>
                   <span v-if="r.sc && r.sc.tier" class="px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wider" :class="TIER_CLASS[r.sc.tier]" :title="`${r.sc.tierLabel} среди ${r.sc.currency}`">{{ r.sc.tierLabel }}</span>
                 </span>
               </template>

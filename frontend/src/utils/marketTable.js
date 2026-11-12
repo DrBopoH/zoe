@@ -29,6 +29,20 @@ export const parseIsins = (text) => [...new Set(String(text || '').toUpperCase()
 // Оставить только бумаги из набора ISIN; пустой набор не фильтрует (иначе «только ICU» без списка обнулил бы таблицу)
 export const restrictTo = (list, ids) => (!list || !ids || !ids.size ? list : list.filter((b) => ids.has(String(b.id).toUpperCase())))
 
+// Сколько штук каждой бумаги уже куплено: позиции брокерских счетов (ответы /icu/ledger), по ISIN, счета складываются
+export function holdingsOf(overviews) {
+  const out = new Map()
+  for (const ov of Array.isArray(overviews) ? overviews : []) {
+    for (const p of (ov && ov.positions) || []) {
+      const id = String(p.isin || '').toUpperCase()
+      const qty = Number(p.qty)
+      if (id && qty > 0) out.set(id, (out.get(id) || 0) + qty)
+    }
+  }
+  return out
+}
+export const qtyText = (n) => `${new Intl.NumberFormat('ru-RU').format(Math.round(n * 100) / 100)}\u00A0шт.`
+
 export const isMatured = (b, today) => !!b.maturity && b.maturity < today
 
 export function filterBonds(list, { q = '', currency = '', hideMatured = true, today = '' } = {}) {
