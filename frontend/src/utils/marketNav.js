@@ -8,6 +8,7 @@ export const MACRO_SECTIONS = [
   { key: 'fx', label: 'Курсы', icon: 'fx', feed: 'fx' },
   { key: 'fed', label: 'Ставка ФРС', icon: 'usa', feed: 'us' },
   { key: 'usecon', label: 'Экономика США', icon: 'usa', feed: 'usecon' },
+  { key: 'stocks', label: 'Биржа США', icon: 'stocks', feed: 'stocks' },
   { key: 'crypto', label: 'Крипто', icon: 'crypto', feed: 'crypto' }
 ]
 

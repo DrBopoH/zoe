@@ -31,6 +31,12 @@ export const SERIES = {
   crypto_bnb: { label: 'BNB', color: '#fbbf24', step: false },
   crypto_sol: { label: 'Solana', color: '#34d399', step: false },
   crypto_fng: { label: 'Страх и жадность', color: '#38bdf8', step: false },
+  stock_sp500: { label: 'S&P 500', color: '#38bdf8', step: false },
+  stock_nasdaq: { label: 'NASDAQ Composite', color: '#a78bfa', step: false },
+  stock_dow: { label: 'Dow Jones', color: '#fbbf24', step: false },
+  stock_sp500_dd: { label: 'S&P 500: просадка от максимума', color: '#38bdf8', step: false },
+  stock_nasdaq_dd: { label: 'NASDAQ: просадка от максимума', color: '#a78bfa', step: false },
+  stock_dow_dd: { label: 'Dow Jones: просадка от максимума', color: '#fbbf24', step: false },
   crypto_btc_dd: { label: 'Bitcoin: просадка от максимума', color: '#fb923c', step: false },
   crypto_eth_dd: { label: 'Ethereum: просадка от максимума', color: '#a78bfa', step: false }
 }
@@ -40,6 +46,7 @@ export const MACRO_IDS = ['policy_rate', 'overnight_cd', 'overnight_loans', 'cpi
 export const FX_IDS = ['usd_uah', 'eur_uah', 'xau_uah']
 export const USECON_IDS = ['us_unrate', 'us_gdp', 'us_spread', 'us_vix', 'us_sentiment']
 export const CRYPTO_IDS = ['crypto_btc', 'crypto_eth', 'crypto_bnb', 'crypto_sol', 'crypto_fng']
+export const STOCK_IDS = ['stock_sp500', 'stock_nasdaq', 'stock_dow']
 export const US_IDS = ['fed_funds', 'fed_target', 'ust_10y', 'us_cpi_yoy', 'us_cpi_mom']
 
 // Число для оси и подсказки по единице ряда: «%» — процент, «₴»/«$» — деньги (тысячи сокращаются: 183 562 → «184 тыс.»)
