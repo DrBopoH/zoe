@@ -117,7 +117,7 @@ const hover = computed(() => {
         <template v-else>
         <span v-for="l in chart.lines" :key="l.id" class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-0.5" :style="{ backgroundColor: SERIES[l.id].color }"></span>{{ l.label }}</span>
         <span class="text-slate-600">{{ hint }}</span>
-        <span v-if="benner" class="text-slate-600" title="Цикл Беннера (1875). Исторический курьёз, предсказательной силы не доказано">цикл Беннера: A паника · B пик · C дно, яркий — сам год, блёклый — период после (курьёз, не сигнал)</span>
+        <span v-if="benner" class="text-slate-600" title="Цикл Беннера (1875). Исторический курьёз, предсказательной силы не доказано">цикл Беннера: A паника · B пик · C дно, плотный — сам год, бледный — период после (курьёз, не сигнал)</span>
         </template>
       </div>
     </template>
