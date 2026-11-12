@@ -21,7 +21,6 @@ export const idKey = (s) => {
   if (isIbanLike(n)) return n
   return n.length >= 8 ? n.slice(0, 4) + n.slice(-4) : n
 }
-export const panKey = idKey
 
 // Номер карты (полный или с маской), не IBAN — зеркало isPanLike в Go (util.go)
 export const isPanLike = (s) => {
