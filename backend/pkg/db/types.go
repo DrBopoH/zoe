@@ -59,8 +59,9 @@ type Account struct {
 	ManualOpened bool     `json:"manual_opened"` // дата задана руками (core.db), синк её не трогает
 	ManualClosed bool     `json:"manual_closed"`
 
-	Manual  bool   `json:"manual"`             // ручной счёт (ICU и т.п.): баланс считается из журнала в core.db
-	BankKey string `json:"bank_key,omitempty"` // бренд ручного счёта (icu)
+	Manual    bool   `json:"manual"`               // ручной счёт (ICU и т.п.): баланс считается из журнала в core.db
+	BankKey   string `json:"bank_key,omitempty"`   // бренд ручного счёта (icu) или внешнего источника (binance)
+	HasDetail bool   `json:"has_detail,omitempty"` // у счёта есть своя модалка (журнал ICU, портфель Binance)
 }
 
 type Transaction struct {

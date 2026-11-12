@@ -29,6 +29,11 @@ type accProg struct {
 	Requests  int
 	Error     string
 	Complete  bool
+
+	// счета без таймлайна покрытия (Binance): прогресс и подпись задаёт сам источник
+	Custom bool
+	Pct    int
+	Note   string
 }
 
 type clientProg struct {
@@ -154,6 +159,7 @@ type accView struct {
 	Win       *progWin `json:"window,omitempty"`
 	CoolUntil int64    `json:"cool_until,omitempty"`
 	Error     string   `json:"error,omitempty"`
+	Note      string   `json:"note,omitempty"` // подпись под таймлайном (этап)
 	remaining int
 }
 
@@ -238,6 +244,9 @@ func (s *Server) progressSnapshot() progressView {
 
 // accTimeline строит ось счёта [открытие … сейчас] и раскрашивает её по таблице покрытия.
 func (s *Server) accTimeline(a *accProg, now int64) accView {
+	if a.Custom {
+		return s.customAccView(a, now)
+	}
 	av := accView{ID: a.ID, Label: a.Label, State: a.State, Win: a.Win, CoolUntil: a.CoolUntil, Error: a.Error}
 	win := int64(walkWindow / time.Second)
 
@@ -325,6 +334,29 @@ func (s *Server) accTimeline(a *accProg, now int64) accView {
 
 	av.remaining = s.remainingRequests(a, spans, txs, complete, lo, hi, covered)
 	return av
+}
+
+// customAccView — «таймлайн» источника без покрытия по периодам: ось [начало истории … сейчас], заливка слева направо по проценту.
+func (s *Server) customAccView(a *accProg, now int64) accView {
+	lo := now - 30*86400
+	if first, _, n := s.storage.BinanceSeriesInfo(); n > 0 && first > 0 && first < lo {
+		lo = first
+	}
+	pct := a.Pct
+	if a.State == "done" {
+		pct = 100
+	}
+	if pct > 100 {
+		pct = 100
+	}
+	cells := make([]byte, timelineCells)
+	for i := range cells {
+		cells[i] = '0'
+		if i*100 < pct*timelineCells {
+			cells[i] = '1'
+		}
+	}
+	return accView{ID: a.ID, Label: a.Label, State: a.State, Percent: pct, AxisFrom: lo, AxisTo: now, Cells: string(cells), Error: a.Error, Note: a.Note}
 }
 
 // accLabel — подпись счёта в панели: «UA32****0965 · black».

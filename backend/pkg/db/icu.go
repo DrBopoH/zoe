@@ -189,7 +189,12 @@ func (s *Storage) GetAllAccounts() ([]Account, error) {
 		return nil, err
 	}
 	for _, m := range man {
-		list = append(list, s.manualToAccount(m))
+		a := s.manualToAccount(m)
+		a.HasDetail = true
+		list = append(list, a)
+	}
+	if b, ok := s.binanceAccount(); ok {
+		list = append(list, b)
 	}
 	return list, nil
 }
@@ -370,9 +375,18 @@ func (s *Storage) GetAllTransactions(limit int) ([]Transaction, error) {
 	if err != nil {
 		return nil, err
 	}
+	if bt, err := s.binanceTransactions(); err != nil {
+		return nil, err
+	} else if len(bt) > 0 {
+		list = append(list, bt...)
+	}
 	man, err := s.ListManualAccounts()
-	if err != nil || len(man) == 0 {
-		return list, err
+	if err != nil {
+		return nil, err
+	}
+	if len(man) == 0 {
+		sort.SliceStable(list, func(i, j int) bool { return list[i].Time > list[j].Time })
+		return list, nil
 	}
 	mt := s.newIcuMatcher(man)
 	for i := range list {

@@ -10,7 +10,7 @@ export const prepareAccount = (acc) => {
   return {
     ...acc,
     key: acc.id || acc.iban,
-    displayIban: formatMaskedIBAN(rawIban),
+    displayIban: acc.has_detail && !isIbanLike(rawIban) ? String(rawIban).toUpperCase() : formatMaskedIBAN(rawIban), // «BINANCE», а не Bina****ance
     pans: pans.map(formatMaskedIBAN),
     ids: [rawIban, ...pans].filter(x => x && (isIbanLike(x) || isPanLike(x))), // для сопоставления контрагента операций
     theme

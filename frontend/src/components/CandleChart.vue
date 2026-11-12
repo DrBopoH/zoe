@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
+import { apiSend } from '../utils/api.js'
 import { toLocalDateStr, formatMoney, formatDateLong, formatShortDateName, formatMonthName } from '../utils/formatters.js'
 
 const props = defineProps({
@@ -21,94 +22,198 @@ const svgHeight = 260
 const paddingY = 30
 const paddingX = 30
 
-const dailyCandles = computed(() => {
-  if (props.transactions.length === 0) return []
+// ── Таймфреймы. Внутридневные окна ограничены (минутных свечей за годы — сотни тысяч), 1D и 1W — вся история.
+const TFS = [
+  { id: '1m', ms: 60_000, limit: 3000 },
+  { id: '5m', ms: 300_000, limit: 2880 },
+  { id: '15m', ms: 900_000, limit: 2880 },
+  { id: '1h', ms: 3_600_000, limit: 2160 },
+  { id: '4h', ms: 14_400_000, limit: 1500 },
+  { id: '1D', day: true },
+  { id: '1W', week: true }
+]
+const readTf = () => {
+  try { const v = localStorage.getItem('zoe.candle.tf'); if (TFS.some(t => t.id === v)) return v } catch { /* нет хранилища — не страшно */ }
+  return '1D'
+}
+const tfId = ref(readTf())
+const tfDef = computed(() => TFS.find(t => t.id === tfId.value) || TFS[5])
+const isDaily = computed(() => !!(tfDef.value.day || tfDef.value.week))
+const pad2 = (n) => String(n).padStart(2, '0')
+const setTf = (id) => {
+  if (id === tfId.value) return
+  tfId.value = id
+  try { localStorage.setItem('zoe.candle.tf', id) } catch { /* ignore */ }
+  zoomLevel.value = 1.0
+  hoveredCandle.value = null
+  nextTick(() => scrollToEnd(true))
+}
 
-  const txByDate = {}
-  let minDateObj = new Date()
+const dayStartOf = (ms) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime() }
+const weekStartOf = (ms) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.getTime() }
+const alignDown = (ms, step) => { const ds = dayStartOf(ms); return ds + Math.floor((ms - ds) / step) * step }
 
-  const sortedTx = [...props.transactions]
-    .filter(t => t.time)
-    .sort((a, b) => new Date(a.time) - new Date(b.time))
+// Минутный ряд Binance (восстановленная история): первая/последняя минута, есть ли он вообще
+const bnInfo = ref({ has: false, first: 0, last: 0 })
+const bnData = ref(null) // свечи оценки Binance под текущие корзины: { has, last_value, candles, sig }
+let bnToken = 0
+const loadBnInfo = async () => {
+  try {
+    const res = await apiSend('POST', '/binance/candles', { starts: [], end: 0 })
+    const d = await res.json()
+    bnInfo.value = { has: !!d.has, first: d.first || 0, last: d.last || 0 }
+  } catch { bnInfo.value = { has: false, first: 0, last: 0 } }
+}
 
-  sortedTx.forEach(t => {
-    const dObj = new Date(t.time)
-    if (dObj < minDateObj) minDateObj = dObj
-    const dStr = toLocalDateStr(dObj)
+// Самая ранняя точка графика: первая операция или начало ряда Binance
+const minTimeMs = computed(() => {
+  let m = null
+  for (const t of props.transactions) {
+    if (!t.time) continue
+    const v = new Date(t.time).getTime()
+    if (m === null || v < m) m = v
+  }
+  if (bnInfo.value.has && bnInfo.value.first) {
+    const f = bnInfo.value.first * 1000
+    if (m === null || f < m) m = f
+  }
+  return m
+})
 
-    if (!txByDate[dStr]) txByDate[dStr] = []
-    txByDate[dStr].push(t)
+// Начала корзин (мс, по возрастанию). Границы — по местному времени, поэтому дни/недели переходят через DST ровно.
+const bucketStarts = computed(() => {
+  const minT = minTimeMs.value
+  if (minT === null) return []
+  const nowMs = Date.now()
+  const def = tfDef.value
+  const out = []
+  if (def.day || def.week) {
+    const first = def.day ? dayStartOf(minT) : weekStartOf(minT)
+    const last = def.day ? dayStartOf(nowMs) : weekStartOf(nowMs)
+    const c = new Date(first)
+    while (c.getTime() <= last) {
+      out.push(c.getTime())
+      c.setDate(c.getDate() + (def.day ? 1 : 7))
+    }
+    return out
+  }
+  let st = alignDown(nowMs, def.ms)
+  while (out.length < def.limit) {
+    out.push(st)
+    if (st <= minT) break
+    st = alignDown(st - 1, def.ms)
+  }
+  return out.reverse()
+})
+
+// Свечи Binance под корзины: запрос при смене таймфрейма/диапазона и при каждой новой версии данных (меняется итог капитала)
+let bnTimer = 0
+const requestBn = () => {
+  clearTimeout(bnTimer)
+  bnTimer = setTimeout(async () => {
+    const starts = bucketStarts.value
+    if (!starts.length || !bnInfo.value.has) { bnData.value = null; return }
+    const my = ++bnToken
+    const tfAt = tfId.value
+    try {
+      const res = await apiSend('POST', '/binance/candles', { starts: starts.map(v => Math.floor(v / 1000)), end: Math.floor(Date.now() / 1000) + 60 })
+      const d = await res.json()
+      if (my === bnToken) bnData.value = d.has ? { ...d, n: starts.length, tf: tfAt } : null
+    } catch { if (my === bnToken) bnData.value = null }
+  }, 120)
+}
+watch([bucketStarts, () => props.totalValueUAH, () => bnInfo.value.has], requestBn)
+watch(() => props.transactions, loadBnInfo)
+onMounted(() => { loadBnInfo() })
+onBeforeUnmount(() => clearTimeout(bnTimer))
+
+// Корзина i — [starts[i], starts[i+1]); операция «в будущем» (например, 12:00 сегодняшнего дня) попадает в последнюю
+const bucketOf = (starts, ms) => {
+  let lo = 0, hi = starts.length
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (starts[mid] <= ms) lo = mid + 1; else hi = mid }
+  return lo - 1
+}
+
+const bucketCandles = computed(() => {
+  const starts = bucketStarts.value
+  const n = starts.length
+  if (n === 0) return []
+
+  const groups = Array.from({ length: n }, () => [])
+  props.transactions.forEach(t => {
+    if (!t.time) return
+    const ms = new Date(t.time).getTime()
+    const i = bucketOf(starts, ms)
+    if (i >= 0) groups[i].push({ ms, amount: t.amount, id: t.id })
   })
+  groups.forEach(g => g.sort((a, b) => a.ms - b.ms))
 
-  const allDays = []
-  const curr = new Date(minDateObj)
-  curr.setHours(0, 0, 0, 0)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
+  const bn = bnData.value && bnData.value.n === n && bnData.value.tf === tfId.value && bnInfo.value.has ? bnData.value : null
+  let cur = props.totalValueUAH - (bn ? bn.last_value : 0)
+  const result = new Array(n)
 
-  while (curr <= today) {
-    allDays.push(toLocalDateStr(curr))
-    curr.setDate(curr.getDate() + 1)
-  }
-
-  let currentCap = props.totalValueUAH
-  const result = []
-
-  for (let i = allDays.length - 1; i >= 0; i--) {
-    const dateStr = allDays[i]
-    const dayTxs = txByDate[dateStr] || []
-
-    const close = currentCap
-    const netChange = dayTxs.reduce((sum, t) => sum + t.amount, 0)
-    const open = close - netChange
-
-    let runningBalance = open
-    let high = Math.max(open, close)
-    let low = Math.min(open, close)
-    let dayInflow = 0
-    let dayOutflow = 0
-
-    dayTxs.forEach(t => {
-      if (t.amount > 0) dayInflow += t.amount
-      else dayOutflow += Math.abs(t.amount)
-
-      runningBalance += t.amount
-      if (runningBalance > high) high = runningBalance
-      if (runningBalance < low) low = runningBalance
+  for (let i = n - 1; i >= 0; i--) {
+    const txs = groups[i]
+    const c1 = cur
+    const net = txs.reduce((sum, t) => sum + t.amount, 0)
+    const o1 = c1 - net
+    let run = o1
+    let h1 = Math.max(o1, c1)
+    let l1 = Math.min(o1, c1)
+    let inflow = 0
+    let outflow = 0
+    txs.forEach(t => {
+      if (t.amount > 0) inflow += t.amount
+      else outflow += Math.abs(t.amount)
+      run += t.amount
+      if (run > h1) h1 = run
+      if (run < l1) l1 = run
     })
+    cur = o1
 
-    result.unshift({
-      date: dateStr,
-      open,
-      high,
-      low,
-      close,
-      inflow: dayInflow,
-      outflow: dayOutflow,
+    // Binance: свеча оценки (o,h,l,c); до начала ряда — ноль. Пути двух частей внутри корзины неизвестны —
+    // пик/дно берём из достижимых сочетаний крайних точек.
+    const b = (bn && bn.candles && bn.candles[i]) || [0, 0, 0, 0]
+    const open = o1 + b[0]
+    const close = c1 + b[3]
+    const high = Math.max(open, close, h1 + b[0], h1 + b[3], o1 + b[1], c1 + b[1])
+    const low = Math.min(open, close, l1 + b[0], l1 + b[3], o1 + b[2], c1 + b[2])
+
+    const d = new Date(starts[i])
+    result[i] = {
+      key: String(starts[i]),
+      ts: starts[i],
+      date: toLocalDateStr(d),
+      time: `${pad2(d.getHours())}:${pad2(d.getMinutes())}`,
+      open, high, low, close,
+      inflow, outflow,
       isBullish: close >= open
-    })
-
-    currentCap = open
+    }
   }
-
   return result
 })
 
-// Таймлайн вперёд — до последней выплаты инвестиционного счёта (погашение). Свечей там нет, только маркеры.
+// Таймлайн вперёд — до последней выплаты инвестиционного счёта (погашение). Свечей там нет, только маркеры. Только на 1D.
 const futureDays = computed(() => {
+  const weekly = tfId.value === '1W'
   const todayStr = toLocalDateStr(new Date())
   const last = props.events.reduce((m, e) => (e.date > m ? e.date : m), todayStr)
   const days = []
-  const curr = new Date()
-  curr.setHours(0, 0, 0, 0)
-  curr.setDate(curr.getDate() + 1)
+  const curr = new Date(weekly ? weekStartOf(Date.now()) : dayStartOf(Date.now()))
+  curr.setDate(curr.getDate() + (weekly ? 7 : 1))
   while (toLocalDateStr(curr) <= last && days.length < 4000) {
     days.push(toLocalDateStr(curr))
-    curr.setDate(curr.getDate() + 1)
+    curr.setDate(curr.getDate() + (weekly ? 7 : 1))
   }
   return days
 })
-const totalDays = computed(() => (dailyCandles.value.length ? dailyCandles.value.length + futureDays.value.length : 0))
+// Выплата → дата её слота: на 1W слот недели (понедельник), иначе сам день
+const slotDateOf = (dateStr) => {
+  if (tfId.value !== '1W') return dateStr
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return toLocalDateStr(new Date(weekStartOf(new Date(y, m - 1, d).getTime())))
+}
+const totalDays = computed(() => (bucketCandles.value.length ? bucketCandles.value.length + futureDays.value.length : 0))
 
 // Границы зума: ниже ~7% свеча уже тоньше 2px, дальше смысла нет. Раньше пол в 8px/свечу глушил отдаление на 40%.
 const MIN_ZOOM = 0.07
@@ -122,10 +227,10 @@ const svgWidth = computed(() => {
 })
 
 const candleScales = computed(() => {
-  if (dailyCandles.value.length === 0) return { min: 0, max: 0, candles: [], ticks: [], monthBoundaries: [], step: 0 }
+  if (bucketCandles.value.length === 0) return { min: 0, max: 0, candles: [], slots: [], markers: [], ticks: [], monthBoundaries: [], step: 0 }
 
-  const minVal = Math.min(...dailyCandles.value.map(c => c.low))
-  const maxVal = Math.max(...dailyCandles.value.map(c => c.high))
+  const minVal = Math.min(...bucketCandles.value.map(c => c.low))
+  const maxVal = Math.max(...bucketCandles.value.map(c => c.high))
   const range = maxVal - minVal || 1
 
   const count = totalDays.value
@@ -136,7 +241,7 @@ const candleScales = computed(() => {
     return svgHeight - paddingY - ((val - minVal) / range) * (svgHeight - paddingY * 2)
   }
 
-  const candles = dailyCandles.value.map((c, i) => {
+  const candles = bucketCandles.value.map((c, i) => {
     const x = paddingX + i * step + step / 2
     const yOpen = getY(c.open)
     const yClose = getY(c.close)
@@ -155,17 +260,20 @@ const candleScales = computed(() => {
   })
 
   // слоты будущих дней (без свечей) — для оси, сетки и маркеров
-  const futureSlots = futureDays.value.map((date, k) => ({ date, future: true, x: paddingX + (candles.length + k) * step + step / 2 }))
+  const futureSlots = futureDays.value.map((date, k) => ({ key: 'f' + date, date, future: true, x: paddingX + (candles.length + k) * step + step / 2 }))
   const slots = [...candles, ...futureSlots]
 
-  // Маркеры выплат лежат на «полу» таймлайна, прямо над датами; в один день сыплются столбиком вверх
-  const slotByDate = new Map(slots.map(sl => [sl.date, sl]))
+  // Маркеры выплат лежат на «полу» таймлайна, прямо над датами; в один день сыплются столбиком вверх (только на 1D)
+  // на внутридневных таймфреймах день — это много свечей: маркер ставим на первую свечу дня (в будущем слот — сам день)
+  const slotByDate = new Map()
+  slots.forEach(sl => { if (!slotByDate.has(sl.date)) slotByDate.set(sl.date, sl) })
   const floorY = svgHeight - 38
   const byDate = new Map()
   props.events.forEach(e => {
-    if (!slotByDate.has(e.date)) return
-    if (!byDate.has(e.date)) byDate.set(e.date, [])
-    byDate.get(e.date).push(e)
+    const d = slotDateOf(e.date)
+    if (!slotByDate.has(d)) return
+    if (!byDate.has(d)) byDate.set(d, [])
+    byDate.get(d).push(e)
   })
   const markers = []
   byDate.forEach((list, date) => {
@@ -189,15 +297,19 @@ const candleScales = computed(() => {
     })
   })
 
+  // границы: на дневных таймфреймах — месяцы, на внутридневных — сутки
   const monthBoundaries = []
-  let lastMonth = null
-
+  let lastKey = null
+  // будущая часть на внутридневных таймфреймах идёт днями — границы по месяцам, иначе линия на каждый день
+  const periodKey = (c) => (isDaily.value || c.future ? c.date.substring(0, 7) : c.date)
+  let lastMonthKey = null
   slots.forEach((c) => {
-    const currentMonthKey = c.date.substring(0, 7)
-    if (lastMonth && currentMonthKey !== lastMonth) {
-      monthBoundaries.push(c)
-    }
-    lastMonth = currentMonthKey
+    const k = periodKey(c)
+    const m = c.date.substring(0, 7)
+    const changed = c.future && !isDaily.value ? m !== lastMonthKey : lastKey !== null && k !== lastKey
+    if (changed) monthBoundaries.push(c)
+    lastKey = k
+    lastMonthKey = m
   })
 
   const targetDistance = 80
@@ -209,7 +321,7 @@ const candleScales = computed(() => {
   }
 
   const lastCandle = slots[count - 1]
-  if (ticks.length > 0 && ticks[ticks.length - 1].date !== lastCandle.date) {
+  if (ticks.length > 0 && ticks[ticks.length - 1].key !== lastCandle.key) {
     const distToLast = lastCandle.x - ticks[ticks.length - 1].x
     if (distToLast < targetDistance * 0.6) {
       ticks[ticks.length - 1] = lastCandle
@@ -220,6 +332,13 @@ const candleScales = computed(() => {
 
   return { min: minVal, max: maxVal, candles, slots, markers, ticks, monthBoundaries, step }
 })
+
+const tickLabel = (t) => (isDaily.value || t.future ? formatShortDateName(t.date) : t.time)
+const boundaryLabel = (m) => (isDaily.value || m.future ? formatMonthName(m.date) : formatShortDateName(m.date))
+const hoverTitle = (c) => {
+  if (tfId.value === '1W') return `Неделя с ${formatDateLong(c.date)}`
+  return isDaily.value ? formatDateLong(c.date) : `${formatDateLong(c.date)} · ${c.time}`
+}
 
 // Колесо — масштаб (якорь — свеча под курсором, как на биржах); горизонтальное колесо / Shift+колесо — сдвиг.
 const handleWheel = (e) => {
@@ -342,7 +461,7 @@ watch(() => futureDays.value.length, (n) => {
     scrollToEnd(true)
   }
 })
-watch(() => dailyCandles.value.length, (n) => {
+watch(() => bucketCandles.value.length, (n) => {
   if (n > 0 && !scrolledWithData) {
     scrolledWithData = true
     scrollToEnd(true)
@@ -353,10 +472,19 @@ watch(() => dailyCandles.value.length, (n) => {
 <template>
   <section class="bg-slate-900/60 border border-slate-800 p-5 rounded space-y-4">
     <div class="flex items-center justify-between text-xs border-b border-slate-800/80 pb-3">
-      <div class="flex items-center gap-3">
+      <div class="flex items-center gap-3 shrink-0 whitespace-nowrap">
         <span class="font-bold text-slate-300 uppercase tracking-wider">Динамика капитала</span>
-        <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">1D</span>
-        <span class="text-[10px] text-slate-500">Дней: {{ candleScales.candles.length }}</span>
+        <div class="flex items-center gap-0.5">
+          <button
+            v-for="t in TFS"
+            :key="t.id"
+            type="button"
+            class="text-[10px] font-bold px-1.5 py-0.5 rounded border transition-colors"
+            :class="t.id === tfId ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'text-slate-500 border-transparent hover:text-slate-300'"
+            @click="setTf(t.id)"
+          >{{ t.id }}</button>
+        </div>
+        <span class="text-[10px] text-slate-500">Свечей: {{ candleScales.candles.length }}</span>
         <button 
           @click="resetZoom" 
           class="text-[10px] text-slate-400 hover:text-emerald-400 underline transition-colors"
@@ -365,7 +493,7 @@ watch(() => dailyCandles.value.length, (n) => {
         </button>
       </div>
 
-      <div v-if="hoveredMarker" class="flex items-center gap-4 text-[11px] font-mono">
+      <div v-if="hoveredMarker" class="flex items-center gap-4 text-[11px] font-mono min-w-0 overflow-hidden whitespace-nowrap">
         <span class="text-slate-200 font-bold">{{ formatDateLong(hoveredMarker.date) }}</span>
         <span :style="{ color: hoveredMarker.color || '#fbbf24' }">{{ hoveredMarker.kind === 'coupon' ? 'Купон' : 'Погашение' }}</span>
         <span class="text-slate-400">{{ hoveredMarker.isin }}</span>
@@ -373,8 +501,8 @@ watch(() => dailyCandles.value.length, (n) => {
         <span class="text-slate-500">за 1 шт. ({{ hoveredMarker.unit }} из {{ hoveredMarker.of }})</span>
         <span class="text-slate-500">{{ hoveredMarker.done ? 'получено' : 'по графику' }}</span>
       </div>
-      <div v-else-if="hoveredCandle" class="flex items-center gap-4 text-[11px] font-mono">
-        <span class="text-slate-200 font-bold">{{ formatDateLong(hoveredCandle.date) }}</span>
+      <div v-else-if="hoveredCandle" class="flex items-center gap-4 text-[11px] font-mono min-w-0 overflow-hidden whitespace-nowrap">
+        <span class="text-slate-200 font-bold">{{ hoverTitle(hoveredCandle) }}</span>
         <span class="text-slate-500">Откр: <strong class="text-slate-200">{{ formatMoney(hoveredCandle.open) }}</strong></span>
         <span class="text-slate-500">Пик: <strong class="text-emerald-400">{{ formatMoney(hoveredCandle.high) }}</strong></span>
         <span class="text-slate-500">Мин: <strong class="text-rose-400">{{ formatMoney(hoveredCandle.low) }}</strong></span>
@@ -406,7 +534,7 @@ watch(() => dailyCandles.value.length, (n) => {
 
         <line
           v-for="t in candleScales.ticks"
-          :key="'v-grid-' + t.date"
+          :key="'v-grid-' + t.key"
           :x1="t.x"
           y1="10"
           :x2="t.x"
@@ -415,7 +543,7 @@ watch(() => dailyCandles.value.length, (n) => {
           stroke-dasharray="2 2"
         />
 
-        <g v-for="m in candleScales.monthBoundaries" :key="'m-boundary-' + m.date">
+        <g v-for="m in candleScales.monthBoundaries" :key="'m-boundary-' + m.key">
           <line
             :x1="m.x"
             y1="10"
@@ -434,7 +562,7 @@ watch(() => dailyCandles.value.length, (n) => {
             font-family="monospace"
             class="uppercase select-none"
           >
-            {{ formatMonthName(m.date) }}
+            {{ boundaryLabel(m) }}
           </text>
         </g>
 
@@ -456,7 +584,7 @@ watch(() => dailyCandles.value.length, (n) => {
 
         <g
           v-for="c in candleScales.candles"
-          :key="c.date"
+          :key="c.key"
           @mouseenter="!isDragging && (hoveredCandle = c)"
           @mouseleave="hoveredCandle = null"
         >
@@ -475,7 +603,7 @@ watch(() => dailyCandles.value.length, (n) => {
             :stroke="c.isBullish ? '#10b981' : '#f43f5e'"
             stroke-width="1.5"
             class="transition-opacity"
-            :class="hoveredCandle && hoveredCandle.date === c.date ? 'opacity-100 stroke-2' : 'opacity-90'"
+            :class="hoveredCandle && hoveredCandle.key === c.key ? 'opacity-100 stroke-2' : 'opacity-90'"
           />
           <rect
             :x="c.x - c.width / 2"
@@ -485,7 +613,7 @@ watch(() => dailyCandles.value.length, (n) => {
             :fill="c.isBullish ? '#10b981' : '#f43f5e'"
             rx="1"
             class="transition-opacity"
-            :class="hoveredCandle && hoveredCandle.date === c.date ? 'opacity-100' : 'opacity-90'"
+            :class="hoveredCandle && hoveredCandle.key === c.key ? 'opacity-100' : 'opacity-90'"
           />
         </g>
 
@@ -514,7 +642,7 @@ watch(() => dailyCandles.value.length, (n) => {
         <g>
           <text
             v-for="t in candleScales.ticks"
-            :key="'tick-text-' + t.date"
+            :key="'tick-text-' + t.key"
             :x="t.x"
             :y="svgHeight - 6"
             text-anchor="middle"
@@ -522,7 +650,7 @@ watch(() => dailyCandles.value.length, (n) => {
             font-size="10"
             font-family="monospace"
           >
-            {{ formatShortDateName(t.date) }}
+            {{ tickLabel(t) }}
           </text>
         </g>
       </svg>

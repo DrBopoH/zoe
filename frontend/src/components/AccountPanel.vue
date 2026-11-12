@@ -54,7 +54,7 @@ const emit = defineEmits(['remove-pan', 'edit'])
           {{ card.theme.tag }}
         </span>
         <span v-if="card.is_closed" class="ui-closed-tag">Закрыта</span>
-        <UiIconButton v-if="card.manual" icon="edit" tone="accent" title="Журнал счёта" @click.stop="emit('edit')" />
+        <UiIconButton v-if="card.manual || card.has_detail" icon="edit" tone="accent" :title="card.bank_key === 'binance' ? 'Портфель' : 'Журнал счёта'" @click.stop="emit('edit')" />
       </div>
     </div>
 

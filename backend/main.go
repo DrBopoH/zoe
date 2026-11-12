@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"economic/pkg/api"
+	"economic/pkg/binance"
 	"economic/pkg/db"
 	"economic/pkg/mono"
 	"economic/pkg/raif"
@@ -65,6 +67,15 @@ func main() {
 		log.Printf("INFO: Loaded %d Raiffeisen Bank API key(s)", len(raifClients))
 	}
 
+	// 3. Binance (read-only ключ: BINANCE_API_KEY + BINANCE_API_SECRET)
+	var binanceClient *binance.Client
+	if k, sec := os.Getenv("BINANCE_API_KEY"), os.Getenv("BINANCE_API_SECRET"); strings.TrimSpace(k) != "" && strings.TrimSpace(sec) != "" {
+		binanceClient = binance.NewClient(k, sec)
+		log.Println("INFO: Binance API key loaded (read-only)")
+	} else {
+		log.Println("INFO: No Binance API key provided")
+	}
+
 	cacheDBPath := os.Getenv("CACHE_DB_PATH")
 	if cacheDBPath == "" {
 		cacheDBPath = "cache.db"
@@ -86,6 +97,14 @@ func main() {
 	}
 
 	server := api.NewServer(storage, monoClients, raifClients)
+	server.SetBinance(binanceClient)
+	if v := strings.TrimSpace(os.Getenv("BINANCE_HISTORY_FROM")); v != "" { // ГГГГ-ММ-ДД: с какой даты искать движения
+		if t, err := time.Parse("2006-01-02", v); err == nil {
+			server.SetBinanceHistoryFrom(t)
+		} else {
+			log.Printf("WARN: BINANCE_HISTORY_FROM: %v", err)
+		}
+	}
 	if o := os.Getenv("ALLOWED_ORIGINS"); o != "" {
 		server.SetAllowedOrigins(strings.Split(o, ","))
 	}
@@ -103,6 +122,11 @@ func main() {
 	mux.HandleFunc("/api/icu/ledger", server.EnableCORS(server.HandleICULedger))
 	mux.HandleFunc("/api/icu/accept", server.EnableCORS(server.HandleICUAccept))
 	mux.HandleFunc("/api/icu/bonds", server.EnableCORS(server.HandleICUBonds))
+
+	// Binance: портфель в ₴ (GET — последний снимок, POST — обновить сейчас)
+	mux.HandleFunc("/api/binance", server.EnableCORS(server.HandleBinance))
+	mux.HandleFunc("/api/binance/history", server.EnableCORS(server.HandleBinanceHistory)) // восстановление прошлого по минутам
+	mux.HandleFunc("/api/binance/candles", server.EnableCORS(server.HandleBinanceCandles)) // свечи оценки портфеля для графика
 
 	// API Роуты Синхронизации и Очистки Кэша
 	mux.HandleFunc("/api/sync/status", server.EnableCORS(server.HandleGetStatus))
@@ -134,6 +158,14 @@ func main() {
 
 	log.Printf("Backend running on http://%s", srv.Addr)
 	log.Printf("Storage Architecture: Cache DB [%s] | Core DB [%s]", cacheDBPath, coreDBPath)
+
+	bctx, bcancel := context.WithCancel(context.Background())
+	defer bcancel()
+	every := 30 * time.Minute
+	if m, err := strconv.Atoi(os.Getenv("BINANCE_SYNC_MINUTES")); err == nil && m >= 5 {
+		every = time.Duration(m) * time.Minute
+	}
+	server.RunBinanceLoop(bctx, every)
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

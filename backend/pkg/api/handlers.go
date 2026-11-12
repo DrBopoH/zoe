@@ -29,6 +29,8 @@ type Server struct {
 	isSyncing  bool
 	syncStatus string
 
+	bn binanceState // Binance (read-only), см. handlers_binance.go
+
 	prog progress // структурированный прогресс синка для панели на фронте
 
 	allowedOrigins map[string]bool // CORS: кто из браузера имеет право ходить в API
@@ -119,7 +121,7 @@ func (s *Server) runFullCrawler() {
 		s.syncMutex.Unlock()
 	}()
 
-	if len(s.monoClients) == 0 && len(s.raifClients) == 0 {
+	if len(s.monoClients) == 0 && len(s.raifClients) == 0 && s.bn.client == nil {
 		s.updateStatus("ОТСУТСТВУЮТ КЛЮЧИ API")
 		return
 	}
@@ -144,6 +146,15 @@ func (s *Server) runFullCrawler() {
 			defer wg.Done()
 			s.crawlRaifClient(c, idx+1, totalRaif)
 		}(clientIdx, client)
+	}
+
+	// Binance — такой же клиент в панели прогресса: оценка портфеля, затем (если нужно) история по минутам
+	if s.bn.client != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.crawlBinance()
+		}()
 	}
 
 	wg.Wait()

@@ -67,6 +67,7 @@ export const detectBankKey = (ibanStr, cacheAcc, pans = []) => {
   const type = (cacheAcc?.type || '').toLowerCase()
 
   if (cacheAcc?.bank_key === 'icu') return 'icu'
+  if (cacheAcc?.bank_key === 'binance') return 'binance'
   if (mfo === '380946') return 'icu' // ICU Trader: IBAN UA67 380946…
   if (mfo === '300335' || mfo === '380805') return 'raif'
   if (mfo === '305299') return 'privat'
@@ -220,7 +221,7 @@ export const buildCacheIndex = (accounts = [], transactions = []) => {
       if (iban) ibanByPan.set(idKey(p), iban)
     })
 
-    const holder = acc.manual ? null : ensure(cleanAccountName(acc.name)) // ручной счёт (ICU) своего алиаса не имеет
+    const holder = acc.manual || acc.bank_key === 'binance' ? null : ensure(cleanAccountName(acc.name)) // ручной счёт (ICU) своего алиаса не имеет
     if (holder) {
       if (iban) addLink(holder, iban, '')
       pans.forEach(p => addLink(holder, p, iban))

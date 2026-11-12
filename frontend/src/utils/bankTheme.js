@@ -42,6 +42,13 @@ const THEMES = {
     tag: 'OVDP',
     tagStyle: 'bg-blue-500/20 text-blue-300 border-blue-500/40'
   },
+  binance: {
+    tile: 'bg-gradient-to-br from-yellow-600/30 via-zinc-900 to-black border-yellow-500/60 text-yellow-100',
+    panel: 'bg-gradient-to-br from-yellow-600/30 via-zinc-900 to-black border-yellow-500/60 text-yellow-100',
+    color: '#F0B90B', // фирменный цвет: маркеры на графике и т.п.
+    tag: 'BINANCE',
+    tagStyle: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/40'
+  },
   other: {
     tile: 'bg-gradient-to-br from-slate-800 to-slate-950 border-slate-700 text-slate-300',
     panel: 'bg-slate-900/60 border-slate-800 text-slate-200',
@@ -57,6 +64,7 @@ export const bankTheme = (bankKey, type = '') => {
   if (bankKey === 'raif') return THEMES.raif
   if (bankKey === 'privat') return THEMES.privat
   if (bankKey === 'icu') return THEMES.icu
+  if (bankKey === 'binance') return THEMES.binance
   if (bankKey === 'mono') {
     if (t === 'fop') return THEMES.fop
     if (t === 'white') return THEMES.white

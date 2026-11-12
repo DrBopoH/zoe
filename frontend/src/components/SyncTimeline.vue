@@ -45,6 +45,7 @@ const caption = computed(() => {
   if (a.state === 'error') return `Ошибка: ${a.error || 'неизвестно'}${range ? ' · ' + range : ''}`
   if (a.state === 'done') return 'Готово'
   if (a.state === 'queued') return 'В очереди'
+  if (a.note) return a.note // источники без окон запросов (Binance): подпись этапа
   if (!win.value) return ''
   return cooling.value
     ? `Охлаждение ${left.value} ${plural(left.value, 'секунда', 'секунды', 'секунд')} · ${range}`

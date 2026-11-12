@@ -4,6 +4,7 @@ import { prepareAccount } from '../utils/accountView.js'
 import AccountPanel from '../components/AccountPanel.vue'
 import AccountHistoryTable from '../components/AccountHistoryTable.vue'
 import IcuLedgerModal from '../components/IcuLedgerModal.vue'
+import BinanceModal from '../components/BinanceModal.vue'
 
 const props = defineProps({
   accounts: { type: Array, default: () => [] },
@@ -59,6 +60,7 @@ const selectedAccounts = computed(() =>
     </div>
 
     <AccountHistoryTable :transactions="transactions" :selected="selectedAccounts" @clear="selectedIds = []" />
-    <IcuLedgerModal :account="ledgerAcc" :is-open="!!ledgerAcc" @close="ledgerId = null" />
+    <BinanceModal v-if="ledgerAcc?.bank_key === 'binance'" :account="ledgerAcc" :is-open="true" @close="ledgerId = null" />
+    <IcuLedgerModal v-else :account="ledgerAcc" :is-open="!!ledgerAcc" @close="ledgerId = null" />
   </main>
 </template>
