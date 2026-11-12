@@ -5,7 +5,8 @@ import { SOURCES } from './marketTable.js'
 export const MACRO_SECTIONS = [
   { key: 'rates', label: 'Ставка НБУ', icon: 'rate', feed: 'macro' },
   { key: 'inflation', label: 'Инфляция', icon: 'inflation', feed: 'macro' },
-  { key: 'fx', label: 'Курсы', icon: 'fx', feed: 'fx' }
+  { key: 'fx', label: 'Курсы', icon: 'fx', feed: 'fx' },
+  { key: 'fed', label: 'Ставка ФРС', icon: 'usa', feed: 'us' }
 ]
 
 export const MARKET_TREE = [

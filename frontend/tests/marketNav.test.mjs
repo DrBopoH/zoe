@@ -5,7 +5,7 @@ import { MARKET_TREE, MARKET_SECTIONS, leafKeys, groupOf, feedOf, isBondSection,
 import { macroWindow, RANGES } from '../src/utils/macro.js'
 
 test('дерево рынка: листья и группы', () => {
-  assert.deepEqual(MARKET_SECTIONS, ['nbu', 'ust', 'rates', 'inflation', 'fx'])
+  assert.deepEqual(MARKET_SECTIONS, ['nbu', 'ust', 'rates', 'inflation', 'fx', 'fed'])
   assert.deepEqual(leafKeys(MARKET_TREE), MARKET_SECTIONS)
   assert.equal(groupOf(MARKET_TREE, 'inflation'), 'macro')
   assert.equal(groupOf(MARKET_TREE, 'ust'), 'securities')
@@ -20,6 +20,7 @@ test('источник для «Обновить»: бумаги свой, ма�
   assert.equal(feedOf('rates'), 'macro')
   assert.equal(feedOf('inflation'), 'macro')
   assert.equal(feedOf('fx'), 'fx')
+  assert.equal(feedOf('fed'), 'us')
 })
 
 test('окно «С 2007» начинается с 2007-01-01, но не левее данных', () => {
@@ -33,7 +34,7 @@ test('окно «С 2007» начинается с 2007-01-01, но не лев�
 
 // Каждый @click="имя" в шаблоне должен быть объявлен в script setup (потерянный refresh делал кнопку мёртвой)
 test('обработчики шаблонов объявлены', () => {
-  for (const f of ['MarketView', 'BondsView', 'MacroRatesView', 'MacroInflationView', 'MacroFxView', 'MacroPanel']) {
+  for (const f of ['MarketView', 'BondsView', 'MacroRatesView', 'MacroInflationView', 'MacroFxView', 'MacroUsView', 'MacroPanel']) {
     const src = readFileSync(new URL(`../src/${f === 'MacroPanel' ? 'components' : 'views'}/${f}.vue`, import.meta.url), 'utf8')
     const script = src.slice(0, src.indexOf('</script>'))
     for (const m of src.matchAll(/@click="([A-Za-z_$][\w$]*)"/g)) {

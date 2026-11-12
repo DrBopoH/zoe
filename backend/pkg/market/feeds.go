@@ -19,7 +19,7 @@ type Feed struct {
 // IsSource — известен ли такой источник (для ?source=… в маршрутах).
 func IsSource(id string) bool {
 	switch id {
-	case SourceNBU, SourceUST, SourceMacro, SourceFX:
+	case SourceNBU, SourceUST, SourceMacro, SourceFX, SourceUS:
 		return true
 	}
 	return false
@@ -49,5 +49,6 @@ func (c *Client) Feeds() []Feed {
 		}},
 		{ID: SourceMacro, Title: "Ставки и инфляция · НБУ", Unit: "точек", Series: c.MacroNBU},
 		{ID: SourceFX, Title: "Курсы валют и золото · НБУ", Unit: "точек", Series: c.FXNBU},
+		{ID: SourceUS, Title: "Ставка ФРС и инфляция США · FRED", Unit: "точек", Series: c.USFRED},
 	}
 }
