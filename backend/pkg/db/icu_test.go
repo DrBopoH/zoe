@@ -273,8 +273,12 @@ func TestBondReferenceValidationAndGuard(t *testing.T) {
 		t.Fatal("ставка обязательна")
 	}
 	seedReport(t, s)
-	if err := s.DeleteBond("UA4000239131"); err == nil {
-		t.Fatal("облигацию с записями в журнале удалять нельзя")
+	// облигацию с записями в журнале удалять можно: позиция остаётся, оценка — по себестоимости
+	if err := s.DeleteBond("UA4000239131"); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := s.accountState(icuAccID); err != nil || len(st.Positions) == 0 {
+		t.Fatalf("после удаления позиция должна остаться: %v %+v", err, st.Positions)
 	}
 	if _, err := s.SaveBond(Bond{ISIN: "UA0000000001", Maturity: "2029-03-21", CouponRate: 16}); err != nil {
 		t.Fatal(err)

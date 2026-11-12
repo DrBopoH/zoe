@@ -312,6 +312,7 @@ const handleSave = () => {
               :card="cardOf(parentIban, children)"
               :cached="isSignatureInCache(parentIban)"
               compact
+              actions
               removable-pans
               @remove-pan="removeAccount(children[$event], parentIban)"
             />

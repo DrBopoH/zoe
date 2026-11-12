@@ -10,6 +10,7 @@ import { walletName, walletText, fmtQty, walletsOf, bondsOf } from '../utils/por
 const props = defineProps({
   card: { type: Object, required: true },
   selectable: { type: Boolean, default: false }, // рисовать отметку выбора
+  actions: { type: Boolean, default: false }, // поверх плитки справа внизу лежат кнопки — оставить под ними место
   selected: { type: Boolean, default: false },
   compact: { type: Boolean, default: false }, // плитка поменьше (боковые панели)
   removablePans: { type: Boolean, default: false }, // × у каждой карты (редактор алиаса)
@@ -75,7 +76,7 @@ const dlt = (uah) => (rate.value ? signed(uah / rate.value) : signed(uah))
          Брокерский: кэш, в скобках стоимость облигаций; справа ШТ · ISIN и накопленный купон.
          Binance: баланс в долларах, в скобках ₴-эквивалент; ниже дерево кошелёк → позиции.
          Валюта перед числом, у вложенных/дочерних чисел не дублируется; результат (+/−) — мелкий нижний индекс. -->
-    <div class="z-10 flex items-end justify-between gap-3" :class="[compact ? 'mt-3' : 'mt-6', selectable && (bonds || wallets.length) && 'pb-8']">
+    <div class="z-10 flex items-end justify-between gap-3" :class="[compact ? 'mt-3' : 'mt-6', (selectable || actions) && (bonds || wallets.length) && (actions ? 'pb-10' : 'pb-8')]">
       <div class="space-y-1 min-w-0">
         <span class="text-[10px] opacity-60 uppercase block font-bold tracking-wider">Баланс счета:</span>
         <span class="font-bold tracking-wide" :class="compact ? 'text-base' : 'text-xl'">
@@ -97,7 +98,7 @@ const dlt = (uah) => (rate.value ? signed(uah / rate.value) : signed(uah))
     </div>
 
     <!-- Binance: кошелёк → позиции. Число в скобках: основное значение в $, результат — мелкий нижний индекс (как степень, только снизу), без повтора символа -->
-    <div v-if="wallets.length" class="z-10 mt-3 space-y-1.5 font-mono text-[11px]" :class="selectable && 'pb-6'">
+    <div v-if="wallets.length" class="z-10 mt-3 space-y-1.5 font-mono text-[11px]" :class="actions ? 'pb-8' : selectable && 'pb-6'">
       <div v-for="w in wallets" :key="w.wallet">
         <div class="font-bold tracking-wider text-[10px]" :class="walletText(w.wallet)">{{ walletName(w.wallet) }}</div>
         <div v-for="it in w.items" :key="it.asset" class="pl-3 flex items-baseline gap-1.5">
