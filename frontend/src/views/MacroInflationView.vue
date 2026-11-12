@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import { useMarketRefresh } from '../composables/useMarketRefresh.js'
-import { RANGES, macroSummary, plainPct } from '../utils/macro.js'
+import { macroSummary, plainPct } from '../utils/macro.js'
 
 // Экран «Инфляция»: год к году (общая и базовая) и месяц к месяцу — два графика с общим движком.
 const props = defineProps({
@@ -29,12 +29,12 @@ const month = computed(() => (sum.value.cpiMonth ? `${sum.value.cpiMonth.slice(5
       </UiButton>
     </section>
     <div v-if="startError" class="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-3 rounded text-xs">{{ startError }}</div>
-    <MacroPanel title="Инфляция к тому же месяцу прошлого года" :series="series" :today="today" :ids="YOY" :ranges="RANGES" default-range="2007">
+    <MacroPanel title="Инфляция к тому же месяцу прошлого года" :series="series" :today="today" :ids="YOY">
       <template #summary>
         <span class="text-slate-400">Инфляция г/г <b class="text-amber-300 tabular-nums">{{ plainPct(sum.cpi) }}</b></span>
         <span class="text-slate-400">Базовая г/г <b class="text-orange-300 tabular-nums">{{ plainPct(sum.core) }}</b></span>
       </template>
     </MacroPanel>
-    <MacroPanel title="Инфляция к предыдущему месяцу" :series="series" :today="today" :ids="MOM" :ranges="RANGES" default-range="5" hint="Месячные скачки: тот же масштаб и сдвиг, что у годового графика" />
+    <MacroPanel title="Инфляция к предыдущему месяцу" :series="series" :today="today" :ids="MOM" hint="Месячные скачки: тот же масштаб и сдвиг, что у годового графика" />
   </div>
 </template>

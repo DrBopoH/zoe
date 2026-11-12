@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { MARKET_TREE, MARKET_SECTIONS, leafKeys, groupOf, feedOf, isBondSection, isMacroSection } from '../src/utils/marketNav.js'
-import { macroWindow, RANGES } from '../src/utils/macro.js'
+import { macroWindow } from '../src/utils/macro.js'
 
 test('дерево рынка: листья и группы', () => {
   assert.deepEqual(MARKET_SECTIONS, ['nbu', 'ust', 'rates', 'inflation', 'fx', 'fed'])
@@ -23,13 +23,12 @@ test('источник для «Обновить»: бумаги свой, ма�
   assert.equal(feedOf('fed'), 'us')
 })
 
-test('окно «С 2007» начинается с 2007-01-01, но не левее данных', () => {
+test('окно по умолчанию — весь период данных, левее первой точки не уходит', () => {
   const series = { cpi_yoy: [{ d: '2007-01-01', v: 10 }, { d: '2026-10-01', v: 9 }] }
-  const r = RANGES.find((x) => x.key === '2007')
-  const w = macroWindow({ series, ids: ['cpi_yoy'], todayIso: '2026-11-12', from: r.from })
+  const w = macroWindow({ series, ids: ['cpi_yoy'], todayIso: '2026-11-12' })
   assert.ok(Math.abs(w.x0 + 19.86) < 0.05, String(w.x0))
-  const late = macroWindow({ series: { cpi_yoy: [{ d: '2015-01-01', v: 1 }] }, ids: ['cpi_yoy'], todayIso: '2026-11-12', from: '2007-01-01' })
-  assert.ok(late.x0 > -12)
+  const capped = macroWindow({ series, ids: ['cpi_yoy'], todayIso: '2026-11-12', years: 5 })
+  assert.ok(Math.abs(capped.x0 + 5) < 1e-9)
 })
 
 // Каждый @click="имя" в шаблоне должен быть объявлен в script setup (потерянный refresh делал кнопку мёртвой)

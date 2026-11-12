@@ -115,14 +115,6 @@ export function macroSummary(series, todayIso) {
   }
 }
 
-// Диапазоны окна графика: сколько лет назад начинать (0 — с первой точки)
-export const RANGES = [
-  { key: '5', label: '5 л.', years: 5 },
-  { key: '10', label: '10 л.', years: 10 },
-  { key: '2007', label: 'С 2007', from: '2007-01-01' }, // инфляция в данных НБУ начинается с 2007 года
-  { key: 'all', label: 'Всё', years: 0 }
-]
-
 export const MACRO_PAD = { l: 56, r: 16, t: 12, b: 24 } // поля графика (px во viewBox): по ним мышь переводится в данные
 export const MACRO_MIN_SPAN = 0.5 // дальше приближать смысла нет: полгода
 export const MACRO_MAX_SPAN = 60
@@ -134,13 +126,13 @@ export const isoAt = (years, todayIso) => new Date(ms(todayIso) + years * YEAR_M
 
 const usable = (series, ids) => (ids || []).filter((id) => series && series[id] && series[id].length)
 
-/** Окно по умолчанию: years лет назад (0 — с первой точки) или с даты from, до сегодня с небольшим запасом справа. Левее первой точки данных не уходит. */
-export function macroWindow({ series, ids, todayIso, years, from = null }) {
+/** Окно по умолчанию: years лет назад (0 — с первой точки, весь период), до сегодня с небольшим запасом справа. Левее первой точки данных не уходит. */
+export function macroWindow({ series, ids, todayIso, years = 0 }) {
   const use = usable(series, ids)
   if (!use.length) return { x0: -1, x1: 0.05 }
   const first = use.map((id) => series[id][0].d).sort()[0]
   const firstT = yearsFrom(first, todayIso)
-  const left = from ? Math.max(yearsFrom(from, todayIso), firstT) : years ? Math.max(-years, firstT) : firstT
+  const left = years ? Math.max(-years, firstT) : firstT
   const span = Math.max(-left, MACRO_MIN_SPAN)
   return { x0: -span, x1: span * 0.02 }
 }

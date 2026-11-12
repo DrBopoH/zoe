@@ -1,6 +1,6 @@
 <script setup>
-import { ref, computed } from 'vue'
-import { SERIES, RANGES, MACRO_PAD, MACRO_MIN_SPAN, MACRO_MAX_SPAN, buildMacroChart, macroWindow, macroRanges, isoAt, valueAt, unitText, axisText } from '../utils/macro.js'
+import { computed } from 'vue'
+import { SERIES, MACRO_PAD, MACRO_MIN_SPAN, MACRO_MAX_SPAN, buildMacroChart, macroWindow, macroRanges, isoAt, valueAt, unitText, axisText } from '../utils/macro.js'
 import { useChartView } from '../composables/useChartView.js'
 
 // Универсальная панель макро-графика: заголовок, кнопки окна, слот summary (текущие значения), график и подсказка под курсором. Данные — из кеша (/api/macro), заполняются кнопкой «Обновить».
@@ -10,8 +10,6 @@ const props = defineProps({
   today: { type: String, required: true },
   title: { type: String, required: true },
   ids: { type: Array, required: true }, // какие ряды рисовать
-  ranges: { type: Array, default: () => RANGES }, // кнопки окна (из RANGES)
-  defaultRange: { type: String, default: '10' },
   unit: { type: String, default: '%' }, // единица значения: % | ₴ | $
   empty: { type: String, default: 'Нет данных. Нажми «Обновить»: подтянутся ставки и инфляция НБУ' },
   hint: { type: String, default: 'Колесо: масштаб, перетаскивание: сдвиг, двойной клик: сброс' }
@@ -22,23 +20,19 @@ const clipId = `macro-clip-${++uid}-${Math.random().toString(36).slice(2, 7)}`
 const WIDTH = 1000
 const HEIGHT = 220
 const IDS = computed(() => props.ids)
-const rangeKey = ref(props.defaultRange) // кнопки окна задают его, пока его не тронули колесом или мышью
 
-const windowFor = (key) => {
-  const r = RANGES.find((x) => x.key === key)
-  return macroWindow({ series: props.series, ids: IDS.value, todayIso: props.today, years: r?.years ?? 10, from: r?.from || null })
-}
+// Окно по умолчанию — весь период данных; дальше колесо и перетаскивание
+const windowAll = () => macroWindow({ series: props.series, ids: IDS.value, todayIso: props.today, years: 0 })
 const kv = useChartView({
   width: WIDTH,
   height: HEIGHT,
   pad: MACRO_PAD,
-  autoX: () => windowFor(rangeKey.value),
+  autoX: windowAll,
   ranges: (view) => macroRanges({ series: props.series, ids: IDS.value, view, todayIso: props.today, floor: props.unit === '%' ? 0 : null }),
   spans: { minSpan: MACRO_MIN_SPAN, maxSpan: MACRO_MAX_SPAN },
   resetOn: () => [props.series, props.ids]
 })
 const { svgRef, onWheel, onDown, onMove, onUp, onLeave, reset, zoomed } = kv
-const pick = (key) => { rangeKey.value = key; kv.reset() } // новое окно по умолчанию, ручная вертикаль сбрасывается
 
 const has = computed(() => IDS.value.some((id) => props.series[id]?.length))
 const chart = computed(() => buildMacroChart({ series: props.series, ids: IDS.value, view: kv.view.value, yRange: kv.yShown.value || kv.target.value, todayIso: props.today, width: WIDTH, height: HEIGHT }))
@@ -57,17 +51,7 @@ const hover = computed(() => {
   <section class="bg-slate-900/60 border border-slate-800 rounded p-4 space-y-3">
     <div class="flex flex-wrap items-center justify-between gap-3 text-[10px] uppercase tracking-wider font-bold">
       <span class="text-slate-500">{{ title }}</span>
-      <div v-if="has" class="flex items-center gap-1">
-        <button
-          v-for="r in ranges"
-          :key="r.key"
-          type="button"
-          class="px-2 py-1 rounded border cursor-pointer transition-colors"
-          :class="r.key === rangeKey && !zoomed ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'text-slate-500 border-transparent hover:text-slate-300'"
-          @click="pick(r.key)"
-        >{{ r.label }}</button>
-        <button type="button" class="ml-2 text-slate-400 hover:text-emerald-400 underline whitespace-nowrap cursor-pointer" :class="{ 'opacity-40 pointer-events-none': !zoomed }" @click="reset">Сброс масштаба</button>
-      </div>
+      <button v-if="has && zoomed" type="button" class="text-slate-400 hover:text-emerald-400 underline whitespace-nowrap cursor-pointer" @click="reset">Сброс масштаба</button>
     </div>
 
     <div v-if="!has" class="text-xs text-slate-600 uppercase tracking-wider py-6 text-center">{{ empty }}</div>
