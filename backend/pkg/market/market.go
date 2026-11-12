@@ -26,6 +26,7 @@ const (
 	DefaultFREDBase    = "https://fred.stlouisfed.org"
 	DefaultBinanceBase = "https://api.binance.com"
 	DefaultFNGBase     = "https://api.alternative.me"
+	DefaultShillerBase = "https://raw.githubusercontent.com"
 	DefaultUSTBase     = "https://api.fiscaldata.treasury.gov/services/api/fiscal_service"
 
 	maxBody = 32 << 20 // реестр ОВДП — единицы мегабайт; больше — это уже не он
@@ -63,6 +64,8 @@ type Client struct {
 	// BinanceBase — публичные свечи Binance (без ключа, без подписи); FNGBase — индекс страха и жадности крипторынка
 	BinanceBase string
 	FNGBase     string
+	// ShillerBase — GitHub raw с месячными данными Шиллера по S&P 500 с 1871 года (датасет datasets/s-and-p-500)
+	ShillerBase string
 	Now         func() time.Time
 	// USTYears — за сколько лет назад брать аукционы США (по умолчанию 3: хватает на все бумаги, что ещё в обращении
 	// у 2-летних и 3-летних выпусков; долгие бумаги подтянутся при следующих обновлениях по мере появления).
@@ -72,7 +75,7 @@ type Client struct {
 }
 
 func NewClient() *Client {
-	return &Client{HTTP: &http.Client{Timeout: 30 * time.Second}, NBUBase: DefaultNBUBase, USTBase: DefaultUSTBase, FREDBase: DefaultFREDBase, BinanceBase: DefaultBinanceBase, FNGBase: DefaultFNGBase, Now: time.Now}
+	return &Client{HTTP: &http.Client{Timeout: 30 * time.Second}, NBUBase: DefaultNBUBase, USTBase: DefaultUSTBase, FREDBase: DefaultFREDBase, BinanceBase: DefaultBinanceBase, FNGBase: DefaultFNGBase, ShillerBase: DefaultShillerBase, Now: time.Now}
 }
 
 func (c *Client) now() time.Time {

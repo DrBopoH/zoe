@@ -6,7 +6,8 @@ import { useMarketRefresh } from '../composables/useMarketRefresh.js'
 import { lastPoint, plainPct, signedPct, drawdown, athInfo, changeSince, unitText } from '../utils/macro.js'
 
 // Экран «Биржа США»: S&P 500, NASDAQ Composite и Dow Jones (FRED, последнее закрытие недели) и просадка от максимума.
-// FRED даёт S&P 500 и Dow примерно за 10 лет, NASDAQ — с 1971 года: «максимум» считается по доступной истории.
+// S&P 500: месячные данные Шиллера с 1871 года (среднее за месяц) + недельное закрытие FRED за последние ~10 лет; NASDAQ — FRED с 1971 года;
+// Dow — FRED около 10 лет: «максимум» считается по доступной истории.
 // Не прогноз и не совет: картина того, где рынок относительно своих пиков.
 const props = defineProps({
   stocks: { type: Object, default: () => ({}) }, // stock_sp500, stock_nasdaq, stock_dow
@@ -44,7 +45,7 @@ const has = computed(() => Object.values(props.stocks).some((a) => a && a.length
     </section>
     <div v-if="startError" class="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-3 rounded text-xs">{{ startError }}</div>
 
-    <MacroPanel title="S&P 500, пункты" unit="п." :series="stocks" :today="today" :ids="['stock_sp500']" benner :empty="EMPTY">
+    <MacroPanel title="S&P 500, пункты (с 1871 года)" unit="п." :series="stocks" :today="today" :ids="['stock_sp500']" benner :empty="EMPTY">
       <template #summary>
         <span v-if="sp" class="text-slate-400">Сейчас <b class="text-sky-300 tabular-nums">{{ unitText(sp.v, 'п.') }}</b></span>
         <span v-if="ath" class="text-slate-400" :title="`Максимум по закрытию недели: ${unitText(ath.ath, 'п.')}, ${dateOf(ath.date)}`">От максимума <b class="tabular-nums" :class="ath.fromAth >= -1 ? 'text-emerald-400' : 'text-rose-400'">{{ signedPct(ath.fromAth) }}</b></span>
@@ -66,12 +67,12 @@ const has = computed(() => Object.values(props.stocks).some((a) => a && a.length
       </template>
     </MacroPanel>
 
-    <MacroPanel title="Просадка от максимума (по доступной истории)" :series="withDd" :today="today" :ids="['stock_sp500_dd', 'stock_nasdaq_dd', 'stock_dow_dd']" benner :empty="EMPTY" hint="Колесо: масштаб, перетаскивание: сдвиг. 0 % — индекс на максимуме, −20 % — медвежий рынок. У S&P 500 и Dow история FRED около 10 лет">
+    <MacroPanel title="Просадка от максимума (по доступной истории)" :series="withDd" :today="today" :ids="['stock_sp500_dd', 'stock_nasdaq_dd', 'stock_dow_dd']" benner :empty="EMPTY" hint="Колесо: масштаб, перетаскивание: сдвиг. 0 % — индекс на максимуме, −20 % — медвежий рынок. У S&P 500 история с 1871 года, у NASDAQ с 1971, у Dow около 10 лет">
       <template #summary>
         <span v-if="ath" class="text-slate-400">S&amp;P 500 <b class="tabular-nums" :class="ath.fromAth >= -1 ? 'text-emerald-400' : 'text-rose-400'">{{ plainPct(ath.fromAth) }}</b> от пика</span>
       </template>
     </MacroPanel>
 
-    <div v-if="has" class="text-[11px] text-slate-600">Данные: FRED (S&amp;P 500, NASDAQ Composite, Dow Jones), закрытие недели. Это картина рынка, а не прогноз и не совет.</div>
+    <div v-if="has" class="text-[11px] text-slate-600">Данные: FRED (закрытие недели); S&amp;P 500 до последних ~10 лет — месячные данные Роберта Шиллера (среднее за месяц, с 1871 года). Это картина рынка, а не прогноз и не совет.</div>
   </div>
 </template>
