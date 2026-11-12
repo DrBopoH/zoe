@@ -25,13 +25,21 @@ export const SERIES = {
   us_gdp: { label: 'Рост ВВП США (в год)', color: '#34d399', step: true },
   us_spread: { label: 'Кривая: 10 л. − 2 г.', color: '#a78bfa', step: false },
   us_vix: { label: 'VIX (индекс страха)', color: '#fb923c', step: false },
-  us_sentiment: { label: 'Настроения потребителей', color: '#fbbf24', step: false }
+  us_sentiment: { label: 'Настроения потребителей', color: '#fbbf24', step: false },
+  crypto_btc: { label: 'Bitcoin', color: '#fb923c', step: false },
+  crypto_eth: { label: 'Ethereum', color: '#a78bfa', step: false },
+  crypto_bnb: { label: 'BNB', color: '#fbbf24', step: false },
+  crypto_sol: { label: 'Solana', color: '#34d399', step: false },
+  crypto_fng: { label: 'Страх и жадность', color: '#38bdf8', step: false },
+  crypto_btc_dd: { label: 'Bitcoin: просадка от максимума', color: '#fb923c', step: false },
+  crypto_eth_dd: { label: 'Ethereum: просадка от максимума', color: '#a78bfa', step: false }
 }
 
 // Ряды по группам: для запроса /macro (ставки и инфляция — малые, курсы — тысячи точек, грузятся отдельно)
 export const MACRO_IDS = ['policy_rate', 'overnight_cd', 'overnight_loans', 'cpi_yoy', 'cpi_mom', 'core_yoy', 'core_mom']
 export const FX_IDS = ['usd_uah', 'eur_uah', 'xau_uah']
 export const USECON_IDS = ['us_unrate', 'us_gdp', 'us_spread', 'us_vix', 'us_sentiment']
+export const CRYPTO_IDS = ['crypto_btc', 'crypto_eth', 'crypto_bnb', 'crypto_sol', 'crypto_fng']
 export const US_IDS = ['fed_funds', 'fed_target', 'ust_10y', 'us_cpi_yoy', 'us_cpi_mom']
 
 // Число для оси и подсказки по единице ряда: «%» — процент, «₴»/«$» — деньги (тысячи сокращаются: 183 562 → «184 тыс.»)
@@ -235,3 +243,38 @@ export const curveState = (spread) => (spread === null || spread === undefined |
 
 /** Уровень VIX словами: до 20 спокойно, 20–30 тревожно, выше 30 паника. */
 export const vixLevel = (v) => (v === null || v === undefined || !isFinite(v) ? null : v < 20 ? 'calm' : v <= 30 ? 'nervous' : 'panic')
+
+// ── Крипто: просадка от максимума, рост за период, индекс страха и жадности словами (чистые функции).
+
+/** Просадка от исторического максимума, %: 0 на максимуме, −50 — цена вдвое ниже пика. Ряд по возрастанию дат. */
+export function drawdown(points) {
+  let peak = 0
+  const out = []
+  for (const p of points || []) {
+    if (!(p.v > 0)) continue
+    if (p.v > peak) peak = p.v
+    out.push({ d: p.d, v: (p.v / peak - 1) * 100 })
+  }
+  return out
+}
+
+/** Максимум за всю историю и где цена сейчас относительно него: { ath, date, fromAth (%, ≤ 0) }. Нет данных — null. */
+export function athInfo(points) {
+  const pts = (points || []).filter((p) => p.v > 0)
+  if (!pts.length) return null
+  let top = pts[0]
+  for (const p of pts) if (p.v > top.v) top = p
+  const last = pts[pts.length - 1]
+  return { ath: top.v, date: top.d, fromAth: (last.v / top.v - 1) * 100 }
+}
+
+/** Изменение цены за years лет назад (по последней точке не позже даты), % — не среднегодовое. Нет данных так далеко — null. */
+export function changeSince(points, todayIso, years) {
+  const last = lastPoint(points)
+  if (!last || !(years > 0)) return null
+  const then = valueAt(points, isoAt(-years, todayIso))
+  return then > 0 && last.v > 0 ? (last.v / then - 1) * 100 : null
+}
+
+/** Индекс страха и жадности словами: до 25 крайний страх, до 45 страх, до 55 нейтрально, до 75 жадность, выше крайняя жадность. */
+export const fearGreedLevel = (v) => (v === null || v === undefined || !isFinite(v) ? null : v < 25 ? 'extreme-fear' : v < 45 ? 'fear' : v <= 55 ? 'neutral' : v <= 75 ? 'greed' : 'extreme-greed')

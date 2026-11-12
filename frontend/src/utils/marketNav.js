@@ -7,7 +7,8 @@ export const MACRO_SECTIONS = [
   { key: 'inflation', label: 'Инфляция', icon: 'inflation', feed: 'macro' },
   { key: 'fx', label: 'Курсы', icon: 'fx', feed: 'fx' },
   { key: 'fed', label: 'Ставка ФРС', icon: 'usa', feed: 'us' },
-  { key: 'usecon', label: 'Экономика США', icon: 'usa', feed: 'usecon' }
+  { key: 'usecon', label: 'Экономика США', icon: 'usa', feed: 'usecon' },
+  { key: 'crypto', label: 'Крипто', icon: 'crypto', feed: 'crypto' }
 ]
 
 export const MARKET_TREE = [

@@ -33,3 +33,27 @@ test('все ряды экономики США описаны в SERIES и чи
   for (const id of USECON_IDS) assert.ok(SERIES[id] && SERIES[id].label, id)
   assert.equal(unitText(18.5, 'п.'), '18,5 п.')
 })
+
+import { drawdown, athInfo, changeSince, fearGreedLevel, CRYPTO_IDS } from '../src/utils/macro.js'
+
+test('просадка от максимума и позиция относительно пика', () => {
+  const pts = [{ d: '2021-11-01', v: 60000 }, { d: '2022-06-01', v: 20000 }, { d: '2024-03-01', v: 70000 }, { d: '2026-11-01', v: 35000 }]
+  assert.deepEqual(drawdown(pts).map((p) => Math.round(p.v)), [0, -67, 0, -50])
+  const a = athInfo(pts)
+  assert.equal(a.ath, 70000)
+  assert.equal(a.date, '2024-03-01')
+  assert.ok(Math.abs(a.fromAth + 50) < 1e-9)
+  assert.equal(athInfo([]), null)
+})
+
+test('изменение за год и индекс страха словами', () => {
+  const pts = [{ d: '2025-11-01', v: 50000 }, { d: '2026-11-01', v: 75000 }]
+  assert.ok(Math.abs(changeSince(pts, '2026-11-12', 1) - 50) < 1e-9)
+  assert.equal(changeSince(pts, '2026-11-12', 10), null)
+  assert.equal(fearGreedLevel(10), 'extreme-fear')
+  assert.equal(fearGreedLevel(30), 'fear')
+  assert.equal(fearGreedLevel(50), 'neutral')
+  assert.equal(fearGreedLevel(65), 'greed')
+  assert.equal(fearGreedLevel(90), 'extreme-greed')
+  assert.ok(CRYPTO_IDS.every((id) => id.startsWith('crypto_')))
+})

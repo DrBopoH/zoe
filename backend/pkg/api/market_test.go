@@ -38,6 +38,10 @@ func newMarketServer(t *testing.T, usUp bool) *Server {
 			} else {
 				w.Write([]byte(`[{"exchangedate":"12.11.2026","rate_per_unit":45.3222,"units":1}]`))
 			}
+		case "/api/v3/klines":
+			w.Write([]byte(`[[1793577600000,"100","110","90","105.5","1",1794182399999]]`))
+		case "/fng/":
+			w.Write([]byte(`{"data":[{"value":"40","timestamp":"1794009600"}]}`))
 		case "/v1/accounting/od/auctions_query":
 			if !usUp {
 				http.Error(w, "down", http.StatusBadGateway) // US лежит — НБУ всё равно должен сохраниться
@@ -55,7 +59,7 @@ func newMarketServer(t *testing.T, usUp bool) *Server {
 	t.Cleanup(func() { st.Close() })
 	s := NewServer(st, nil, nil)
 	c := market.NewClient()
-	c.NBUBase, c.USTBase, c.FREDBase, c.AuctionDays = up.URL, up.URL, up.URL, 1
+	c.NBUBase, c.USTBase, c.FREDBase, c.BinanceBase, c.FNGBase, c.AuctionDays = up.URL, up.URL, up.URL, up.URL, up.URL, 1
 	s.SetMarket(c)
 	return s
 }
@@ -151,7 +155,7 @@ func TestFullSyncStartsMarketToo(t *testing.T) {
 		t.Fatalf("sync/full: %d", code)
 	}
 	last := waitMarketLast(t, s)
-	if len(last["feeds"].([]any)) != 6 || feedByID(last, "usecon")["state"] != "done" || feedByID(last, "us")["state"] != "done" || feedByID(last, "fx")["state"] != "done" || feedByID(last, "ust")["state"] != "done" || feedByID(last, "nbu")["state"] != "done" || feedByID(last, "macro")["state"] != "done" {
+	if len(last["feeds"].([]any)) != 7 || feedByID(last, "crypto")["state"] != "done" || feedByID(last, "usecon")["state"] != "done" || feedByID(last, "us")["state"] != "done" || feedByID(last, "fx")["state"] != "done" || feedByID(last, "ust")["state"] != "done" || feedByID(last, "nbu")["state"] != "done" || feedByID(last, "macro")["state"] != "done" {
 		t.Fatalf("все фиды должны отработать: %+v", last)
 	}
 	if m := feedByID(last, "macro"); m["unit"] != "точек" || m["fetched"].(float64) != 2 {
