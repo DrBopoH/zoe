@@ -34,7 +34,7 @@ test('все ряды экономики США описаны в SERIES и чи
   assert.equal(unitText(18.5, 'п.'), '18,5 п.')
 })
 
-import { drawdown, athInfo, changeSince, fearGreedLevel, CRYPTO_IDS } from '../src/utils/macro.js'
+import { drawdown, athInfo, changeSince, fearGreedLevel, CRYPTO_IDS, STOCK_IDS } from '../src/utils/macro.js'
 
 test('просадка от максимума и позиция относительно пика', () => {
   const pts = [{ d: '2021-11-01', v: 60000 }, { d: '2022-06-01', v: 20000 }, { d: '2024-03-01', v: 70000 }, { d: '2026-11-01', v: 35000 }]
@@ -56,4 +56,5 @@ test('изменение за год и индекс страха словами
   assert.equal(fearGreedLevel(65), 'greed')
   assert.equal(fearGreedLevel(90), 'extreme-greed')
   assert.ok(CRYPTO_IDS.every((id) => id.startsWith('crypto_')))
+  assert.ok(STOCK_IDS.every((id) => id.startsWith('stock_')))
 })
