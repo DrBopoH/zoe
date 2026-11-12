@@ -20,7 +20,7 @@ import { loadMasks } from './composables/useIbanMasks.js'
 
 const STORAGE_ACTIVE_TAB = 'economic_active_tab'
 
-// Старые значения («Операционная»/«Лица») переводятся в «Данные» + раздел и сразу переписываются в новом виде
+// Старые значения («Операционная»/«Лица») переводятся в «Учет» + раздел и сразу переписываются в новом виде
 const nav = resolveNav(storageGet(STORAGE_ACTIVE_TAB), storageGet('economic_data_section'))
 storageSet(STORAGE_ACTIVE_TAB, nav.tab)
 storageSet('economic_data_section', nav.section)

@@ -8,7 +8,7 @@ const emit = defineEmits(['update:activeTab'])
 
 const TABS = [
   { key: 'dashboard', label: 'Смета' },
-  { key: 'data', label: 'Данные' }
+  { key: 'data', label: 'Учет' }
 ]
 </script>
 
