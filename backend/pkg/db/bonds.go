@@ -3,7 +3,6 @@ package db
 import (
 	"economic/pkg/stmtkit"
 	"errors"
-	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -316,13 +315,9 @@ func (s *Storage) SaveBond(b Bond) (Bond, error) {
 	return b, err
 }
 
-// DeleteBond удаляет облигацию из справочника; нельзя, пока в журнале есть покупки/продажи по ней.
+// DeleteBond удаляет облигацию из справочника. Журнал счёта при этом не трогается: без условий позиция оценивается
+// по себестоимости (или по скачанным условиям ОВДП, если они есть), а запись легко вернуть — SaveBond.
 func (s *Storage) DeleteBond(isin string) error {
-	var n int
-	_ = s.cacheDB.QueryRow(`SELECT COUNT(*) FROM icu_flows WHERE isin = ?`, isin).Scan(&n)
-	if n > 0 {
-		return fmt.Errorf("по %s есть %d записей в журнале счёта — облигацию удалить нельзя", isin, n)
-	}
 	defer s.bump()
 	s.coreMu.Lock()
 	defer s.coreMu.Unlock()
