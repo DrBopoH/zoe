@@ -7,11 +7,11 @@ import ToastStack from './components/ToastStack.vue'
 import { pushToast } from './composables/useToasts.js'
 import { useWheelScroll } from './composables/useWheelScroll.js'
 import SmetaView from './views/SmetaView.vue'
-import OperationalView from './views/OperationalView.vue'
-import PersonsView from './views/PersonsView.vue'
+import DataView from './views/DataView.vue'
 import { cleanPersonName, isP2PTransaction } from './utils/formatters.js'
 import { apiGetJson, apiSend } from './utils/api.js'
 import { storageGet, storageSet } from './utils/storage.js'
+import { resolveNav } from './utils/nav.js'
 import { marketNotice } from './utils/marketNotice.js'
 import { syncOkLines } from './utils/syncNotice.js'
 import { isSyncing, autoSave, syncPath } from './composables/useSync.js'
@@ -20,7 +20,11 @@ import { loadMasks } from './composables/useIbanMasks.js'
 
 const STORAGE_ACTIVE_TAB = 'economic_active_tab'
 
-const activeTab = ref(storageGet(STORAGE_ACTIVE_TAB, 'dashboard'))
+// Старые значения («Операционная»/«Лица») переводятся в «Учет» + раздел и сразу переписываются в новом виде
+const nav = resolveNav(storageGet(STORAGE_ACTIVE_TAB), storageGet('economic_data_section'))
+storageSet(STORAGE_ACTIVE_TAB, nav.tab)
+storageSet('economic_data_section', nav.section)
+const activeTab = ref(nav.tab)
 watch(activeTab, (newTab) => storageSet(STORAGE_ACTIVE_TAB, newTab))
 
 // Вкладки живут в KeepAlive (выбор счетов, свеча, раскрытые строки не сбрасываются). У каждой вкладки своя позиция прокрутки: уходя, запоминаем, возвращаясь — восстанавливаем (новая вкладка — с верха)
@@ -183,7 +187,6 @@ onUnmounted(() => {
         <AppHeader
           v-model:activeTab="activeTab"
           :is-syncing="isSyncing"
-          :persons-count="personsCount"
         />
       </div>
     </div>
@@ -194,8 +197,7 @@ onUnmounted(() => {
       </div>
 
       <KeepAlive><SmetaView v-if="activeTab === 'dashboard'" :accounts="accounts" :transactions="transactions" /></KeepAlive>
-      <KeepAlive><OperationalView v-if="activeTab === 'accounts'" :accounts="accounts" :transactions="transactions" :users="users" /></KeepAlive>
-      <KeepAlive><PersonsView v-if="activeTab === 'entities'" :transactions="transactions" :accounts="accounts" :data-version="dataVersion" @refresh="fetchData" /></KeepAlive>
+      <KeepAlive><DataView v-if="activeTab === 'data'" :accounts="accounts" :transactions="transactions" :users="users" :data-version="dataVersion" :persons-count="personsCount" @refresh="fetchData" /></KeepAlive>
     </div>
   </div>
 </template>

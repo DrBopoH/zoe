@@ -21,6 +21,13 @@ const SHAPES = {
   trash: [
     { d: 'M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16' }
   ],
+  history: [{ circle: { cx: 12, cy: 12, r: 9 } }, { d: 'M12 7v5l3 2' }],
+  users: [
+    { d: 'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2' },
+    { circle: { cx: 9, cy: 7, r: 4 } },
+    { d: 'M23 21v-2a4 4 0 00-3-3.87' },
+    { d: 'M16 3.13a4 4 0 010 7.75' }
+  ],
   paste: [
     { d: 'M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2' },
     { rect: { x: 8, y: 2, width: 8, height: 4, rx: 1, ry: 1 } }
@@ -47,6 +54,7 @@ const sizeClass = computed(() => SIZES[props.size] || SIZES.md)
     <template v-for="(s, i) in shapes" :key="i">
       <path v-if="s.d" :d="s.d" />
       <rect v-else-if="s.rect" v-bind="s.rect" />
+      <circle v-else-if="s.circle" v-bind="s.circle" />
     </template>
   </svg>
 </template>
