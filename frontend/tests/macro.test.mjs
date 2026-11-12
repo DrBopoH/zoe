@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { valueAt, realRate, signedPct, plainPct, currentInflation, macroSummary, buildMacroChart, macroWindow, macroRanges, yearsFrom, isoAt } from '../src/utils/macro.js'
+import { valueAt, realRate, signedPct, plainPct, currentInflation, macroSummary, buildMacroChart, macroWindow, macroRanges, yearsFrom, isoAt, goldUsd, annualChange, unitText, axisText } from '../src/utils/macro.js'
 import { sortBonds } from '../src/utils/marketTable.js'
 
 const rate = [{ d: '2024-12-12', v: 13.5 }, { d: '2025-01-23', v: 14.5 }, { d: '2026-01-01', v: 15.5 }]
@@ -101,4 +101,27 @@ test('сортировка по «Реальной»: минус и ноль —
   const rows = [{ id: 'a', real: -1.5 }, { id: 'b', real: null }, { id: 'c', real: 0 }, { id: 'd', real: 9.8 }]
   assert.deepEqual(sortBonds(rows, 'real', 'asc').map((r) => r.id), ['a', 'c', 'd', 'b'])
   assert.deepEqual(sortBonds(rows, 'real', 'desc').map((r) => r.id), ['d', 'c', 'a', 'b'])
+})
+
+test('золото в долларах: гривенная цена на курс той же даты', () => {
+  const g = goldUsd({ xau_uah: [{ d: '2026-01-02', v: 200000 }, { d: '2026-01-05', v: 210000 }], usd_uah: [{ d: '2026-01-01', v: 40 }, { d: '2026-01-05', v: 42 }] })
+  assert.deepEqual(g, [{ d: '2026-01-02', v: 5000 }, { d: '2026-01-05', v: 5000 }])
+  assert.deepEqual(goldUsd({}), [])
+})
+
+test('среднегодовое изменение ряда: сложный процент, нет данных так далеко — null', () => {
+  const u = [{ d: '2016-11-01', v: 25 }, { d: '2026-11-12', v: 50 }]
+  assert.ok(Math.abs(annualChange(u, '2026-11-12', 10) - 7.18) < 0.05)
+  assert.equal(annualChange(u, '2026-11-12', 20), null)
+  assert.equal(annualChange([], '2026-11-12', 5), null)
+})
+
+test('подписи значений по единице', () => {
+  assert.equal(unitText(45.3222, '₴'), '45,32 ₴')
+  assert.equal(unitText(183562, '₴'), '184 тыс. ₴')
+  assert.equal(unitText(4050.4, '$'), '4050 $')
+  assert.equal(unitText(10.3), '10,3 %')
+  assert.equal(axisText(30), '30 %')
+  assert.equal(axisText(150000, '₴'), '150к ₴')
+  assert.equal(unitText(null, '₴'), '—')
 })

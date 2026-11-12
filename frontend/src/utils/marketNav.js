@@ -3,8 +3,9 @@ import { SOURCES } from './marketTable.js'
 // Дерево разделов вкладки «Рынок»: группы раскрываются в шторке слева. Новый раздел = одна запись здесь
 // (для ценных бумаг — ещё и в SOURCES из marketTable.js, для макро — своя панель в MarketView).
 export const MACRO_SECTIONS = [
-  { key: 'rates', label: 'Ставка НБУ', icon: 'rate' },
-  { key: 'inflation', label: 'Инфляция', icon: 'inflation' }
+  { key: 'rates', label: 'Ставка НБУ', icon: 'rate', feed: 'macro' },
+  { key: 'inflation', label: 'Инфляция', icon: 'inflation', feed: 'macro' },
+  { key: 'fx', label: 'Курсы', icon: 'fx', feed: 'fx' }
 ]
 
 export const MARKET_TREE = [
@@ -19,8 +20,8 @@ export const MARKET_SECTIONS = leafKeys(MARKET_TREE)
 export const isBondSection = (key) => SOURCES.some((s) => s.key === key)
 export const isMacroSection = (key) => MACRO_SECTIONS.some((s) => s.key === key)
 
-// Какой источник опрашивает кнопка «Обновить» в разделе: бумаги — свой (nbu/ust), макро — общий источник ставок и инфляции
-export const feedOf = (key) => (isMacroSection(key) ? 'macro' : key)
+// Какой источник опрашивает кнопка «Обновить» в разделе: бумаги — свой (nbu/ust), ставка и инфляция — общий macro, курсы — fx
+export const feedOf = (key) => MACRO_SECTIONS.find((s) => s.key === key)?.feed ?? key
 
 // Ключ группы, в которой лежит раздел (null — раздел не в группе)
 export const groupOf = (tree, key) => tree.find((n) => n.children?.some((c) => c.key === key))?.key ?? null

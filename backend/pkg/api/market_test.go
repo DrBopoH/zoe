@@ -29,6 +29,13 @@ func newMarketServer(t *testing.T, usUp bool) *Server {
 			} else {
 				w.Write([]byte(`[]`))
 			}
+		case "/NBU_Exchange/exchange_site":
+			// курс в карбованцах до деноминации: 179900 = 1,799 ₴
+			if strings.HasPrefix(r.URL.Query().Get("start"), "1996") {
+				w.Write([]byte(`[{"exchangedate":"06.01.1996","rate_per_unit":179900,"units":1},{"exchangedate":"12.11.2006","rate_per_unit":5.05,"units":1}]`))
+			} else {
+				w.Write([]byte(`[{"exchangedate":"12.11.2026","rate_per_unit":45.3222,"units":1}]`))
+			}
 		case "/v1/accounting/od/auctions_query":
 			if !usUp {
 				http.Error(w, "down", http.StatusBadGateway) // US лежит — НБУ всё равно должен сохраниться
@@ -142,7 +149,7 @@ func TestFullSyncStartsMarketToo(t *testing.T) {
 		t.Fatalf("sync/full: %d", code)
 	}
 	last := waitMarketLast(t, s)
-	if len(last["feeds"].([]any)) != 3 || feedByID(last, "ust")["state"] != "done" || feedByID(last, "nbu")["state"] != "done" || feedByID(last, "macro")["state"] != "done" {
+	if len(last["feeds"].([]any)) != 4 || feedByID(last, "fx")["state"] != "done" || feedByID(last, "ust")["state"] != "done" || feedByID(last, "nbu")["state"] != "done" || feedByID(last, "macro")["state"] != "done" {
 		t.Fatalf("все фиды должны отработать: %+v", last)
 	}
 	if m := feedByID(last, "macro"); m["unit"] != "точек" || m["fetched"].(float64) != 2 {
