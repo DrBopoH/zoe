@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch, provide } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, provide, nextTick } from 'vue'
 import AppHeader from './components/AppHeader.vue'
 import SideMenu from './components/SideMenu.vue'
 import ScrollJumpButtons from './components/ScrollJumpButtons.vue'
@@ -24,6 +24,14 @@ watch(activeTab, (newTab) => {
   } catch (err) {
     console.error('Save active tab error:', err)
   }
+})
+
+// Вкладки живут в KeepAlive (выбор счетов, свеча, раскрытые строки не сбрасываются). У каждой вкладки своя позиция прокрутки: уходя, запоминаем, возвращаясь — восстанавливаем (новая вкладка — с верха)
+const tabScroll = {}
+watch(activeTab, (_, oldTab) => { if (oldTab) tabScroll[oldTab] = window.scrollY }, { flush: 'pre' })
+watch(activeTab, async (tab) => {
+  await nextTick()
+  window.scrollTo(0, tabScroll[tab] || 0)
 })
 
 useWheelScroll() // колесо над слайдерами и горизонтальными областями
@@ -176,9 +184,9 @@ onUnmounted(() => {
         ERROR: {{ errorMsg }}
       </div>
 
-      <SmetaView v-if="activeTab === 'dashboard'" :accounts="accounts" :transactions="transactions" />
-      <OperationalView v-if="activeTab === 'accounts'" :accounts="accounts" :transactions="transactions" :users="users" />
-      <PersonsView v-if="activeTab === 'entities'" :transactions="transactions" :accounts="accounts" :data-version="dataVersion" @refresh="fetchData" />
+      <KeepAlive><SmetaView v-if="activeTab === 'dashboard'" :accounts="accounts" :transactions="transactions" /></KeepAlive>
+      <KeepAlive><OperationalView v-if="activeTab === 'accounts'" :accounts="accounts" :transactions="transactions" :users="users" /></KeepAlive>
+      <KeepAlive><PersonsView v-if="activeTab === 'entities'" :transactions="transactions" :accounts="accounts" :data-version="dataVersion" @refresh="fetchData" /></KeepAlive>
     </div>
   </div>
 </template>
