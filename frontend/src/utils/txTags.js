@@ -5,6 +5,7 @@
 //   начисление Earn               — только [EARN]
 //   перевод между кошельками      — откуда → куда:                   [SPOT] → [EARN]   [SPOT] → [STRATEGY]
 //   сделка в кошельке             — [ПОКУПКА] [SPOT] / [ПРОДАЖА] [SPOT]
+//   обмен монет                   — [ОБМЕН] [SPOT] / [ПЫЛЬ] [SPOT] / [СТЕЙКИНГ] [SPOT]
 const STYLE = {
   invest: 'bg-blue-500/15 text-blue-300 border-blue-500/30',
   out: 'bg-orange-500/15 text-orange-300 border-orange-500/30',
@@ -13,6 +14,9 @@ const STYLE = {
   sell: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
   coupon: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
   redemption: 'bg-violet-500/15 text-violet-300 border-violet-500/30',
+  swap: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30',
+  dust: 'bg-stone-500/15 text-stone-300 border-stone-500/30',
+  stake: 'bg-teal-500/15 text-teal-300 border-teal-500/30',
   // кошельки Binance
   spot: 'bg-slate-500/15 text-slate-300 border-slate-500/30',
   funding: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
@@ -44,7 +48,10 @@ const KIND = {
   bonus: () => tag('БОНУС', 'bonus')
 }
 
+const SWAP = { convert: ['ОБМЕН', 'swap'], dust: ['ПЫЛЬ', 'dust'], stake: ['СТЕЙКИНГ', 'stake'] }
+
 export function tagsFor(t) {
+  if (t.memo === 'swap') { const [l, st] = SWAP[t.kind] || ['ОБМЕН', 'swap']; return [tag(l, st), walletTag(t.wallet)] }
   if (t.memo === 'trade') return [tag(t.side === 'buy' ? 'ПОКУПКА' : 'ПРОДАЖА', t.side === 'buy' ? 'buy' : 'sell'), walletTag(t.wallet)]
   if (t.memo === 'move') return [walletTag(t.from), ARROW, walletTag(t.to)]
   if (t.memo) return [tag(MEMO[t.memo] || t.memo.toUpperCase(), t.memo)]

@@ -37,6 +37,7 @@ export function useCapitalChart(accounts, transactions, pickedIds = ref([])) {
   // Переводы между кошельками Binance — тоже справочные строки истории (капитал не меняют)
   const bnMoves = ref([])
   const bnTrades = ref([]) // покупки и продажи монет внутри кошельков
+  const bnSwaps = ref([]) // обмены монет: Convert, пыль → BNB, стейкинг
   watch(accounts, async (list) => {
     const bn = (list || []).find(a => a.bank_key === 'binance')
     if (!bn) { bnTrades.value = []; return }
@@ -49,6 +50,23 @@ export function useCapitalChart(accounts, transactions, pickedIds = ref([])) {
       }))
     } catch (e) {
       console.error('Binance trades error:', e)
+    }
+  }, { immediate: true })
+
+  // Обмен: «0.2 SOL → 0.177 BNSOL»; если монет несколько (пыль) — первая и «+N»
+  const legs = (l) => (l.length ? `${l[0].qty} ${l[0].asset}${l.length > 1 ? ` +${l.length - 1}` : ''}` : '')
+  watch(accounts, async (list) => {
+    const bn = (list || []).find(a => a.bank_key === 'binance')
+    if (!bn) { bnSwaps.value = []; return }
+    try {
+      const swaps = await apiGetJson('/binance/swaps')
+      bnSwaps.value = (swaps || []).map(x => ({
+        id: `bnsw_${x.id}`, account_id: bn.id, time: new Date(x.t).toISOString(), amount: 0, currency_code: 980,
+        memo: 'swap', exact: true, kind: x.kind, wallet: x.wallet,
+        description: `${legs(x.out)} → ${legs(x.in)}`
+      }))
+    } catch (e) {
+      console.error('Binance swaps error:', e)
     }
   }, { immediate: true })
 
@@ -104,7 +122,7 @@ export function useCapitalChart(accounts, transactions, pickedIds = ref([])) {
   // оценки, скачки депозитов уже в нём, и график сам перестаёт считать эти операции второй раз (CandleChart, binanceIds).
   const binanceIdList = computed(() => chartAccounts.value.filter(a => a.bank_key === 'binance').map(a => a.id))
 
-  const bondOps = computed(() => [...icuOps.value, ...bnMoves.value, ...bnTrades.value]) // имя прежнее: справочные строки истории всех счетов
+  const bondOps = computed(() => [...icuOps.value, ...bnMoves.value, ...bnTrades.value, ...bnSwaps.value]) // имя прежнее: справочные строки истории всех счетов
 
   return { bondOps, uahAccounts, uahTransactions, chartTransactions, chartTotalUAH, binanceIdList, payEvents }
 }

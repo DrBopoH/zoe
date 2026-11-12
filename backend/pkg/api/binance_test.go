@@ -367,3 +367,25 @@ func TestBinanceBalanceEqualsSeriesEnd(t *testing.T) {
 		t.Fatalf("баланс %v, конец ряда %v (ждали 4000, а не 4040 по тикеру)", accs[0].Balance, last)
 	}
 }
+
+// Обмены (Convert, пыль → BNB, стейкинг) видны в истории как справочные строки; сделки и переводы среди них не попадают.
+func TestBinanceSwapsEndpoint(t *testing.T) {
+	fake := newPriceFake()
+	defer fake.Close()
+	s, _ := newBinanceServer(t, fake)
+	csv := stmtHead +
+		"7,2026-05-21 20:43:50,Spot,Binance Convert,SOL,-0.000825,\n" +
+		"7,2026-05-21 20:43:50,Spot,Binance Convert,BNB,0.00010928,\n" +
+		"7,2026-09-01 21:45:26,Spot,SOL Staking - Purchase,SOL,-0.2,\n" +
+		"7,2026-09-01 21:45:26,Spot,SOL Staking - Purchase,BNSOL,0.17704555,\n" +
+		"7,2026-09-02 10:00:00,Spot,Transaction Buy,BTC,0.001,\n" +
+		"7,2026-09-02 10:00:00,Spot,Transaction Spend,USDT,-60,\n"
+	if _, err := s.importSource(stmtName, []byte(csv)); err != nil {
+		t.Fatal(err)
+	}
+	c, b := call(t, s.HandleBinanceSwaps, "GET", "/api/binance/swaps", "")
+	var got []binance.Swap
+	if c != 200 || json.Unmarshal(b, &got) != nil || len(got) != 2 || got[0].Kind != "stake" || got[1].Kind != "convert" || got[0].In[0].Asset != "BNSOL" {
+		t.Fatalf("обмены: %d %s", c, b)
+	}
+}

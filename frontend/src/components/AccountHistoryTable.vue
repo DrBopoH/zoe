@@ -171,7 +171,7 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
             <th class="p-3 whitespace-nowrap">ДАТА</th>
             <th v-if="selected.length > 1" class="p-3">КАРТА</th>
             <th class="p-3">ОПЕРАЦИЯ</th>
-            <th class="p-3">КОНТРАГЕНТ</th>
+            <th class="p-3">СЧЁТ</th>
             <th class="p-3 text-right">СУММА</th>
           </tr>
         </thead>
@@ -192,27 +192,23 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
               </td>
               <td class="p-3 max-w-[360px]">
                 <div class="font-bold text-slate-200 truncate">
-                  <template v-for="(g, i) in tagsFor(t)" :key="i"><span v-if="g.sep" class="mr-1.5 text-[10px] text-slate-500 font-normal">{{ g.label }}</span><span v-else class="mr-1.5 text-[9px] px-1.5 py-0.5 rounded border font-normal" :class="g.cls">{{ g.label }}</span></template>{{ cleanTitle(t, title(t)) }}
+                  <template v-for="(g, i) in tagsFor(t)" :key="i"><span v-if="g.sep" class="mr-1.5 text-[10px] text-slate-500 font-normal">{{ g.label }}</span><span v-else class="mr-1.5 text-[9px] px-1.5 py-0.5 rounded border font-normal" :class="g.cls">{{ g.label }}</span></template>
+                  <template v-if="who(t)">
+                    <span class="inline-flex w-5 h-5 mr-1.5 align-middle rounded-full bg-slate-800 border border-slate-700 overflow-hidden items-center justify-center text-[9px] font-bold text-slate-400">
+                      <img v-if="person(t)?.avatar_url" :src="person(t).avatar_url" class="w-full h-full object-cover" draggable="false" />
+                      <span v-else>{{ who(t).charAt(0).toUpperCase() }}</span>
+                    </span>{{ who(t) }}
+                  </template>
+                  <template v-else>{{ cleanTitle(t, title(t)) }}</template>
                 </div>
-                <div v-if="subtitle(t)" class="text-[10px] text-slate-500 truncate">{{ subtitle(t) }}</div>
+                <div v-if="!who(t) && subtitle(t)" class="text-[10px] text-slate-500 truncate">{{ subtitle(t) }}</div>
               </td>
               <td class="p-3 whitespace-nowrap">
-                <template v-if="who(t) || counterAcct(t)">
-                  <div class="flex items-center gap-1.5">
-                    <template v-if="who(t)">
-                      <span v-if="person(t)" class="w-5 h-5 rounded-full bg-slate-800 border border-slate-700 overflow-hidden shrink-0 flex items-center justify-center text-[9px] font-bold text-slate-400">
-                        <img v-if="person(t).avatar_url" :src="person(t).avatar_url" class="w-full h-full object-cover" draggable="false" />
-                        <span v-else>{{ person(t).name.charAt(0).toUpperCase() }}</span>
-                      </span>
-                      <span class="text-slate-300">{{ who(t) }}</span>
-                    </template>
-                    <span v-if="counterAcct(t)" class="text-[9px] px-1.5 py-0.5 rounded border text-slate-400 font-normal" :class="counterAcct(t).exact ? 'border-slate-700' : 'border-dashed border-slate-600'" :title="counterAcct(t).exact ? 'Счёт или карта контрагента' : counterAcct(t).tip">{{ counterAcct(t).text }}<template v-if="counterAcct(t).more"> <span class="text-slate-500">+{{ counterAcct(t).more }}</span></template></span>
-                  </div>
-                </template>
+                <span v-if="counterAcct(t)" class="text-[9px] px-1.5 py-0.5 rounded border text-slate-400 font-normal" :class="counterAcct(t).exact ? 'border-slate-700' : 'border-dashed border-slate-600'" :title="counterAcct(t).exact ? 'Счёт или карта контрагента' : counterAcct(t).tip">{{ counterAcct(t).text }}<template v-if="counterAcct(t).more"> <span class="text-slate-500">+{{ counterAcct(t).more }}</span></template></span>
                 <span v-else class="text-slate-600">—</span>
               </td>
               <td class="p-3 text-right whitespace-nowrap font-bold" :class="tone(t.amount)">
-                <span v-if="t.memo === 'move' || t.memo === 'trade'" class="text-slate-600 font-normal">—</span>
+                <span v-if="['move', 'trade', 'swap'].includes(t.memo)" class="text-slate-600 font-normal">—</span>
                 <span v-else :class="(t.internal || t.memo) && 'opacity-60'">{{ money(t.amount, t) }}</span>
                 <span v-if="t.is_hold" class="ml-1 text-[9px] text-amber-400 font-normal">HOLD</span>
               </td>
