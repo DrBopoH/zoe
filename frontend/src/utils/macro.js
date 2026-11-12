@@ -115,7 +115,7 @@ export function macroSummary(series, todayIso) {
   }
 }
 
-export const MACRO_PAD = { l: 56, r: 16, t: 12, b: 24 } // поля графика (px во viewBox): по ним мышь переводится в данные
+export const MACRO_PAD = { l: 56, r: 16, t: 12, b: 36 } // поля графика (px во viewBox): по ним мышь переводится в данные
 export const MACRO_MIN_SPAN = 0.5 // дальше приближать смысла нет: полгода
 export const MACRO_MAX_SPAN = 60
 

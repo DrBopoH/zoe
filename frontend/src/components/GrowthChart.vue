@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { buildGrowthChart, autoView, yRanges, GROWTH_PAD, MIN_SPAN, MAX_SPAN } from '../utils/growthChart.js'
+import BennerBands from './BennerBands.vue'
 import { useChartView } from '../composables/useChartView.js'
 import { moneyText } from '../utils/marketTable.js'
 
@@ -31,6 +32,13 @@ const kv = useChartView({
   resetOn: () => [props.items, props.matured] // другие фильтры — снова окно по умолчанию
 })
 const { svgRef, onWheel, onDown, onMove, onUp, onLeave, reset, zoomed } = kv
+// Слой цикла Беннера: ось — годы от сегодня (как у макро-графиков), вперёд до горизонта и дальше
+const YEAR_MS = 365.25 * 86400000
+const todayMs = computed(() => Date.parse(`${props.today}T00:00:00Z`))
+const bn = computed(() => {
+  const v = kv.view.value, w = WIDTH - GROWTH_PAD.l - GROWTH_PAD.r
+  return { fromMs: todayMs.value + v.x0 * YEAR_MS, toMs: todayMs.value + v.x1 * YEAR_MS, xOf: (ms) => GROWTH_PAD.l + (((ms - todayMs.value) / YEAR_MS - v.x0) / (v.x1 - v.x0)) * w }
+})
 const chart = computed(() => buildGrowthChart({ items: props.items, matured: props.matured, amount: props.amount, view: kv.view.value, yRange: kv.yShown.value || kv.target.value, today: props.today, width: WIDTH, height: HEIGHT }))
 const hoverT = kv.hoverX
 const cur = kv.view
@@ -78,6 +86,7 @@ const hoverInfo = computed(() => {
         </g>
         <text v-for="t in chart.xTicks" :key="'x' + t.label" :x="t.x" :y="HEIGHT - 8" text-anchor="middle">{{ t.label }}</text>
       </g>
+      <BennerBands layer="bg" v-bind="bn" :left="GROWTH_PAD.l" :right="WIDTH - GROWTH_PAD.r" :top="GROWTH_PAD.t" :bottom="HEIGHT - GROWTH_PAD.b" />
       <g :clip-path="`url(#plot-clip)`">
         <line :x1="chart.nowX" :x2="chart.nowX" :y1="chart.pad.t" :y2="HEIGHT - chart.pad.b" stroke="#475569" stroke-dasharray="2 3" />
         <line :x1="chart.horizonX" :x2="chart.horizonX" :y1="chart.pad.t" :y2="HEIGHT - chart.pad.b" stroke="#334155" stroke-dasharray="6 4" />
@@ -96,6 +105,7 @@ const hoverInfo = computed(() => {
           <text :x="l.mat.x" :y="l.mat.y + 3.5" text-anchor="middle" font-size="10" font-weight="700" fill="#020617" pointer-events="none">{{ byId.get(l.id)?.place }}</text>
         </template>
       </g>
+      <BennerBands layer="strip" v-bind="bn" :left="GROWTH_PAD.l" :right="WIDTH - GROWTH_PAD.r" :strip-y="HEIGHT - GROWTH_PAD.b + 5" />
     </svg>
 
     <div class="flex flex-wrap items-center gap-x-5 gap-y-1 text-[11px] text-slate-400 min-h-[1.5rem]">
