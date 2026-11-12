@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, onActivated, onDeactivated, onBeforeUnmount, watch } from 'vue'
 import { apiSend } from '../utils/api.js'
 import { storageGet, storageSet } from '../utils/storage.js'
 import { TFS, dayStartOf, weekStartOf, alignDown, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel } from '../utils/candleMath.js'
@@ -659,6 +659,21 @@ const scrollToEnd = (force = false) => {
 
 onMounted(() => {
   scrollToEnd()
+})
+
+// Вкладки живут в KeepAlive: у скрытого блока браузер сбрасывает прокрутку в 0 без события scroll, а окно свечей
+// считается по запомненному scrollX — график оставался пустым. При уходе запоминаем позицию, при возврате ставим её и пересчитываем окно.
+let savedScroll = null
+onDeactivated(() => { savedScroll = scrollX.value }) // к этому моменту блок уже скрыт и его scrollLeft обнулён — берём последний синхронизированный
+onActivated(() => {
+  if (savedScroll === null) return // первая активация — это обычный mount
+  const want = savedScroll
+  nextTick(() => {
+    const el = chartContainerRef.value
+    if (!el) return
+    el.scrollLeft = want
+    syncView()
+  })
 })
 
 // Данные приходят после монтирования: когда свечи впервые появились — встаём на свежий край
