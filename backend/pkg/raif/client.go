@@ -1,6 +1,7 @@
 package raif
 
 import (
+	"economic/pkg/stmtkit"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -102,8 +103,8 @@ func (c *Client) GetUserInfo() (string, []mono.AccountDTO, error) {
 			ID:           acc.ID,
 			IBAN:         acc.IBAN,
 			MaskedPan:    maskedPans,
-			Balance:      toCents(acc.Balance),
-			CreditLimit:  toCents(acc.CreditLimit),
+			Balance:      stmtkit.Cents(acc.Balance),
+			CreditLimit:  stmtkit.Cents(acc.CreditLimit),
 			Type:         accType,
 			CurrencyCode: acc.Currency,
 		}
@@ -149,7 +150,7 @@ func (c *Client) GetStatement(accountID string, from, to time.Time) ([]mono.Stat
 			CounterIban:   st.CounterIBAN,
 			CounterName:   st.CounterName,
 			MCC:           st.MCC,
-			Amount:        toCents(st.Amount),
+			Amount:        stmtkit.Cents(st.Amount),
 			CurrencyCode:  st.CurrencyCode,
 		}
 	}

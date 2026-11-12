@@ -11,6 +11,7 @@ package icu
 
 import (
 	"bytes"
+	"economic/pkg/stmtkit"
 	"fmt"
 	"math"
 	"regexp"
@@ -114,12 +115,12 @@ func ParseWords(pages [][]pdftext.Word) (*Report, error) {
 	for _, l := range lines {
 		t := l.text()
 		if m := rePeriod.FindStringSubmatch(t); m != nil && rep.From.IsZero() {
-			rep.From, _ = time.ParseInLocation("02.01.2006", m[1], time.Local)
-			rep.To, _ = time.ParseInLocation("02.01.2006", m[2], time.Local)
+			rep.From, _ = time.ParseInLocation("02.01.2006", m[1], stmtkit.Kyiv)
+			rep.To, _ = time.ParseInLocation("02.01.2006", m[2], stmtkit.Kyiv)
 		}
 		if m := reContract.FindStringSubmatch(t); m != nil && rep.Contract == "" {
 			rep.Contract = m[1]
-			rep.ContractDate, _ = time.ParseInLocation("02.01.2006", m[2], time.Local)
+			rep.ContractDate, _ = time.ParseInLocation("02.01.2006", m[2], stmtkit.Kyiv)
 		}
 	}
 	if rep.Contract == "" {
@@ -264,10 +265,8 @@ func moneyOf(s string) float64 {
 	return v
 }
 
-func round2(v float64) float64 { return math.Round(v*100) / 100 }
-
 func noon(date string) (int64, error) {
-	t, err := time.ParseInLocation("02.01.2006", date, time.Local)
+	t, err := time.ParseInLocation("02.01.2006", date, stmtkit.Kyiv)
 	if err != nil {
 		return 0, err
 	}
@@ -395,7 +394,7 @@ func parseOrders(rep *Report, ls []line) error {
 		if len(ns) > 3 {
 			return fmt.Errorf("розділ 2: замовлення %s — є курс/винагорода, формат ще не підтверджено зразком", orderNo)
 		}
-		qty, sum := ns[0].val, round2(ns[2].val)
+		qty, sum := ns[0].val, stmtkit.Round2(ns[2].val)
 		f := Flow{ID: "ord:" + orderNo, Time: ts, ISIN: isin, Qty: qty, Amount: -sum, Kind: KindBuy, Note: orderNo}
 		if side == "Продаж" {
 			f.Kind, f.Amount = KindSell, sum
@@ -428,7 +427,7 @@ func parseNonTrade(rep *Report, ls []line) error {
 		if err != nil {
 			return err
 		}
-		amt := round2(moneyOf(m[3]))
+		amt := stmtkit.Round2(moneyOf(m[3]))
 		key := fmt.Sprintf("op|%s|%s|%d", m[1], kind, int64(math.Round(amt*100)))
 		seen[key]++
 		rep.Flows = append(rep.Flows, Flow{ID: fmt.Sprintf("%s|%d", key, seen[key]), Time: ts, Kind: kind, Amount: amt, Note: strings.TrimSpace(m[2])})
@@ -455,7 +454,7 @@ func (r *Report) check() error {
 			qty[f.ISIN] -= f.Qty
 		}
 	}
-	if !near(round2(net), round2(r.Cash.In-r.Cash.Out)) {
+	if !near(stmtkit.Round2(net), stmtkit.Round2(r.Cash.In-r.Cash.Out)) {
 		return &ChecksumError{fmt.Sprintf("операції дають %.2f ₴, а розділ 1 — %.2f ₴ (надходження − видаток)", net, r.Cash.In-r.Cash.Out)}
 	}
 	for _, p := range r.Positions {

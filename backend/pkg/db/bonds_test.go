@@ -1,6 +1,7 @@
 package db
 
 import (
+	"economic/pkg/stmtkit"
 	"strings"
 	"testing"
 	"time"
@@ -76,7 +77,7 @@ func TestBondCouponAndRedemptionBecomeCash(t *testing.T) {
 	if len(st.Positions) != 0 {
 		t.Fatalf("позиция после погашения: %+v", st.Positions)
 	}
-	if want := round2(130 + 7*246.6 + 3000); st.Cash != want || st.Balance != want {
+	if want := stmtkit.Round2(130 + 7*246.6 + 3000); st.Cash != want || st.Balance != want {
 		t.Fatalf("после погашения %v / %v, ждали %v", st.Cash, st.Balance, want)
 	}
 }
@@ -116,7 +117,7 @@ func TestBondWithoutTermsIsValuedAtCost(t *testing.T) {
 	// продали штуку — остаток по средней цене
 	rows = append(rows, lrow(2026, 11, 8, KindSell, 1019.73, bond081.ISIN, 1))
 	st = ComputeState(rows, nil, time.Date(2026, 11, 10, 12, 0, 0, 0, time.Local))
-	if st.Positions[0].Qty != 2 || st.Positions[0].Value != round2(2*3070.0/3) {
+	if st.Positions[0].Qty != 2 || st.Positions[0].Value != stmtkit.Round2(2*3070.0/3) {
 		t.Fatalf("после продажи: %+v", st.Positions[0])
 	}
 }

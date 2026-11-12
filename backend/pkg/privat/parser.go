@@ -1,8 +1,7 @@
 package privat
 
 import (
-	"crypto/sha1"
-	"encoding/hex"
+	"economic/pkg/stmtkit"
 	"fmt"
 	"io"
 	"math"
@@ -166,10 +165,7 @@ func ParsePDF(r io.Reader) (*ParsedResult, error) {
 	}
 
 	// 2. Строки таблицы
-	loc, err := time.LoadLocation("Europe/Kyiv")
-	if err != nil {
-		loc = time.Local
-	}
+	loc := stmtkit.Kyiv
 
 	seen := make(map[string]int)
 	for pageNo, words := range parseBBox(bboxText) {
@@ -487,14 +483,7 @@ func unifyLookalikes(s string) string {
 }
 
 func txID(account string, ts, card, fee int64, desc string, seen map[string]int) string {
-	sum := sha1.Sum([]byte(fmt.Sprintf("%s|%d|%d|%d|%s", account, ts, card, fee, desc)))
-	base := hex.EncodeToString(sum[:])[:20]
-	n := seen[base]
-	seen[base] = n + 1
-	if n == 0 {
-		return "pdf_privat_" + base
-	}
-	return fmt.Sprintf("pdf_privat_%s_%d", base, n)
+	return stmtkit.StableID("pdf_privat_", fmt.Sprintf("%s|%d|%d|%d|%s", account, ts, card, fee, desc), seen)
 }
 
 var (

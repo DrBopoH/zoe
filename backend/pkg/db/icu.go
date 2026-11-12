@@ -1,9 +1,9 @@
 package db
 
 import (
+	"economic/pkg/stmtkit"
 	"encoding/json"
 	"fmt"
-	"math"
 	"sort"
 	"strings"
 	"time"
@@ -50,8 +50,6 @@ type LedgerRow struct {
 	ISIN      string  `json:"isin,omitempty"` // buy/sell: облигация
 	Qty       float64 `json:"qty,omitempty"`  // buy/sell: штук
 }
-
-func round2(v float64) float64 { return math.Round(v*100) / 100 }
 
 // ICUAccountID — id счёта по номеру договора из отчёта («БО-261021-0058» → icu_2610210058).
 // В отчёте нет ни IBAN, ни карты: договор — единственный стабильный ключ.
@@ -301,7 +299,7 @@ type ICUOverview struct {
 }
 
 func dayNum(ts int64) int64 {
-	t := time.Unix(ts, 0).In(time.Local)
+	t := time.Unix(ts, 0).In(stmtkit.Kyiv)
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC).Unix() / 86400
 }
 
@@ -371,12 +369,12 @@ func (s *Storage) ICUOverview(accountID string) (ICUOverview, error) {
 
 // bondsPortfolio — карточка брокерского счёта: свободные деньги отдельно от стоимости облигаций (Balance = Cash + Invested).
 func bondsPortfolio(st AccountState) *PortfolioView {
-	p := &PortfolioView{Kind: "bonds", Cash: round2(st.Cash) + 0}
+	p := &PortfolioView{Kind: "bonds", Cash: stmtkit.Round2(st.Cash) + 0}
 	for _, pos := range st.Positions {
 		p.Invested += pos.Value
-		p.Bonds = append(p.Bonds, BondLine{ISIN: pos.ISIN, Name: pos.Name, Qty: pos.Qty, Accrued: round2(pos.Qty * pos.Accrued)})
+		p.Bonds = append(p.Bonds, BondLine{ISIN: pos.ISIN, Name: pos.Name, Qty: pos.Qty, Accrued: stmtkit.Round2(pos.Qty * pos.Accrued)})
 	}
-	p.Invested = round2(p.Invested)
+	p.Invested = stmtkit.Round2(p.Invested)
 	return p
 }
 

@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"economic/pkg/stmtkit"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -230,7 +231,7 @@ func (s *Storage) SaveBinance(in BinanceSave) error {
 			return err
 		}
 	}
-	if _, err := tx.Exec(`UPDATE accounts SET balance = ?, closed_at = 0 WHERE id = ?`, round2(in.Portfolio), BinanceAccountID); err != nil {
+	if _, err := tx.Exec(`UPDATE accounts SET balance = ?, closed_at = 0 WHERE id = ?`, stmtkit.Round2(in.Portfolio), BinanceAccountID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`INSERT INTO binance_state(k,v) VALUES('detail',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`, string(raw)); err != nil {
@@ -298,7 +299,7 @@ func (s *Storage) SaveBinanceTxs(txs []BinanceTx) error {
 	defer tx.Rollback()
 	for _, t := range txs {
 		if _, err := tx.Exec(`INSERT OR REPLACE INTO transactions (id, account_id, time, description, amount, operation_amount, currency_code, is_hold)
-			VALUES (?,?,?,?,?,?,980,0)`, "binance_"+t.FlowID, BinanceAccountID, t.T/1000, t.Desc, round2(t.UAH), round2(t.UAH)); err != nil {
+			VALUES (?,?,?,?,?,?,980,0)`, "binance_"+t.FlowID, BinanceAccountID, t.T/1000, t.Desc, stmtkit.Round2(t.UAH), stmtkit.Round2(t.UAH)); err != nil {
 			return err
 		}
 	}
@@ -382,6 +383,16 @@ func (s *Storage) BinanceCandles(starts []int64, end int64) ([][4]float64, []boo
 		}
 		return end
 	}
+	// closeBucket закрывает корзину i: свеча из собранных точек, а пустая после начала ряда — плоская на последней цене.
+	closeBucket := func() {
+		if started {
+			out[i], has[i] = cand, true
+			prev, havePrev = cand[3], true
+			started = false
+		} else if havePrev {
+			out[i], has[i] = [4]float64{prev, prev, prev, prev}, true
+		}
+	}
 	for rows.Next() {
 		var ts int64
 		var v float64
@@ -389,13 +400,7 @@ func (s *Storage) BinanceCandles(starts []int64, end int64) ([][4]float64, []boo
 			return nil, nil, err
 		}
 		for i < len(starts) && ts >= bucketEnd(i) {
-			if started {
-				out[i], has[i] = cand, true
-				prev, havePrev = cand[3], true
-				started = false
-			} else if havePrev {
-				out[i], has[i] = [4]float64{prev, prev, prev, prev}, true
-			}
+			closeBucket()
 			i++
 		}
 		if i >= len(starts) {
@@ -415,13 +420,7 @@ func (s *Storage) BinanceCandles(starts []int64, end int64) ([][4]float64, []boo
 		}
 	}
 	for ; i < len(starts); i++ {
-		if started {
-			out[i], has[i] = cand, true
-			prev, havePrev = cand[3], true
-			started = false
-		} else if havePrev {
-			out[i], has[i] = [4]float64{prev, prev, prev, prev}, true
-		}
+		closeBucket()
 	}
 	return out, has, rows.Err()
 }

@@ -110,8 +110,7 @@ func readAccounts(r *http.Request) map[string]bool {
 
 // HandleLoadSources — «Загрузить»: файлы-источники кладутся в базу (все или только выбранных счетов).
 func (s *Server) HandleLoadSources(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !allow(w, r, http.MethodPost) {
 		return
 	}
 	want := readAccounts(r)
@@ -145,16 +144,14 @@ func (s *Server) HandleLoadSources(w http.ResponseWriter, r *http.Request) {
 		failed = []loadFailure{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, map[string]interface{}{
 		"status": "success", "total": total, "loaded": loaded, "transactions": txCount, "failed": failed, "dir": sourcesDir(),
 	})
 }
 
 // HandleResetSources — «Сбросить»: кеш-база очищается (вся или у выбранных счетов). Файлы-источники не трогаются.
 func (s *Server) HandleResetSources(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !allow(w, r, http.MethodPost) {
 		return
 	}
 	want := readAccounts(r)
@@ -170,11 +167,10 @@ func (s *Server) HandleResetSources(w http.ResponseWriter, r *http.Request) {
 		err = s.storage.WipeAccounts(ids)
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		failErr(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+	writeOK(w)
 }
 
 // ───────────── Инвентарь: что известно об источниках ─────────────
@@ -236,12 +232,7 @@ func coverCells(spans []db.Span, txs []int64, lo, hi int64) string {
 			cells[i] = '0'
 			continue
 		}
-		j := sort.Search(len(txs), func(k int) bool { return txs[k] >= ca })
-		if j < len(txs) && txs[j] < cb {
-			cells[i] = '1'
-		} else {
-			cells[i] = '2'
-		}
+		cells[i] = txCell(txs, ca, cb)
 	}
 	return string(cells)
 }
@@ -263,8 +254,7 @@ func mergeSpans(in []db.Span) []db.Span {
 
 // HandleSources — GET /api/sources: все счета, у которых есть источник или данные в кеше, со сведениями о файлах и таймлайном.
 func (s *Server) HandleSources(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !allow(w, r, http.MethodGet) {
 		return
 	}
 	migrated, failed := migrateLegacy()
@@ -362,8 +352,7 @@ func (s *Server) HandleSources(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"dir": sourcesDir(), "accounts": out, "migrated": migrated, "failed": failedOrEmpty(failed)})
+	writeJSON(w, map[string]interface{}{"dir": sourcesDir(), "accounts": out, "migrated": migrated, "failed": failedOrEmpty(failed)})
 }
 
 func failedOrEmpty(f []loadFailure) []loadFailure {
@@ -377,14 +366,13 @@ func failedOrEmpty(f []loadFailure) []loadFailure {
 // в файлы-источники. Сброс кеша потом восстанавливается с диска, а снятые отрезки заново не качаются.
 // Тело: {"accounts":[…]}; пусто — все счета, у которых есть что сохранить.
 func (s *Server) HandleSaveAPI(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !allow(w, r, http.MethodPost) {
 		return
 	}
 	want := readAccounts(r)
 	accs, err := s.storage.GetAccounts()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		failErr(w, err)
 		return
 	}
 	type res struct {
@@ -423,24 +411,22 @@ func (s *Server) HandleSaveAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, item)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"status": "success", "results": out})
+	writeJSON(w, map[string]any{"status": "success", "results": out})
 }
 
 // HandleDeleteSource — DELETE /api/sources/file?id=<отпечаток>: снести файл-источник.
 // Если это снимок API, кеш забывает, что отрезок снят (и сбрасывает ряд Binance): следующая синхронизация стянет всё с API заново.
 func (s *Server) HandleDeleteSource(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !allow(w, r, http.MethodDelete) {
 		return
 	}
 	e, ok := store().Find(r.URL.Query().Get("id"))
 	if !ok {
-		http.Error(w, "источник не найден", http.StatusNotFound)
+		fail(w, http.StatusNotFound, "источник не найден")
 		return
 	}
 	if err := store().Remove(e.Path); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		failErr(w, err)
 		return
 	}
 	refetch := false
@@ -453,11 +439,10 @@ func (s *Server) HandleDeleteSource(w http.ResponseWriter, r *http.Request) {
 			err = s.storage.ClearCoverage(e.File.AccountID)
 		}
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			failErr(w, err)
 			return
 		}
 		refetch = true
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"status": "success", "refetch": refetch})
+	writeJSON(w, map[string]any{"status": "success", "refetch": refetch})
 }

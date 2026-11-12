@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -182,14 +181,13 @@ func (s *Server) overlapOf(f *source.File, have []source.Entry) *overlapInfo {
 
 // HandleInspectSource — POST /api/sources/inspect (multipart: file, account?) → что это за файл и что с ним не так. Ничего не пишет.
 func (s *Server) HandleInspectSource(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	if !allow(w, r, http.MethodPost) {
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		http.Error(w, "Failed to read uploaded file", http.StatusBadRequest)
+		fail(w, http.StatusBadRequest, "Failed to read uploaded file")
 		return
 	}
 	defer file.Close()
@@ -199,7 +197,7 @@ func (s *Server) HandleInspectSource(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, err := io.ReadAll(file)
 	if err != nil {
-		http.Error(w, "Failed to read file bytes", http.StatusBadRequest)
+		fail(w, http.StatusBadRequest, "Failed to read file bytes")
 		return
 	}
 	f, err := parseSource(name, raw)
@@ -212,8 +210,7 @@ func (s *Server) HandleInspectSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f.Seal()
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(s.inspect(f, r.FormValue("account")))
+	writeJSON(w, s.inspect(f, r.FormValue("account")))
 }
 
 // enforceImportRules применяет решения пользователя из формы импорта. Без поля mode — прежнее поведение (просто импорт).

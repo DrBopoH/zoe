@@ -11,12 +11,14 @@ const BaseURL = "https://api.monobank.ua"
 
 type Client struct {
 	token      string
+	baseURL    string
 	httpClient *http.Client
 }
 
 func NewClient(token string) *Client {
 	return &Client{
-		token: token,
+		token:   token,
+		baseURL: BaseURL,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -72,61 +74,44 @@ func (e *BadRequestError) Error() string {
 }
 
 func (c *Client) GetClientInfo() (*UserInfoDTO, error) {
-	req, err := c.newRequest("GET", BaseURL+"/personal/client-info")
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == 429 {
-		return nil, &RateLimitError{}
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("mono client info status: %d", resp.StatusCode)
-	}
-
 	var info UserInfoDTO
-	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+	if err := c.get("/personal/client-info", "client info", false, &info); err != nil {
 		return nil, err
 	}
-
 	return &info, nil
 }
 
 func (c *Client) GetStatement(accountID string, from, to time.Time) ([]StatementItemDTO, error) {
-	url := fmt.Sprintf("%s/personal/statement/%s/%d/%d", BaseURL, accountID, from.Unix(), to.Unix())
-	req, err := c.newRequest("GET", url)
-	if err != nil {
+	var items []StatementItemDTO
+	path := fmt.Sprintf("/personal/statement/%s/%d/%d", accountID, from.Unix(), to.Unix())
+	if err := c.get(path, "statement", true, &items); err != nil {
 		return nil, err
 	}
+	return items, nil
+}
 
+// get — GET к API и разбор JSON в out. 429 → RateLimitError; 400 → BadRequestError, если badRequest
+// (у выписки это «достигнут лимит создания счетов»), иначе обычная ошибка статуса.
+func (c *Client) get(path, what string, badRequest bool, out any) error {
+	req, err := c.newRequest("GET", c.baseURL+path)
+	if err != nil {
+		return err
+	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 429 {
-		return nil, &RateLimitError{}
+	switch {
+	case resp.StatusCode == http.StatusTooManyRequests:
+		return &RateLimitError{}
+	case resp.StatusCode == http.StatusBadRequest && badRequest:
+		return &BadRequestError{}
+	case resp.StatusCode != http.StatusOK:
+		return fmt.Errorf("mono %s status: %d", what, resp.StatusCode)
 	}
-	if resp.StatusCode == 400 {
-		return nil, &BadRequestError{}
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("mono statement status: %d", resp.StatusCode)
-	}
-
-	var items []StatementItemDTO
-	if err := json.NewDecoder(resp.Body).Decode(&items); err != nil {
-		return nil, err
-	}
-
-	return items, nil
+	return json.NewDecoder(resp.Body).Decode(out)
 }
 
 func (c *Client) newRequest(method, url string) (*http.Request, error) {
