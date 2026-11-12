@@ -141,3 +141,14 @@ test('логарифмическая шкала: равные проценты �
   const c2 = buildMacroChart({ series: withZero, ids: ['px'], view, yRange: r.auto, todayIso: today, scale: 'log' })
   assert.ok(!c2.lines[0].d.includes('NaN') && !c2.lines[0].d.includes('Infinity'))
 })
+
+test('градиент по значению: вектор от значения from до to в пикселях, у обычных рядов градиента нет', () => {
+  const today = '2026-11-12'
+  const series = { crypto_fng: [{ d: '2026-01-01', v: 20 }, { d: '2026-11-01', v: 80 }], us_unrate: [{ d: '2026-01-01', v: 4 }, { d: '2026-11-01', v: 5 }] }
+  const view = { x0: -1, x1: 0.05 }
+  const chart = buildMacroChart({ series, ids: ['crypto_fng', 'us_unrate'], view, yRange: { lo: 0, hi: 100 }, todayIso: today })
+  const [fng, un] = chart.lines
+  assert.ok(fng.gradient && fng.gradient.y1 > fng.gradient.y2) // 0 внизу, 100 вверху
+  assert.equal(fng.gradient.stops.length, 3)
+  assert.equal(un.gradient, null)
+})
