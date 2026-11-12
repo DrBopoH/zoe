@@ -111,6 +111,9 @@ type Transaction struct {
 	AliasAccts []AliasAcct `json:"alias_accts,omitempty"`
 
 	// Перемещение между своими счетами (на брокерский счёт и записи его журнала): не доход и не расход.
+	// Контрагент — другой наш счёт или карта (на чтении): перевод между своими, не доход и не расход.
+	OwnAccountID string `json:"own_account_id,omitempty"`
+
 	Internal        bool   `json:"internal,omitempty"`
 	LinkedAccountID string `json:"linked_account_id,omitempty"` // куда ушла операция кеша (брокерский счёт)
 

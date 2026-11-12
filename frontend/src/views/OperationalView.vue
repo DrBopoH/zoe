@@ -29,6 +29,7 @@ const toRow = (a) => ({
   fullLabel: [a.displayIban, ...a.pans].join(' · '),
   theme: a.theme
 })
+const ownRows = computed(() => preparedAccounts.value.map(toRow))
 const selectedAccounts = computed(() => preparedAccounts.value.filter(isSelected).map(toRow))
 
 // График — по выбранным картам (ничего не выбрано → все счета, как в Смете). Клик по свече сужает таблицу до её корзины времени.
@@ -79,6 +80,7 @@ const allScope = computed(() => !selectedAccounts.value.length && !!range.value)
 
     <AccountHistoryTable
       :users="users"
+      :own="ownRows"
       :transactions="transactions"
       :memo="bondOps"
       :selected="tableAccounts"

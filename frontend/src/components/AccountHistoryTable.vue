@@ -18,7 +18,9 @@ const props = defineProps({
   // «все счета» (карты не выбраны, фильтр только по свече): без плашек карт и без кнопки снятия выбора
   allScope: { type: Boolean, default: false },
   // лица (id, name, avatar_url): алиас контрагента в строке подменяется на привязанное Лицо
-  users: { type: Array, default: () => [] }
+  users: { type: Array, default: () => [] },
+  // все наши счета { id, label, theme }: чтобы перевод на свой счёт показывал банк этого счёта
+  own: { type: Array, default: () => [] }
 })
 const emit = defineEmits(['clear', 'clear-range'])
 
@@ -27,6 +29,9 @@ const visible = ref(PAGE)
 const openId = ref(null)
 
 const byId = computed(() => new Map(props.selected.map(a => [a.id, a])))
+const ownById = computed(() => new Map(props.own.map(a => [a.id, a])))
+// свой счёт: перевод на банк/карту (own_account_id) или на брокерский/Binance (linked_account_id — тот же механизм, что дал бейдж ИНВЕСТИЦИЯ)
+const ownAcc = (t) => ownById.value.get(t.own_account_id || t.linked_account_id) || null
 
 const inRange = (t) => {
   const r = props.range
@@ -58,7 +63,7 @@ const totals = computed(() => {
   let income = 0
   let expense = 0
   for (const t of rows.value) {
-    if (t.internal || t.memo) continue // перевод между своими счетами — не доход и не расход
+    if (t.internal || t.own_account_id || t.memo) continue // перевод между своими счетами — не доход и не расход
     if (t.amount >= 0) income += t.amount
     else expense += t.amount
   }
@@ -206,10 +211,11 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
               <td class="p-3 whitespace-nowrap">
                 <span v-if="counterAcct(t)" class="text-[9px] px-1.5 py-0.5 rounded border text-slate-400 font-normal" :class="counterAcct(t).exact ? 'border-slate-700' : 'border-dashed border-slate-600'" :title="counterAcct(t).exact ? 'Счёт или карта контрагента' : counterAcct(t).tip">{{ counterAcct(t).text }}<template v-if="counterAcct(t).more"> <span class="text-slate-500">+{{ counterAcct(t).more }}</span></template></span>
                 <span v-else class="text-slate-600">—</span>
+                <span v-if="ownAcc(t)?.theme?.tag" class="ml-1.5 text-[9px] px-1.5 py-0.5 rounded border font-normal" :class="ownAcc(t).theme.tagStyle" title="Банк и тип этого счёта">{{ ownAcc(t).theme.tag }}</span>
               </td>
               <td class="p-3 text-right whitespace-nowrap font-bold" :class="tone(t.amount)">
                 <span v-if="['move', 'trade', 'swap'].includes(t.memo)" class="text-slate-600 font-normal">—</span>
-                <span v-else :class="(t.internal || t.memo) && 'opacity-60'">{{ money(t.amount, t) }}</span>
+                <span v-else :class="(t.internal || t.own_account_id || t.memo) && 'opacity-60'">{{ money(t.amount, t) }}</span>
                 <span v-if="t.is_hold" class="ml-1 text-[9px] text-amber-400 font-normal">HOLD</span>
               </td>
             </tr>

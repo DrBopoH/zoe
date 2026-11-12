@@ -229,6 +229,7 @@ func (s *Storage) GetTransactions(limit int) ([]Transaction, error) {
 	defer rows.Close()
 
 	res := s.buildResolver()
+	own := s.buildOwnMatcher()
 	list := []Transaction{}
 	for rows.Next() {
 		var t Transaction
@@ -242,8 +243,20 @@ func (s *Storage) GetTransactions(limit int) ([]Transaction, error) {
 		t.IsHold = hold != 0
 		t.Time = time.Unix(ts, 0).Format(time.RFC3339)
 		t.ResolvedUserID = res.resolve(t.CounterIBAN, t.CounterName, t.Description)
+		t.OwnAccountID = own.own(t.AccountID, t.CounterIBAN, t.CounterName, t.Description)
 		if t.CounterIBAN == "" {
 			t.AliasAccts = res.aliasAccts(t.CounterIBAN, t.CounterName, t.Description)
+		}
+		if t.OwnAccountID == "" { // номера в операции нет: свой счёт по привязке алиаса, если среди его счетов ровно один наш (другой, чем у операции)
+			t.OwnAccountID = own.fromAliasAccts(t.AccountID, t.AliasAccts)
+		}
+		if t.ResolvedUserID == "" && t.OwnAccountID != "" { // контрагент назван номером своей карты: Лицо — владелец этого счёта
+			for _, id := range own.ids[t.OwnAccountID] {
+				if u := res.resolve(id, "", ""); u != "" {
+					t.ResolvedUserID = u
+					break
+				}
+			}
 		}
 		list = append(list, t)
 	}
