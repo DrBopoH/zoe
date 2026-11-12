@@ -199,3 +199,35 @@ func (s *Server) HandleMarketSync(w http.ResponseWriter, r *http.Request) {
 	}
 	writeMsg(w, "started", "Обновление облигаций запущено.")
 }
+
+// /api/market/lists?name=icu — свой список ISIN (хранится в core.db, не в кеше).
+//
+//	GET            → {"name":"icu","isins":[…],"updated_at":…}
+//	PUT/POST       — тело {"isins":[…]} заменяет список целиком
+func (s *Server) HandleMarketLists(w http.ResponseWriter, r *http.Request) {
+	name := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("name")))
+	switch r.Method {
+	case http.MethodGet:
+		ids, err := s.storage.MarketList(name)
+		if err != nil {
+			fail(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"name": name, "isins": ids})
+	case http.MethodPut, http.MethodPost:
+		var body struct {
+			ISINs []string `json:"isins"`
+		}
+		if !readJSON(w, r, &body) {
+			return
+		}
+		ids, err := s.storage.SaveMarketList(name, body.ISINs, time.Now().Unix())
+		if err != nil {
+			fail(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"name": name, "isins": ids})
+	default:
+		fail(w, http.StatusMethodNotAllowed, "GET, PUT")
+	}
+}

@@ -386,6 +386,9 @@ func (s *Storage) initCore() error {
 	if err := s.initICU(); err != nil {
 		return fmt.Errorf("icu schema: %w", err)
 	}
+	if err := s.initMarketLists(); err != nil {
+		return fmt.Errorf("market lists schema: %w", err)
+	}
 	if err := s.dropLegacyBinanceCore(); err != nil {
 		return fmt.Errorf("drop legacy binance tables: %w", err)
 	}

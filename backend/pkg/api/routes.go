@@ -23,6 +23,7 @@ func (s *Server) Handler() http.Handler {
 		// Рыночные облигации: ОВДП (НБУ) и US Treasury, публичные данные в кеше
 		{"/api/market/bonds", s.HandleMarketBonds},
 		{"/api/market/sync", s.HandleMarketSync},
+		{"/api/market/lists", s.HandleMarketLists}, // свои списки ISIN (например «icu» — доступно к покупке в брокере)
 
 		// Binance (только чтение кеша; обновляется через «Разведать»)
 		{"/api/binance", s.HandleBinance},
