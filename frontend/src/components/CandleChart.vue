@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { apiSend } from '../utils/api.js'
+import { storageGet, storageSet } from '../utils/storage.js'
 import { toLocalDateStr, formatMoney, formatDateLong, formatShortDateName, formatMonthName } from '../utils/formatters.js'
 
 const props = defineProps({
@@ -39,8 +40,8 @@ const TFS = [
   { id: '1W', week: true }
 ]
 const readTf = () => {
-  try { const v = localStorage.getItem('zoe.candle.tf'); if (TFS.some(t => t.id === v)) return v } catch { /* нет хранилища — не страшно */ }
-  return '1D'
+  const v = storageGet('zoe.candle.tf')
+  return TFS.some(t => t.id === v) ? v : '1D'
 }
 const tfId = ref(readTf())
 const tfDef = computed(() => TFS.find(t => t.id === tfId.value) || TFS[5])
@@ -50,7 +51,7 @@ const setTf = (id) => {
   if (id === tfId.value) return
   tfId.value = id
   extraBack.value = 0
-  try { localStorage.setItem('zoe.candle.tf', id) } catch { /* ignore */ }
+  storageSet('zoe.candle.tf', id)
   zoomLevel.value = 1.0
   hoveredCandle.value = null
   selectCandle(null)

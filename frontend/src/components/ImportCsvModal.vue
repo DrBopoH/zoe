@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { API_BASE } from '../utils/api.js'
+import { apiUpload } from '../utils/api.js'
 import { formatRuDate } from '../utils/formatters.js'
 import UiModal from './ui/UiModal.vue'
 import UiButton from './ui/UiButton.vue'
@@ -56,9 +56,7 @@ const inspect = async () => {
     const fd = new FormData()
     fd.append('file', file.value)
     if (props.mode === 'update' && props.account) fd.append('account', props.account.id)
-    const res = await fetch(`${API_BASE}/sources/inspect`, { method: 'POST', body: fd })
-    if (!res.ok) throw new Error((await res.text()) || 'Не удалось разобрать файл')
-    info.value = await res.json()
+    info.value = await (await apiUpload('/sources/inspect', fd)).json()
   } catch (err) {
     statusMsg.value = { type: 'error', text: err.message }
   } finally {
@@ -101,9 +99,7 @@ const submitImport = async () => {
   if (force.value) fd.append('force', '1')
 
   try {
-    const res = await fetch(`${API_BASE}/sync/import-csv`, { method: 'POST', body: fd })
-    if (!res.ok) throw new Error((await res.text()) || 'Ошибка импорта')
-    const data = await res.json()
+    const data = await (await apiUpload('/sync/import-csv', fd)).json()
     statusMsg.value = { type: 'success', text: `Загружено операций: ${data.imported_count || 0}` }
     setTimeout(() => { emit('success'); emit('close') }, 900)
   } catch (err) {

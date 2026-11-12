@@ -1,5 +1,6 @@
 import { reactive } from 'vue'
 import { bankTheme } from './bankTheme.js'
+import { BANKS as REGISTRY } from './banks.js'
 
 // Скрытый IBAN хранится цифрами («UA44-322001-0000-9976»: страна+контрольные, код банка, 4 первые, 4 последние).
 // Флаг и значок банка подставляются на лету здесь; своё имя счёта (карандаш) не подходит под шаблон и показывается как есть.
@@ -23,14 +24,10 @@ export const flagEmoji = (cc) => [...String(cc).toUpperCase()].map(c => String.f
 
 // Код банка (МФО) → значок. Логотип подхватывается из public/banks/<МФО>.svg для любого кода (кладёшь файл — он появляется);
 // без файла — монограмма в цвете банка. Код, которого нет в списке, — нейтральная монограмма из его первых цифр.
-// Нужен новый банк — одна строка здесь.
-const BANKS = {
-  322001: { key: 'mono', letter: 'M', name: 'monobank' },
-  305299: { key: 'privat', letter: 'П', name: 'ПриватБанк' },
-  300335: { key: 'raif', letter: 'R', name: 'Райффайзен' },
-  380946: { key: 'icu', letter: 'I', name: 'ICU' },
-  935871: { key: 'novapay', letter: 'N', name: 'NovaPay' }
-}
+// Банки берутся из реестра banks.js (нужен новый банк — одна запись там).
+const BANKS = Object.fromEntries(
+  Object.entries(REGISTRY).flatMap(([key, b]) => b.mfo.map((code) => [code, { key, letter: b.letter, name: b.name }]))
+)
 
 // логотипы, которых нет в public/banks: один раз не нашли — больше не запрашиваем (общее на все компоненты)
 export const failedLogos = reactive(new Set())

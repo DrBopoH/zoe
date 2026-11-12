@@ -10,21 +10,14 @@ import SmetaView from './views/SmetaView.vue'
 import OperationalView from './views/OperationalView.vue'
 import PersonsView from './views/PersonsView.vue'
 import { cleanPersonName, isP2PTransaction } from './utils/formatters.js'
-import { API_BASE } from './utils/api.js'
+import { apiGetJson, apiSend } from './utils/api.js'
+import { storageGet, storageSet } from './utils/storage.js'
 import { loadMasks } from './composables/useIbanMasks.js'
 
 const STORAGE_ACTIVE_TAB = 'economic_active_tab'
 
-const savedTab = localStorage.getItem(STORAGE_ACTIVE_TAB)
-const activeTab = ref(savedTab || 'dashboard')
-
-watch(activeTab, (newTab) => {
-  try {
-    localStorage.setItem(STORAGE_ACTIVE_TAB, newTab)
-  } catch (err) {
-    console.error('Save active tab error:', err)
-  }
-})
+const activeTab = ref(storageGet(STORAGE_ACTIVE_TAB, 'dashboard'))
+watch(activeTab, (newTab) => storageSet(STORAGE_ACTIVE_TAB, newTab))
 
 // Вкладки живут в KeepAlive (выбор счетов, свеча, раскрытые строки не сбрасываются). У каждой вкладки своя позиция прокрутки: уходя, запоминаем, возвращаясь — восстанавливаем (новая вкладка — с верха)
 const tabScroll = {}
@@ -92,9 +85,7 @@ const connLostSince = ref(null) // ms, null — связь есть
 
 const fetchStatus = async () => {
   try {
-    const res = await fetch(`${API_BASE}/sync/status`)
-    if (!res.ok) throw new Error(`status ${res.status}`)
-    const data = await res.json()
+    const data = await apiGetJson('/sync/status')
     connLostSince.value = null
     isSyncing.value = !!data.running
     progress.value = data.progress || null
@@ -114,15 +105,13 @@ const fetchStatus = async () => {
 
 const loadData = async () => {
   try {
-    const [accRes, txRes, userRes] = await Promise.all([
-      fetch(`${API_BASE}/accounts`),
-      fetch(`${API_BASE}/transactions`),
-      fetch(`${API_BASE}/users`)
-    ])
-    if (userRes.ok) users.value = (await userRes.json()) || []
-    if (accRes.ok) accounts.value = (await accRes.json()) || []
-    if (txRes.ok) transactions.value = (await txRes.json()) || []
-    errorMsg.value = ''
+    // Каждый запрос независим: упавший не мешает остальным подставить свои данные
+    const [acc, tx, usr] = await Promise.allSettled([apiGetJson('/accounts'), apiGetJson('/transactions'), apiGetJson('/users')])
+    if (usr.status === 'fulfilled') users.value = usr.value || []
+    if (acc.status === 'fulfilled') accounts.value = acc.value || []
+    if (tx.status === 'fulfilled') transactions.value = tx.value || []
+    const failed = [acc, tx, usr].find((r) => r.status === 'rejected')
+    errorMsg.value = failed ? String(failed.reason?.message || failed.reason) : ''
     loadMasks() // новые счета после синхронизации получают скрытый вид на бэкенде
   } catch (err) {
     errorMsg.value = err.message
@@ -141,8 +130,7 @@ const startFullSync = async () => {
   if (isSyncing.value) return
   errorMsg.value = ''
   try {
-    const res = await fetch(`${API_BASE}/sync/full`, { method: 'POST' })
-    if (!res.ok) throw new Error(await res.text())
+    await apiSend('POST', '/sync/full')
     await fetchStatus()
   } catch (err) {
     errorMsg.value = err.message

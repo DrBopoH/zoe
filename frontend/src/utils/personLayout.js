@@ -1,4 +1,5 @@
 import { cleanPersonName, cleanAccountName, isMaskedPan } from './formatters.js'
+import { bankKeyByMfo, bankKeyByCard, BANK_ORDER, bankLabel } from './banks.js'
 
 /*
  * Модель данных (зеркалит бэкенд):
@@ -68,18 +69,14 @@ export const detectBankKey = (ibanStr, cacheAcc, pans = []) => {
 
   if (cacheAcc?.bank_key === 'icu') return 'icu'
   if (cacheAcc?.bank_key === 'binance') return 'binance'
-  if (mfo === '380946') return 'icu' // ICU Trader: IBAN UA67 380946…
+  const byMfoKey = bankKeyByMfo(mfo)
+  if (byMfoKey) return byMfoKey
   if (/^BN\d{6,12}$/.test(norm)) return 'binance' // профиль Binance (BN + id пользователя из выписки)
-  if (mfo === '300335' || mfo === '380805') return 'raif'
-  if (mfo === '305299') return 'privat'
-  if (mfo === '322001') return 'mono'
-  if (mfo === '935871') return 'novapay' // NovaPay: UA12 935871…
 
   const allIds = [norm, ...pans.map(normId)].filter(Boolean)
   for (const id of allIds) {
-    if (id.startsWith('5168') || id.startsWith('5457')) return 'privat'
-    if (id.startsWith('5375') || id.startsWith('4441') || id.startsWith('4874')) return 'mono'
-    if (id.startsWith('4149')) return 'privat'
+    const k = bankKeyByCard(id)
+    if (k) return k
   }
   if (type) return 'mono'
   return 'other'
@@ -117,11 +114,10 @@ export const plainNameFromDescription = (t) => {
 // Единое «имя контрагента» операции: counter_name → контакт после префикса → имя-описание P2P
 // Контрагент без имени, известный только по карте («отримувач -, 487407****44, банк отримувача JSC UNIVERSAL BANK»):
 // имя-алиас «487407****44 · Monobank». Зеркало pseudoCounterName в Go (util.go).
-const BANK_LABEL = { mono: 'Monobank', privat: 'PrivatBank', raif: 'Raiffeisen', novapay: 'NovaPay' }
 export const pseudoCounterName = (t) => {
   const c = String(t?.counter_iban || '').trim()
   if (!c || !isPanLike(c)) return ''
-  let bank = BANK_LABEL[detectBankKey('', null, [c])] || ''
+  let bank = bankLabel(detectBankKey('', null, [c]))
   if (!bank) {
     const m = /банк\s+(?:отримувача|платника)\s+(.+?)(?:,|$)/i.exec(String(t.description || ''))
     bank = m ? m[1].trim() : ''
@@ -398,7 +394,6 @@ export const buildAliasGraph = ({ accounts = [], transactions = [], users = [], 
 
 // ───────────────────────── раскладка карточки лица ─────────────────────────
 
-const BANK_ORDER = ['mono', 'raif', 'privat', 'novapay', 'other']
 const byName = (a, b) => String(a).localeCompare(String(b), 'ru')
 
 export const buildPersonLayout = (user, graph) => {

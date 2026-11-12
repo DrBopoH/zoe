@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch, inject, computed } from 'vue'
-import { API_BASE } from '../utils/api.js'
+import { apiSend } from '../utils/api.js'
 import UiModal from './ui/UiModal.vue'
 import UiButton from './ui/UiButton.vue'
 import { parseDateText, isoToText, isDateTextOk } from '../utils/dateText.js'
@@ -35,12 +35,7 @@ const save = async () => {
   busy.value = true
   error.value = ''
   try {
-    const res = await fetch(`${API_BASE}/accounts/life`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ account_id: props.account.id, opened: parseDateText(opened.value) || '', closed: parseDateText(closed.value) || '' })
-    })
-    if (!res.ok) throw new Error((await res.text()) || res.status)
+    await apiSend('POST', '/accounts/life', { account_id: props.account.id, opened: parseDateText(opened.value) || '', closed: parseDateText(closed.value) || '' })
     if (refresh) await refresh()
     emit('close')
   } catch (e) {

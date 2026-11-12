@@ -49,6 +49,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
+      - name: tests
+        run: bun run test
       - name: build
         run: bun run build
 

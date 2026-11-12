@@ -1,13 +1,8 @@
-export const API_BASE = 'http://localhost:8080/api'
+// Адрес бэкенда: VITE_API_BASE в .env фронта, иначе локальный бэкенд.
+export const API_BASE = import.meta.env?.VITE_API_BASE || 'http://localhost:8080/api'
 
-// Универсальный запрос: бросает Error с текстом бэкенда, если статус не 2xx.
-export async function apiSend(method, path, body) {
-  const opts = { method }
-  if (body !== undefined) {
-    opts.headers = { 'Content-Type': 'application/json' }
-    opts.body = JSON.stringify(body)
-  }
-  const res = await fetch(`${API_BASE}${path}`, opts)
+async function request(method, path, opts) {
+  const res = await fetch(`${API_BASE}${path}`, { method, ...opts })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(text || `${method} ${path}: ${res.status}`)
@@ -15,9 +10,22 @@ export async function apiSend(method, path, body) {
   return res
 }
 
+// Универсальный запрос: бросает Error с текстом бэкенда, если статус не 2xx. body (если есть) уходит как JSON.
+export function apiSend(method, path, body) {
+  if (body === undefined) return request(method, path)
+  return request(method, path, { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+}
+
+// Загрузка файла (FormData): заголовок Content-Type браузер ставит сам, с границей multipart.
+export const apiUpload = (path, formData, method = 'POST') => request(method, path, { body: formData })
+
 export async function apiGetJson(path) {
-  const res = await apiSend('GET', path)
-  return res.json()
+  return (await apiSend('GET', path)).json()
+}
+
+// Запрос с телом/без и разбором JSON-ответа.
+export async function apiJson(method, path, body) {
+  return (await apiSend(method, path, body)).json()
 }
 
 export const q = encodeURIComponent
