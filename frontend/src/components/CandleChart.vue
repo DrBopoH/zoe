@@ -2,8 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { apiSend } from '../utils/api.js'
 import { storageGet, storageSet } from '../utils/storage.js'
-import BennerBands from './BennerBands.vue'
-import { msToSlot, slotToMs, TFS, dayStartOf, weekStartOf, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, candleBounds, candleWindow, candleSpans, candleYRanges, visibleSlots } from '../utils/candleMath.js'
+import { TFS, dayStartOf, weekStartOf, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, candleBounds, candleWindow, candleSpans, candleYRanges, visibleSlots } from '../utils/candleMath.js'
 import { clampWindow } from '../utils/chartView.js'
 import { useChartView } from '../composables/useChartView.js'
 import { toLocalDateStr, formatMoney, formatDateLong, formatShortDateName, formatMonthName } from '../utils/formatters.js'
@@ -301,17 +300,6 @@ const slotMeta = (i) => {
 }
 const slotX = (i) => PAD.l + ((i - nSlots.value + 0.5 - kv.view.value.x0) / spanNow.value) * plotW()
 
-// Слой цикла Беннера: слоты ↔ время по стартам корзин (без данных слоя нет)
-const bn = computed(() => {
-  const S = series.value
-  if (!S || !S.n) return null
-  const v = kv.view.value, n = S.n, w = plotW(), span = v.x1 - v.x0
-  return {
-    fromMs: slotToMs(S.starts, v.x0 + n), toMs: slotToMs(S.starts, v.x1 + n),
-    xOf: (ms) => PAD.l + ((msToSlot(S.starts, ms) - n - v.x0) / span) * w
-  }
-})
-
 // Выплата → слоты: по дате; в нескольких слотах одного дня (внутридневные ТФ) маркер ставим на первом
 const eventsByDate = computed(() => {
   const m = new Map()
@@ -588,7 +576,6 @@ watch([() => kv.view.value.x0, nSlots, () => spanNow.value], ([x0, n, span]) => 
         @pointerleave="kv.onLeave"
         @dblclick="resetView"
       >
-        <BennerBands v-if="bn" layer="bg" v-bind="bn" :left="PAD.l" :right="svgW - PAD.r" :top="PAD.t" :bottom="SVG_H - PAD.b" />
         <line v-for="p in priceTicks" :key="'h-grid-' + p.val" x1="0" :y1="p.y" :x2="svgW" :y2="p.y" stroke="#1e293b" stroke-dasharray="3 3" />
         <line v-if="lastPrice" x1="0" :y1="lastPrice.y" :x2="svgW" :y2="lastPrice.y" :stroke="lastPrice.up ? '#10b981' : '#f43f5e'" stroke-opacity="0.55" stroke-dasharray="1 3" />
 
@@ -713,7 +700,6 @@ watch([() => kv.view.value.x0, nSlots, () => spanNow.value], ([x0, n, span]) => 
             {{ tickLabel(t) }}
           </text>
         </g>
-        <BennerBands v-if="bn" layer="strip" v-bind="bn" :left="PAD.l" :right="svgW - PAD.r" :strip-y="SVG_H - 24" />
       </svg>
 
       <div v-else class="h-48 flex items-center justify-center text-xs text-slate-600">
