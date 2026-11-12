@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
-import { SERIES, RANGES, MACRO_PAD, MACRO_MIN_SPAN, MACRO_MAX_SPAN, buildMacroChart, macroWindow, macroRanges, isoAt, valueAt, plainPct } from '../utils/macro.js'
+import { SERIES, RANGES, MACRO_PAD, MACRO_MIN_SPAN, MACRO_MAX_SPAN, buildMacroChart, macroWindow, macroRanges, isoAt, valueAt, unitText, axisText } from '../utils/macro.js'
 import { useChartView } from '../composables/useChartView.js'
 
 // Универсальная панель макро-графика: заголовок, кнопки окна, слот summary (текущие значения), график и подсказка под курсором. Данные — из кеша (/api/macro), заполняются кнопкой «Обновить».
@@ -12,6 +12,7 @@ const props = defineProps({
   ids: { type: Array, required: true }, // какие ряды рисовать
   ranges: { type: Array, default: () => RANGES }, // кнопки окна (из RANGES)
   defaultRange: { type: String, default: '10' },
+  unit: { type: String, default: '%' }, // единица значения: % | ₴ | $
   empty: { type: String, default: 'Нет данных. Нажми «Обновить»: подтянутся ставки и инфляция НБУ' },
   hint: { type: String, default: 'Колесо: масштаб, перетаскивание: сдвиг, двойной клик: сброс' }
 })
@@ -32,7 +33,7 @@ const kv = useChartView({
   height: HEIGHT,
   pad: MACRO_PAD,
   autoX: () => windowFor(rangeKey.value),
-  ranges: (view) => macroRanges({ series: props.series, ids: IDS.value, view, todayIso: props.today }),
+  ranges: (view) => macroRanges({ series: props.series, ids: IDS.value, view, todayIso: props.today, floor: props.unit === '%' ? 0 : null }),
   spans: { minSpan: MACRO_MIN_SPAN, maxSpan: MACRO_MAX_SPAN },
   resetOn: () => [props.series, props.ids]
 })
@@ -93,7 +94,7 @@ const hover = computed(() => {
         <g class="text-[10px]" fill="#64748b">
           <g v-for="t in chart.yTicks" :key="'y' + t.v">
             <line :x1="chart.pad.l" :x2="WIDTH - chart.pad.r" :y1="t.y" :y2="t.y" stroke="#1e293b" stroke-dasharray="3 3" />
-            <text :x="chart.pad.l - 6" :y="t.y + 3" text-anchor="end">{{ t.v }} %</text>
+            <text :x="chart.pad.l - 6" :y="t.y + 3" text-anchor="end">{{ axisText(t.v, unit) }}</text>
           </g>
           <text v-for="t in chart.xTicks" :key="'x' + t.label" :x="t.x" :y="HEIGHT - 8" text-anchor="middle">{{ t.label }}</text>
         </g>
@@ -107,7 +108,7 @@ const hover = computed(() => {
       <div class="flex flex-wrap items-center gap-x-5 gap-y-1 text-[11px] text-slate-400 min-h-[1.5rem]">
         <template v-if="hover">
           <span class="text-slate-200 font-bold">{{ hover.date }}</span>
-          <span v-for="r in hover.rows" :key="r.id" class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-0.5" :style="{ backgroundColor: r.color }"></span>{{ r.label }} <b class="tabular-nums text-slate-200">{{ plainPct(r.v) }}</b></span>
+          <span v-for="r in hover.rows" :key="r.id" class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-0.5" :style="{ backgroundColor: r.color }"></span>{{ r.label }} <b class="tabular-nums text-slate-200">{{ unitText(r.v, unit) }}</b></span>
         </template>
         <template v-else>
         <span v-for="l in chart.lines" :key="l.id" class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-0.5" :style="{ backgroundColor: SERIES[l.id].color }"></span>{{ l.label }}</span>

@@ -11,7 +11,51 @@ export const SERIES = {
   overnight_cd: { label: 'Сертификаты овернайт', color: '#38bdf8', step: true },
   overnight_loans: { label: 'Кредиты овернайт', color: '#a78bfa', step: true },
   cpi_mom: { label: 'Инфляция м/м', color: '#fbbf24', step: false },
-  core_mom: { label: 'Базовая м/м', color: '#fb923c', step: false, thin: true }
+  core_mom: { label: 'Базовая м/м', color: '#fb923c', step: false, thin: true },
+  usd_uah: { label: 'Доллар США', color: '#34d399', step: false },
+  eur_uah: { label: 'Евро', color: '#38bdf8', step: false },
+  xau_uah: { label: 'Золото, ₴ за унцию', color: '#fbbf24', step: false },
+  xau_usd: { label: 'Золото, $ за унцию', color: '#fbbf24', step: false }
+}
+
+// Ряды по группам: для запроса /macro (ставки и инфляция — малые, курсы — тысячи точек, грузятся отдельно)
+export const MACRO_IDS = ['policy_rate', 'overnight_cd', 'overnight_loans', 'cpi_yoy', 'cpi_mom', 'core_yoy', 'core_mom']
+export const FX_IDS = ['usd_uah', 'eur_uah', 'xau_uah']
+
+// Число для оси и подсказки по единице ряда: «%» — процент, «₴»/«$» — деньги (тысячи сокращаются: 183 562 → «184 тыс.»)
+export function unitText(v, unit = '%') {
+  if (v === null || v === undefined || !isFinite(v)) return '—'
+  if (unit === '%') return plainPct(v)
+  const abs = Math.abs(v)
+  const body = abs >= 10000 ? `${Math.round(v / 1000)} тыс.` : abs >= 100 ? String(Math.round(v)) : String(Math.round(v * 100) / 100).replace('.', ',')
+  return `${body} ${unit}`
+}
+// Метка оси: то же, но короче (без десятых у дробных, чтобы подписи не слипались)
+export const axisText = (v, unit = '%') => {
+  if (unit === '%') return `${v} %`
+  if (Math.abs(v) >= 10000) return `${Math.round(v / 1000)}к ${unit}`
+  return unitText(v, unit)
+}
+
+// Золото в долларах: гривенная цена унции на курс доллара той же даты (курс — последний не позже даты)
+export function goldUsd(series) {
+  const g = series && series.xau_uah, u = series && series.usd_uah
+  if (!g || !u || !g.length || !u.length) return []
+  const out = []
+  for (const p of g) {
+    const r = valueAt(u, p.d)
+    if (r) out.push({ d: p.d, v: p.v / r })
+  }
+  return out
+}
+
+// Среднегодовое изменение ряда за последние years лет, % (сложный процент). Нет данных так далеко назад — null.
+export function annualChange(points, todayIso, years) {
+  const last = lastPoint(points)
+  if (!last || !(years > 0)) return null
+  const then = valueAt(points, isoAt(-years, todayIso))
+  if (then === null || !(then > 0) || !(last.v > 0)) return null
+  return (Math.pow(last.v / then, 1 / years) - 1) * 100
 }
 
 const DAY = 86400000
@@ -73,7 +117,7 @@ export const RANGES = [
   { key: 'all', label: 'Всё', years: 0 }
 ]
 
-export const MACRO_PAD = { l: 46, r: 16, t: 12, b: 24 } // поля графика (px во viewBox): по ним мышь переводится в данные
+export const MACRO_PAD = { l: 56, r: 16, t: 12, b: 24 } // поля графика (px во viewBox): по ним мышь переводится в данные
 export const MACRO_MIN_SPAN = 0.5 // дальше приближать смысла нет: полгода
 export const MACRO_MAX_SPAN = 60
 
@@ -96,7 +140,7 @@ export function macroWindow({ series, ids, todayIso, years, from = null }) {
 }
 
 /** Вертикаль: auto — под видимое окно без редких выбросов (один сбойный месяц не должен сплющивать график), ext — крайности по всем данным. */
-export function macroRanges({ series, ids, view, todayIso }) {
+export function macroRanges({ series, ids, view, todayIso, floor = 0 }) {
   const visible = [], all = []
   for (const id of usable(series, ids)) {
     const pts = series[id]
@@ -108,7 +152,7 @@ export function macroRanges({ series, ids, view, todayIso }) {
       if (t >= view.x0 && t <= view.x1) visible.push(p.v)
     }
   }
-  return robustRanges({ visible, all, floor: 0 })
+  return robustRanges({ visible, all, floor })
 }
 
 /**
