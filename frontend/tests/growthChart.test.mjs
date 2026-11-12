@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { multipleAt, niceTicks, buildGrowthChart, autoView, zoomView, panView, timeTicks } from '../src/utils/growthChart.js'
+import { multipleAt, niceTicks, buildGrowthChart, autoView, zoomView, panView, timeTicks, yRanges, panY, zoomY, cleanMatured } from '../src/utils/growthChart.js'
 
 const sc = (years, rate, base = 10) => ({ years, rate, base })
 
@@ -79,4 +79,45 @@ test('масштаб по вертикали следует за окном; п�
   const c = buildGrowthChart({ items: [{ id: 'X', top: true, color: 'red', sc: sc(40, 10) }], amount: 100, today })
   assert.equal(c.lines[0].mat, null)
   assert.ok(c.view.x1 <= 31)
+})
+
+test('деления времени не зацикливаются на мусорном окне', () => {
+  assert.deepEqual(timeTicks(NaN, 5, today), [])
+  assert.deepEqual(timeTicks(0, Infinity, today), [])
+  assert.deepEqual(timeTicks(3, 3, today), [])
+  assert.ok(timeTicks(-3000, 3000, today).length <= 200)
+})
+
+test('сгоревшие с мусорными датами отбрасываются', () => {
+  const ok = { id: 'ok', rate: 10, startT: -3, endT: -1 }
+  const bad = [{ id: 'n', rate: 10, startT: NaN, endT: -1 }, { id: 'old', rate: 10, startT: -500, endT: -1 }, { id: 'rev', rate: 10, startT: -1, endT: -3 }, ok]
+  assert.deepEqual(cleanMatured(bad), [ok])
+  assert.equal(buildGrowthChart({ items, matured: bad, amount: 100, today }).burned.length, 1)
+})
+
+test('диапазоны суммы: авто следует за окном, крайности — по всем данным', () => {
+  const a = yRanges({ items, amount: 1000, view: { x0: 0, x1: 15 } })
+  const z = yRanges({ items, amount: 1000, view: { x0: 0, x1: 2 } })
+  assert.ok(z.auto.hi < a.auto.hi)
+  assert.ok(Math.abs(z.ext.hi - a.ext.hi) < 1e-6) // крайности от окна не зависят
+  assert.ok(a.ext.lo <= 1000 && a.ext.hi >= 1000 * Math.pow(1.14, 15))
+})
+
+test('ручной сдвиг и масштаб по вертикали держатся внутри крайностей', () => {
+  const ext = { lo: 0, hi: 100 }
+  assert.deepEqual(panY({ lo: 10, hi: 30 }, 5, ext), { lo: 15, hi: 35 })
+  assert.deepEqual(panY({ lo: 10, hi: 30 }, -50, ext), { lo: 0, hi: 20 })
+  assert.deepEqual(panY({ lo: 10, hi: 30 }, 500, ext), { lo: 80, hi: 100 })
+  const z = zoomY({ lo: 0, hi: 100 }, 0.5, 25, ext)
+  assert.equal(z.hi - z.lo, 50); assert.equal(z.lo, 12.5) // якорь 25 остался на 25 % высоты
+  assert.ok(zoomY({ lo: 0, hi: 1 }, 0.001, 0.5, ext).hi - zoomY({ lo: 0, hi: 1 }, 0.001, 0.5, ext).lo >= 2 - 1e-9)
+  assert.ok(zoomY({ lo: 0, hi: 100 }, 100, 50, ext).hi - zoomY({ lo: 0, hi: 100 }, 100, 50, ext).lo <= 120 + 1e-9)
+})
+
+test('кривая рисуется только в видимом окне и плотно при сильном приближении', () => {
+  const z = buildGrowthChart({ items, amount: 1000, today, view: { x0: 1, x1: 1.3 } })
+  const pts = (d) => d.split('L').length
+  assert.ok(pts(z.lines.find((l) => l.id === 'A').solid) >= 100) // узкое окно — много точек, излома не видно
+  const out = buildGrowthChart({ items, amount: 1000, today, view: { x0: 20, x1: 21 } })
+  assert.equal(out.lines.find((l) => l.id === 'A').solid, '') // линия уже погасла — в окне её нет
 })

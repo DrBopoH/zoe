@@ -75,6 +75,25 @@ const chartCurrency = computed(() => {
   for (const b of found.value) if (scores.value.has(b.id)) n[b.currency] = (n[b.currency] || 0) + 1
   return Object.keys(n).sort((a, b) => n[b] - n[a])[0] || ''
 })
+const NONE = Object.freeze([]) // стабильный пустой массив: новый [] на каждый рендер сбрасывал бы окно графика
+
+// Разрыв между Топ 1 и Топ 5 по результату за 10 лет — по каждой валюте сразу (в процентах, не в гривнах)
+const spreads = computed(() => {
+  const by = {}
+  for (const b of found.value) {
+    const sc = scores.value.get(b.id)
+    if (sc && isFinite(sc.multipleH) && sc.multipleH > 0) (by[b.currency] ||= []).push(sc)
+  }
+  return Object.entries(by)
+    .map(([cur, arr]) => {
+      const top = arr.sort((a, b) => b.score - a.score).slice(0, 5)
+      const hs = top.map((x) => x.multipleH)
+      return { currency: cur, n: top.length, pct: top.length > 1 ? (Math.max(...hs) / Math.min(...hs) - 1) * 100 : 0 }
+    })
+    .filter((s) => s.n > 1)
+    .sort((a, b) => a.currency.localeCompare(b.currency))
+})
+
 const chartItems = computed(() => {
   const all = found.value
     .filter((b) => b.currency === chartCurrency.value && scores.value.has(b.id))
@@ -138,7 +157,7 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
       </UiButton>
     </section>
 
-    <GrowthChart v-if="list && (chartItems.length || chartMatured.length)" :items="chartItems" :matured="showMatured ? chartMatured : []" :amount="amountN" :currency="chartCurrency" :today="today" />
+    <GrowthChart v-if="list && (chartItems.length || chartMatured.length)" :items="chartItems" :matured="showMatured ? chartMatured : NONE" :amount="amountN" :currency="chartCurrency" :today="today" :spreads="spreads" />
     <div v-if="chartNote" class="text-[11px] text-slate-500 -mt-2">{{ chartNote }}</div>
 
     <div v-if="startError || loadError" class="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-3 rounded text-xs">{{ startError || loadError }}</div>
