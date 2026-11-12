@@ -1,0 +1,26 @@
+package market
+
+import "context"
+
+// Feed — один источник рыночных данных как самостоятельный процесс: свой id, своё название, свой итог.
+// Новый источник (ключевая ставка, депозитные сертификаты НБУ, ФРС, инфляция) — ещё одна запись в Feeds,
+// без новых маршрутов и без переделки запуска и тостов.
+type Feed struct {
+	ID    string
+	Title string
+	Fetch func(ctx context.Context) ([]Security, Result)
+}
+
+// Feeds — все источники клиента в порядке показа.
+func (c *Client) Feeds() []Feed {
+	return []Feed{
+		{ID: SourceNBU, Title: "ОВДП · НБУ", Fetch: c.SyncNBU},
+		{ID: SourceUST, Title: "Облигации США", Fetch: func(ctx context.Context) ([]Security, Result) {
+			list, res, err := c.USTAuctions(ctx)
+			if err != nil {
+				res.Error = err.Error()
+			}
+			return list, res
+		}},
+	}
+}

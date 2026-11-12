@@ -12,6 +12,7 @@ import PersonsView from './views/PersonsView.vue'
 import { cleanPersonName, isP2PTransaction } from './utils/formatters.js'
 import { apiGetJson, apiSend } from './utils/api.js'
 import { storageGet, storageSet } from './utils/storage.js'
+import { marketNotice } from './utils/marketNotice.js'
 import { loadMasks } from './composables/useIbanMasks.js'
 
 const STORAGE_ACTIVE_TAB = 'economic_active_tab'
@@ -56,6 +57,14 @@ const notifyResult = (last) => {
   }
 }
 
+// Рыночные данные (ОВДП, US Treasury) — отдельный процесс рядом с банками: свои итоги и по тосту на источник
+let marketSeenAt = null
+const notifyMarket = (last) => {
+  const r = marketNotice(marketSeenAt, last)
+  marketSeenAt = r.seenAt
+  r.toasts.forEach(pushToast)
+}
+
 // какой запуск синка пользователь закрыл крестиком (started_at)
 const dismissedRun = ref(null)
 const panelState = computed(() => {
@@ -91,6 +100,8 @@ const fetchStatus = async () => {
     progress.value = data.progress || null
     if (lastFinishedAt === null && !data.progress?.last) lastFinishedAt = 0
     notifyResult(data.progress?.last)
+    if (marketSeenAt === null && !data.market?.last) marketSeenAt = 0
+    notifyMarket(data.market?.last)
 
     const ver = data.stats?.data_version
     if (typeof ver === 'number' && ver !== dataVersion.value) {
