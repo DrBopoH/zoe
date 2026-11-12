@@ -1,4 +1,5 @@
-import { niceTicks } from './growthChart.js'
+import { niceTicks, timeTicks } from './growthChart.js'
+import { robustRanges } from './chartView.js'
 
 // Макро НБУ: ключевые ставки и инфляция (ряды из /api/macro). Чистые функции — без интерфейса.
 // Ставки приходят датами смены значения (значение действует до следующей точки), инфляция — помесячно.
@@ -68,73 +69,85 @@ export const RANGES = [
   { key: 'all', label: 'Всё', years: 0 }
 ]
 
-const startOf = (years, firstIso, todayIso) => {
-  if (!years) return firstIso
-  const d = new Date(ms(todayIso))
-  d.setUTCFullYear(d.getUTCFullYear() - years)
-  const iso = d.toISOString().slice(0, 10)
-  return iso > firstIso ? iso : firstIso
+export const MACRO_PAD = { l: 46, r: 16, t: 12, b: 24 } // поля графика (px во viewBox): по ним мышь переводится в данные
+export const MACRO_MIN_SPAN = 0.5 // дальше приближать смысла нет: полгода
+export const MACRO_MAX_SPAN = 60
+
+const YEAR_MS = 365.25 * DAY
+// Годы от сегодня (отрицательные — прошлое): та же ось X, что у графика роста, поэтому и общий движок (composables/useChartView.js)
+export const yearsFrom = (iso, todayIso) => (ms(iso) - ms(todayIso)) / YEAR_MS
+export const isoAt = (years, todayIso) => new Date(ms(todayIso) + years * YEAR_MS).toISOString().slice(0, 10)
+
+const usable = (series, ids) => (ids || []).filter((id) => series && series[id] && series[id].length)
+
+/** Окно по умолчанию: years лет назад (0 — с первой точки) до сегодня с небольшим запасом справа. */
+export function macroWindow({ series, ids, todayIso, years }) {
+  const use = usable(series, ids)
+  if (!use.length) return { x0: -1, x1: 0.05 }
+  const first = use.map((id) => series[id][0].d).sort()[0]
+  const left = years ? Math.max(-years, yearsFrom(first, todayIso)) : yearsFrom(first, todayIso)
+  const span = Math.max(-left, MACRO_MIN_SPAN)
+  return { x0: -span, x1: span * 0.02 }
 }
 
-// График: ставка ступенькой (держится до следующей смены, последнее значение тянется до сегодня), инфляция ломаной.
-// Возвращает { lines:[{id,color,label,d}], yTicks:[{v,y}], xTicks:[{x,label}], todayX, zeroY, empty }.
-export function buildMacroChart({ series, ids, years, todayIso, width = 1000, height = 240, pad = { l: 46, r: 16, t: 12, b: 24 } }) {
-  const use = (ids || []).filter((id) => series && series[id] && series[id].length)
-  if (!use.length) return { lines: [], yTicks: [], xTicks: [], todayX: 0, zeroY: null, empty: true }
-  const first = use.map((id) => series[id][0].d).sort()[0]
-  const from = startOf(years, first, todayIso)
-  const t0 = ms(from), t1 = ms(todayIso)
-  const span = Math.max(t1 - t0, DAY)
-
-  // значения в окне, чтобы подобрать шкалу Y
-  const vals = []
-  const clipped = {}
-  for (const id of use) {
+/** Вертикаль: auto — под видимое окно без редких выбросов (один сбойный месяц не должен сплющивать график), ext — крайности по всем данным. */
+export function macroRanges({ series, ids, view, todayIso }) {
+  const visible = [], all = []
+  for (const id of usable(series, ids)) {
     const pts = series[id]
-    const before = valueAt(pts, from)
-    const inside = pts.filter((p) => p.d >= from && p.d <= todayIso)
-    clipped[id] = { before, inside }
-    if (before !== null) vals.push(before)
-    for (const p of inside) vals.push(p.v)
+    const before = valueAt(pts, isoAt(view.x0, todayIso))
+    if (before !== null) visible.push(before)
+    for (const p of pts) {
+      all.push(p.v)
+      const t = yearsFrom(p.d, todayIso)
+      if (t >= view.x0 && t <= view.x1) visible.push(p.v)
+    }
   }
-  let lo = Math.min(0, ...vals), hi = Math.max(...vals)
-  if (!(hi > lo)) hi = lo + 1
-  const ticks = niceTicks(lo, hi, 5)
-  lo = Math.min(lo, ticks[0])
-  hi = Math.max(hi, ticks[ticks.length - 1])
-  const X = (iso) => pad.l + ((ms(iso) - t0) / span) * (width - pad.l - pad.r)
+  return robustRanges({ visible, all, floor: 0 })
+}
+
+/**
+ * График: ставка ступенькой (держится до следующей смены, последнее значение тянется до сегодня), инфляция ломаной.
+ * view — окно { x0, x1 } в годах от сегодня, yRange — { lo, hi }. Точки за краями остаются в линии, обрезает рамка графика.
+ * Возвращает { lines:[{id,color,label,d}], yTicks, xTicks, todayX, zeroY, empty, pad, width, height }.
+ */
+export function buildMacroChart({ series, ids, view, yRange, todayIso, width = 1000, height = 220, pad = MACRO_PAD }) {
+  const use = usable(series, ids)
+  if (!use.length) return { lines: [], yTicks: [], xTicks: [], todayX: 0, zeroY: null, empty: true, pad, width, height }
+  const { x0, x1 } = view
+  const { lo, hi } = yRange
+  const X = (t) => pad.l + ((t - x0) / (x1 - x0)) * (width - pad.l - pad.r)
   const Y = (v) => pad.t + (1 - (v - lo) / (hi - lo)) * (height - pad.t - pad.b)
+  const margin = (x1 - x0) * 0.05
 
   const lines = use.map((id) => {
     const meta = SERIES[id] || { label: id, color: '#94a3b8', step: false }
-    const { before, inside } = clipped[id]
+    // точки окна с запасом и одна точка перед ним (чтобы линия входила с левого края)
     const pts = []
-    if (before !== null && (!inside.length || inside[0].d > from)) pts.push({ d: from, v: before })
-    pts.push(...inside)
+    let prev = null
+    for (const p of series[id]) {
+      const t = yearsFrom(p.d, todayIso)
+      if (t < x0 - margin) { prev = { t: x0 - margin, v: p.v }; continue }
+      if (t > x1 + margin) break
+      if (prev) { pts.push(prev); prev = null }
+      pts.push({ t, v: p.v })
+    }
+    if (prev) pts.push(prev)
     let d = ''
     pts.forEach((p, i) => {
-      const x = X(p.d), y = Y(p.v)
-      if (i === 0) d += `M${x.toFixed(1)} ${y.toFixed(1)}`
-      else if (meta.step) d += `H${x.toFixed(1)}V${y.toFixed(1)}`
-      else d += `L${x.toFixed(1)} ${y.toFixed(1)}`
+      const x = X(p.t).toFixed(1), y = Y(p.v).toFixed(1)
+      d += i === 0 ? `M${x} ${y}` : meta.step ? `H${x}V${y}` : `L${x} ${y}`
     })
-    if (meta.step && pts.length) d += `H${X(todayIso).toFixed(1)}`
+    if (meta.step && pts.length) d += `H${X(Math.min(x1 + margin, 0)).toFixed(1)}`
     return { id, color: meta.color, label: meta.label, d }
   })
 
-  // Ось времени: годы, шаг подбирается под ширину окна
-  const y0 = Number(from.slice(0, 4)) + (from.slice(5) === '01-01' ? 0 : 1)
-  const y1 = Number(todayIso.slice(0, 4))
-  const step = Math.max(1, Math.ceil((y1 - y0 + 1) / 8))
-  const xTicks = []
-  for (let y = y0; y <= y1; y += step) xTicks.push({ x: X(`${y}-01-01`), label: String(y) })
-
   return {
     lines,
-    yTicks: ticks.map((v) => ({ v, y: Y(v) })),
-    xTicks,
-    todayX: X(todayIso),
-    zeroY: lo < 0 ? Y(0) : null,
+    yTicks: niceTicks(lo, hi, 5).map((v) => ({ v, y: Y(v) })),
+    xTicks: timeTicks(x0, x1, todayIso).map((t) => ({ x: X(t.t), label: t.label })),
+    todayX: X(0),
+    zeroY: lo < 0 && hi > 0 ? Y(0) : null,
     pad, width, height,
     empty: false
   }

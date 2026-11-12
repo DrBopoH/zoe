@@ -1,6 +1,7 @@
 <script setup>
-import { computed, ref, watch, onBeforeUnmount } from 'vue'
-import { buildGrowthChart, autoView, zoomView, panView, yRanges, panY, zoomY } from '../utils/growthChart.js'
+import { computed } from 'vue'
+import { buildGrowthChart, autoView, yRanges, GROWTH_PAD, MIN_SPAN, MAX_SPAN } from '../utils/growthChart.js'
+import { useChartView } from '../composables/useChartView.js'
 import { moneyText } from '../utils/marketTable.js'
 
 // Один график роста вложения: годы от сегодня по горизонтали (прошлое слева), сумма по вертикали. Линия на бумагу, цвет = цвет
@@ -19,77 +20,20 @@ const props = defineProps({
 })
 
 const WIDTH = 1000, HEIGHT = 300
-const view = ref(null) // null — окно по умолчанию (следует за данными), иначе { x0, x1 } после масштаба или сдвига
-const auto = computed(() => autoView(props.items, props.matured))
-const cur = computed(() => view.value || auto.value)
-const manualY = ref(null) // null — вертикаль следует за окном, иначе { lo, hi } после ручного сдвига/масштаба суммы
-const ranges = computed(() => yRanges({ items: props.items, matured: props.matured, amount: props.amount, view: cur.value }))
-const target = computed(() => manualY.value || ranges.value.auto)
-const shown = ref(null) // то, что реально нарисовано: догоняет target плавно
-let raf = 0
-let dragY = false // идёт ручной сдвиг суммы: тогда подгонка без анимации (объявлено до watch(target), иначе TDZ в dev)
-const stopAnim = () => { if (raf) cancelAnimationFrame(raf); raf = 0 }
-const snap = () => { stopAnim(); shown.value = { ...target.value } }
-const step = () => {
-  const t = target.value, s = shown.value
-  if (!s) return snap()
-  const span = t.hi - t.lo, k = 0.2
-  const lo = s.lo + (t.lo - s.lo) * k, hi = s.hi + (t.hi - s.hi) * k
-  if (Math.abs(t.lo - lo) < span * 0.002 && Math.abs(t.hi - hi) < span * 0.002) return snap()
-  shown.value = { lo, hi }
-  raf = requestAnimationFrame(step)
-}
-watch(target, () => { if (dragY || typeof requestAnimationFrame === 'undefined') snap(); else if (!raf) raf = requestAnimationFrame(step) }, { immediate: true })
-onBeforeUnmount(stopAnim)
-const chart = computed(() => buildGrowthChart({ items: props.items, matured: props.matured, amount: props.amount, view: cur.value, yRange: shown.value || target.value, today: props.today, width: WIDTH, height: HEIGHT }))
-watch(() => [props.items, props.matured], () => { view.value = null; manualY.value = null }) // другие фильтры — снова окно по умолчанию
-
-const svgRef = ref(null)
-// Координата мыши → единицы viewBox (график масштабируется по ширине страницы)
-const px = (e) => {
-  const r = svgRef.value.getBoundingClientRect()
-  return ((e.clientX - r.left) / r.width) * WIDTH
-}
-const py = (e) => {
-  const r = svgRef.value.getBoundingClientRect()
-  return ((e.clientY - r.top) / r.height) * HEIGHT
-}
-const onWheel = (e) => {
-  const d = e.deltaY || e.deltaX
-  const f = d < 0 ? 1 / 1.2 : 1.2
-  if (e.shiftKey) { // масштаб суммы вокруг значения под курсором
-    manualY.value = zoomY(shown.value || target.value, f, chart.value.vAt(py(e)), ranges.value.ext)
-    return
-  }
-  view.value = zoomView(cur.value, f, chart.value.tAt(px(e)))
-  manualY.value = null
-}
-let drag = null
-const onDown = (e) => { drag = { x: px(e), y: py(e), view: cur.value, range: { ...(shown.value || target.value) }, axis: null }; svgRef.value.setPointerCapture(e.pointerId) }
-const hoverT = ref(null)
-const onMove = (e) => {
-  const x = px(e), y = py(e)
-  hoverT.value = chart.value.tAt(x)
-  if (!drag) return
-  if (!drag.axis) { // ось выбирается по первому заметному движению
-    const dx = Math.abs(x - drag.x), dy = Math.abs(y - drag.y)
-    if (Math.max(dx, dy) < 4) return
-    drag.axis = dy > dx ? 'y' : 'x'
-  }
-  if (drag.axis === 'y') {
-    dragY = true
-    const span = drag.range.hi - drag.range.lo
-    manualY.value = panY(drag.range, ((y - drag.y) / chart.value.plotH) * span, ranges.value.ext)
-  } else {
-    dragY = false
-    const dt = ((drag.x - x) / (WIDTH - chart.value.pad.l - chart.value.pad.r)) * (drag.view.x1 - drag.view.x0)
-    view.value = panView(drag.view, dt)
-    manualY.value = null // по иксу вертикаль плавно возвращается к подгонке
-  }
-}
-const onUp = () => { drag = null; dragY = false }
-const onLeave = () => { hoverT.value = null; drag = null; dragY = false }
-const reset = () => { view.value = null; manualY.value = null }
+// Окно, вертикаль, колесо, перетаскивание, наведение и сброс — общий движок графиков (composables/useChartView.js)
+const kv = useChartView({
+  width: WIDTH,
+  height: HEIGHT,
+  pad: GROWTH_PAD,
+  autoX: () => autoView(props.items, props.matured),
+  ranges: (v) => yRanges({ items: props.items, matured: props.matured, amount: props.amount, view: v }),
+  spans: { minSpan: MIN_SPAN, maxSpan: MAX_SPAN },
+  resetOn: () => [props.items, props.matured] // другие фильтры — снова окно по умолчанию
+})
+const { svgRef, onWheel, onDown, onMove, onUp, onLeave, reset, zoomed } = kv
+const chart = computed(() => buildGrowthChart({ items: props.items, matured: props.matured, amount: props.amount, view: kv.view.value, yRange: kv.yShown.value || kv.target.value, today: props.today, width: WIDTH, height: HEIGHT }))
+const hoverT = kv.hoverX
+const cur = kv.view
 
 const tops = computed(() => props.items.filter((i) => i.top))
 const byId = computed(() => new Map(props.items.map((i) => [i.id, i])))
@@ -97,12 +41,11 @@ const order = computed(() => [...chart.value.lines].sort((a, b) => Number(a.top)
 
 // Подсказка под курсором: дата и суммы лучших пяти на этот момент
 const dateAt = (t) => new Date(Date.parse(`${props.today}T00:00:00Z`) + t * 365.25 * 86400000).toLocaleDateString('ru-RU', { timeZone: 'UTC' })
-const hoverX = computed(() => (hoverT.value === null ? null : chart.value.pad.l + ((hoverT.value - cur.value.x0) / (cur.value.x1 - cur.value.x0)) * (WIDTH - chart.value.pad.l - chart.value.pad.r)))
+const hoverX = kv.hoverPx
 const hoverInfo = computed(() => {
   if (hoverT.value === null || hoverT.value < 0) return null
   return { date: dateAt(hoverT.value), rows: tops.value.filter((i) => hoverT.value <= i.sc.years).map((i) => ({ place: i.place, color: i.color, v: chart.value.valueOf(i.id, hoverT.value) })) }
 })
-const zoomed = computed(() => view.value !== null || manualY.value !== null)
 </script>
 
 <template>
