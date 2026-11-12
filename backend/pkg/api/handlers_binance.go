@@ -1,252 +1,285 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
-	"sync"
+	"strings"
 	"time"
 
 	"economic/pkg/binance"
+	"economic/pkg/db"
 )
 
-// Binance: read-only ключ из .env (BINANCE_API_KEY / BINANCE_API_SECRET). Оценка портфеля в ₴ снимается раз в N минут,
-// по кнопке «Обновить» и при полном синке; каждый день хранится последний снимок (см. db/binance.go).
+// Binance — клиент «Разведать» наравне с банками: read-only ключ из .env (BINANCE_API_KEY / BINANCE_API_SECRET),
+// всё полученное — кеш (см. db/binance.go). Отдельного опроса и своих кнопок нет: обновляется только через «Разведать»,
+// а «Вайп кеша» сносит и Binance, после чего следующий «Разведать» восстанавливает историю с нуля.
 
 type binanceState struct {
-	mu      sync.Mutex // один запрос к Binance за раз
-	client  *binance.Client
-	lastErr string
-	warns   []string
-
-	hmu      sync.Mutex // состояние восстановления истории
-	hist     histStatus
-	histFrom time.Time
-}
-
-// histStatus — ход восстановления истории (минутный ряд оценки портфеля).
-type histStatus struct {
-	Running  bool               `json:"running"`
-	Stage    string             `json:"stage,omitempty"`
-	Done     int                `json:"done"`
-	Total    int                `json:"total"`
-	Error    string             `json:"error,omitempty"`
-	Flows    int                `json:"flows"`
-	Warnings []string           `json:"warnings,omitempty"`
-	Residual map[string]float64 `json:"residual,omitempty"` // монета → то, что API не объяснил
-	At       int64              `json:"at,omitempty"`       // когда восстановили (unix)
-	tried    bool
-}
-
-// histStages — порядок этапов восстановления (так их называет binance.BuildHistory); по нему считается общий процент.
-var histStages = []string{"остатки", "депозиты", "выводы", "конвертации", "покупки картой", "P2P", "начисления", "сделки", "цены"}
-
-func (h histStatus) percent() int {
-	for i, st := range histStages {
-		if st == h.Stage {
-			frac := 0.0
-			if h.Total > 0 {
-				frac = float64(h.Done) / float64(h.Total)
-			}
-			return int((float64(i) + frac) * 100 / float64(len(histStages)))
-		}
-	}
-	return 0
-}
-
-func (h histStatus) note() string {
-	if h.Total > 1 {
-		return fmt.Sprintf("%s · %d/%d", h.Stage, h.Done, h.Total)
-	}
-	return h.Stage
-}
-
-// crawlBinance — участие Binance в «Разведать»: клиент в панели прогресса с двумя «счетами».
-// Портфель — оценка остатков (быстро). История по минутам — если ещё не восстановлена (или идёт), ждём её конца здесь же.
-func (s *Server) crawlBinance() {
-	cp := s.prog.client("Binance", "binance", 0)
-	port := &accProg{ID: "binance", Label: "Портфель", State: "fetch", Custom: true, Note: "остатки и оценка в ₴"}
-	s.prog.setAccounts(cp, []*accProg{port})
-	if err := s.SyncBinance(); err != nil {
-		log.Printf("WARN: Binance: %v", err)
-		s.prog.with(port, func(a *accProg) { a.State, a.Error = "error", err.Error() })
-		return
-	}
-	s.prog.with(port, func(a *accProg) { a.State, a.Note = "done", "" })
-
-	// история: уже восстановлена — ряд дописался в SyncBinance; нет — запускаем (если не идёт) и показываем ход
-	b := &s.bn
-	b.hmu.Lock()
-	running := b.hist.Running
-	b.hmu.Unlock()
-	if !running && s.storage.BinanceMeta("backfill_at") != "" {
-		return
-	}
-	if !running {
-		if err := s.StartBinanceHistory(); err != nil {
-			return
-		}
-	}
-	his := &accProg{ID: "binance-history", Label: "История по минутам", State: "fetch", Custom: true}
-	s.prog.setAccounts(cp, []*accProg{port, his})
-	for {
-		b.hmu.Lock()
-		h := b.hist
-		b.hmu.Unlock()
-		s.prog.with(his, func(a *accProg) { a.Pct, a.Note = h.percent(), h.note() })
-		if !h.Running {
-			s.prog.with(his, func(a *accProg) {
-				a.Note = ""
-				if h.Error != "" {
-					a.State, a.Error = "error", h.Error
-				} else {
-					a.State = "done"
-				}
-			})
-			return
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-}
-
-// SetBinanceHistoryFrom — как далеко назад искать движения (по умолчанию 2020-01-01).
-func (s *Server) SetBinanceHistoryFrom(t time.Time) { s.bn.histFrom = t }
-
-// StartBinanceHistory запускает восстановление истории в фоне (одно за раз).
-func (s *Server) StartBinanceHistory() error {
-	b := &s.bn
-	if b.client == nil {
-		return errors.New("Binance не подключён")
-	}
-	b.hmu.Lock()
-	if b.hist.Running {
-		b.hmu.Unlock()
-		return errors.New("восстановление уже идёт")
-	}
-	b.hist = histStatus{Running: true, Stage: "старт", tried: true}
-	b.hmu.Unlock()
-	go s.runBinanceHistory()
-	return nil
-}
-
-func (s *Server) runBinanceHistory() {
-	b := &s.bn
-	set := func(f func(h *histStatus)) {
-		b.hmu.Lock()
-		f(&b.hist)
-		b.hmu.Unlock()
-	}
-	fail := func(err error) {
-		log.Printf("WARN: Binance история: %v", err)
-		set(func(h *histStatus) { h.Running, h.Error = false, err.Error() })
-	}
-	from := b.histFrom
-	if from.IsZero() {
-		from = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
-	}
-	res, err := b.client.BuildHistory(binance.HistoryOpts{From: from, Progress: func(stage string, d, t int) {
-		set(func(h *histStatus) { h.Stage, h.Done, h.Total = stage, d, t })
-	}})
-	if err != nil {
-		fail(err)
-		return
-	}
-	if res.Series == nil || len(res.Series.Values) == 0 {
-		set(func(h *histStatus) {
-			h.Running, h.Warnings, h.Error = false, res.Warnings, "движений на счёте не нашлось — восстанавливать нечего"
-		})
-		return
-	}
-	if err := s.storage.ReplaceBinanceMinutes(res.Series.StartMs/1000, res.Series.Values); err != nil {
-		fail(err)
-		return
-	}
-	now := time.Now().Unix()
-	_ = s.storage.SetBinanceMeta("backfill_at", strconv.FormatInt(now, 10))
-	set(func(h *histStatus) {
-		*h = histStatus{Stage: "готово", Flows: res.Flows, Warnings: res.Warnings, Residual: res.Residual, At: now, tried: true}
-	})
-	b.hmu.Lock()
-	raw, err := json.Marshal(b.hist)
-	b.hmu.Unlock()
-	if err == nil {
-		_ = s.storage.SetBinanceMeta("history", string(raw))
-	}
-}
-
-// historyView — состояние для интерфейса: ход текущего восстановления или итог прошлого.
-func (s *Server) historyView() map[string]any {
-	b := &s.bn
-	b.hmu.Lock()
-	h := b.hist
-	b.hmu.Unlock()
-	if !h.Running && h.At == 0 && h.Error == "" {
-		if raw := s.storage.BinanceMeta("history"); raw != "" {
-			_ = json.Unmarshal([]byte(raw), &h)
-		}
-	}
-	first, last, n := s.storage.BinanceSeriesInfo()
-	return map[string]any{"status": h, "first": first, "last": last, "points": n}
-}
-
-// extendBinanceSeries дописывает минутный ряд до текущего момента (если история уже восстановлена).
-func (s *Server) extendBinanceSeries(h binance.Holdings) error {
-	if s.storage.BinanceMeta("backfill_at") == "" {
-		return nil
-	}
-	s.bn.hmu.Lock()
-	running := s.bn.hist.Running
-	s.bn.hmu.Unlock()
-	if running {
-		return nil
-	}
-	last, _, ok := s.storage.BinanceLastMinute()
-	if !ok {
-		return nil
-	}
-	res, err := s.bn.client.ExtendSeries(h, last*1000, time.Now().UnixMilli())
-	if err != nil {
-		return err
-	}
-	if len(res.Values) == 0 {
-		return nil
-	}
-	return s.storage.AppendBinanceMinutes(res.StartMs/1000, res.Values)
+	client   *binance.Client
+	histFrom time.Time // как далеко назад искать движения (по умолчанию 2020-01-01)
 }
 
 // SetBinance подключает клиент Binance (nil — интеграция выключена).
 func (s *Server) SetBinance(c *binance.Client) { s.bn.client = c }
 
-// SyncBinance снимает остатки, оценивает в гривнах и сохраняет снимок дня.
-func (s *Server) SyncBinance() error {
-	b := &s.bn
-	if b.client == nil {
-		return errors.New("Binance не подключён: нет BINANCE_API_KEY / BINANCE_API_SECRET")
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
+func (s *Server) SetBinanceHistoryFrom(t time.Time) { s.bn.histFrom = t }
 
-	err := s.syncBinanceLocked()
-	if err != nil {
-		b.lastErr = err.Error()
-		return err
+// binanceFrom — как далеко назад искать движения (по умолчанию 2020-01-01).
+func (s *Server) binanceFrom() time.Time {
+	if s.bn.histFrom.IsZero() {
+		return time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 	}
-	b.lastErr = ""
-	return nil
+	return s.bn.histFrom
 }
 
-func (s *Server) syncBinanceLocked() error {
-	b := &s.bn
-	h, warns, err := b.client.Fetch()
+// Этапы Binance: в панели «Разведать» каждый — своя строка-таймлайн (кроме быстрых «остатков»).
+var (
+	rowStages = []string{"депозиты", "выводы", "конвертации", "покупки картой", "P2P", "начисления", "сделки", "цены"}
+	stageName = map[string]string{
+		"остатки": "Остатки и оценка в ₴", "депозиты": "Депозиты", "выводы": "Выводы", "конвертации": "Конвертации",
+		"покупки картой": "Покупки картой", "P2P": "P2P", "начисления": "Начисления", "сделки": "Сделки", "цены": "Минутные цены",
+		"ряд": "Минутный ряд",
+	}
+	// длина окна запроса у этапов, поддерживающих период (Binance ограничивает: 89 или 29 суток) и число обходов
+	stageStep = map[string]struct {
+		days int64
+		mult int
+	}{"депозиты": {89, 1}, "выводы": {89, 1}, "конвертации": {29, 1}, "покупки картой": {29, 1}, "P2P": {29, 2}, "начисления": {89, 1}}
+)
+
+// crawlBinance — Binance в «Разведать»: клиент в панели прогресса. Пока истории нет — строки по статьям (депозиты, выводы,
+// конвертации, … сделки, минутные цены), у каждой честный таймлайн: ось — период, окно — запрашиваемый сейчас период,
+// зелёные клетки — найденные движения. Каждый просмотренный период сразу пишется в кеш (db.SaveBinanceWindow), и прерванный
+// синк продолжается с него. Когда ряд уже есть — одна строка «Портфель» (дописывание).
+func (s *Server) crawlBinance() {
+	cp := s.prog.client("Binance", "binance", 0)
+	started, req0 := time.Now(), s.bn.client.Requests()
+	var rows []*accProg
+	byStage := map[string]*accProg{}
+	incremental := false
+	if first, _, n := s.storage.BinanceSeriesInfo(); n > 0 {
+		incremental = true
+		row := &accProg{ID: "binance", Label: "Портфель", State: "fetch", Custom: true, AxisFrom: first, Note: stageName["остатки"], Left: 2}
+		var d struct {
+			History struct {
+				FlowAt []int64 `json:"flow_at"`
+			} `json:"history"`
+		}
+		_ = json.Unmarshal(s.storage.BinanceDetail(), &d)
+		row.FlowAt = d.History.FlowAt
+		rows = []*accProg{row}
+	} else {
+		for _, st := range rowStages {
+			r := &accProg{ID: "binance-" + st, Label: stageName[st], State: "queued", Custom: true, Ahead: st == "сделки"}
+			if sp, ok := stageStep[st]; ok {
+				r.Step, r.Mult = sp.days*86400, sp.mult
+			}
+			rows, byStage[st] = append(rows, r), r
+		}
+	}
+	s.prog.setAccounts(cp, rows)
+
+	// средняя длительность запроса — для оценки «закончится ≈»
+	pace := func() {
+		if n := s.bn.client.Requests() - req0; n >= 3 {
+			sec := time.Since(started).Seconds() / float64(n)
+			s.prog.mu.Lock()
+			cp.ReqSec = sec
+			s.prog.mu.Unlock()
+		}
+	}
+	// диагностика: сколько ждали по лимиту и какие периоды отвечали долго (видно в консоли бэкенда)
+	var waits int
+	var slowest time.Duration
+	var t0 time.Time
+	var cur string
+	var pd, pt int                               // монеты цен: готово из скольки
+	pricesSpan := func(a *accProg, from int64) { // доля текущей монеты по времени → общий процент цен
+		if pt > 0 && a.AxisFrom > 0 {
+			if span := time.Now().Unix() - a.AxisFrom; span > 0 {
+				frac := float64(from/1000-a.AxisFrom) / float64(span)
+				if frac < 0 {
+					frac = 0
+				} else if frac > 1 {
+					frac = 1
+				}
+				a.Pct = int((float64(pd) + frac) * 100 / float64(pt))
+			}
+		}
+	}
+	hk := &binanceHooks{
+		Wait: func(d time.Duration) { // лимит Binance: «остывание», как у банков
+			if d > 0 {
+				waits++
+				s.updateStatus(fmt.Sprintf("[Binance] ЛИМИТ ЗАПРОСОВ · ОХЛАЖДЕНИЕ %d С", int(d.Seconds())))
+			}
+			for _, r := range rows {
+				s.prog.with(r, func(a *accProg) {
+					switch {
+					case d > 0 && a.State == "fetch":
+						a.State, a.CoolUntil = "cooling", time.Now().Add(d).Unix()
+					case d == 0 && a.State == "cooling":
+						a.State, a.CoolUntil = "fetch", 0
+					}
+				})
+			}
+		},
+	}
+	if incremental {
+		hk.Stage = func(stage string, _, _ int) {
+			s.updateStatus("[Binance] " + strings.ToUpper(stageName[stage]))
+			s.prog.with(rows[0], func(a *accProg) { a.Note = stageName[stage] })
+			pace()
+		}
+	} else {
+		hk.Stage = func(stage string, d, t int) {
+			row := byStage[stage]
+			if row == nil { // остатки: быстро, отдельной строки нет
+				if cur != stage {
+					cur = stage
+					s.updateStatus("[Binance] " + strings.ToUpper(stageName[stage]))
+				}
+				return
+			}
+			if stage != cur { // новый этап: прежние готовы, этот качается
+				cur = stage
+				s.updateStatus("[Binance] " + strings.ToUpper(stageName[stage]))
+				for _, st := range rowStages {
+					if st == stage {
+						break
+					}
+					s.prog.with(byStage[st], func(a *accProg) { a.State, a.Pct, a.Note, a.Win, a.Left, a.Cov = "done", 100, "", nil, 0, 0 })
+				}
+				s.prog.with(row, func(a *accProg) { a.State = "fetch" })
+			}
+			switch stage {
+			case "сделки", "цены":
+				unit := map[string]string{"сделки": "пар", "цены": "монет"}[stage]
+				if stage == "цены" {
+					pd, pt = d, t
+				}
+				if t > 0 {
+					s.prog.with(row, func(a *accProg) {
+						a.Pct, a.Note, a.Left = d*100/t, fmt.Sprintf("%s %d/%d", unit, d, t), t-d
+						if stage == "цены" && a.AxisFrom > 0 { // каждая оставшаяся монета — свои куски по 1000 минут
+							a.Left = (t - d) * int((time.Now().Unix()-a.AxisFrom)/60/1000+1)
+						}
+					})
+				}
+				if stage == "сделки" && d%100 == 0 && d > 0 {
+					s.updateStatus(fmt.Sprintf("[Binance] СДЕЛКИ %d/%d", d, t))
+				}
+			}
+			pace()
+		}
+		hk.Start = func(stage string, from, to int64) { // запрашивается именно этот период
+			t0 = time.Now()
+			row := byStage[stage]
+			if row == nil {
+				return
+			}
+			s.prog.with(row, func(a *accProg) {
+				a.Win = &progWin{From: from / 1000, To: to / 1000}
+				if stage == "цены" {
+					pricesSpan(a, from)
+				} else if _, windowed := stageStep[stage]; windowed {
+					a.Cov = to / 1000 // справа налево: просмотрено всё, что правее запрашиваемого окна
+				}
+			})
+		}
+		hk.Done = func(stage, _ string, from, to int64, flows []int64, cached bool) {
+			if d := time.Since(t0); !cached && !t0.IsZero() {
+				if d > slowest {
+					slowest = d
+				}
+				if d >= 3*time.Second && stage != "цены" {
+					log.Printf("[Sync] Binance: %s %s — %s отвечал %s", stageName[stage], time.Unix(from/1000, 0).Format("2006-01-02"), time.Unix(to/1000, 0).Format("2006-01-02"), d.Round(100*time.Millisecond))
+				}
+			}
+			row := byStage[stage]
+			if row == nil {
+				return
+			}
+			s.prog.with(row, func(a *accProg) {
+				if _, windowed := stageStep[stage]; windowed { // сделки идут по парам, а не по времени: «просмотрено до» у них нет
+					a.Cov = from / 1000 // окно обработано: просмотрено от его начала до сегодня
+				}
+				a.FlowAt = append(a.FlowAt, secs(flows)...)
+			})
+			pace()
+		}
+		hk.Period = func(first int64, flows []int64) { // реальная история найдена: ось минутных цен — от первого движения
+			s.prog.with(byStage["цены"], func(a *accProg) { a.AxisFrom, a.FlowAt = first/1000, secs(flows) })
+		}
+	}
+
+	err := s.syncBinance(hk)
+	log.Printf("[Sync] Binance: запросов %d за %s, пауз по лимиту %d, самый долгий период %s",
+		s.bn.client.Requests()-req0, time.Since(started).Round(time.Second), waits, slowest.Round(100*time.Millisecond))
+	for _, r := range rows {
+		s.prog.with(r, func(a *accProg) {
+			a.Note, a.Win, a.CoolUntil, a.Left = "", nil, 0, 0
+			switch {
+			case err != nil && (a.State == "fetch" || a.State == "cooling"):
+				a.State, a.Error = "error", err.Error()
+			case err == nil:
+				a.State, a.Pct = "done", 100
+			}
+		})
+	}
+	if err != nil {
+		log.Printf("[Sync Error] Binance: %v", err)
+		s.updateStatus("[Binance] СБОЙ: " + err.Error())
+	}
+}
+
+// secs — моменты в мс → в секунды, не чаще раза в час (клеткам хватает; в кеше это короче).
+func secs(ms []int64) []int64 {
+	var out []int64
+	var last int64 = -1
+	for _, m := range ms {
+		if h := m / 3_600_000; h != last {
+			out, last = append(out, m/1000), h
+		}
+	}
+	return out
+}
+
+// binanceHooks — куда сообщать ход синка (панель «Разведать»); любое поле можно не задавать.
+type binanceHooks struct {
+	Stage  func(stage string, done, total int)
+	Period func(firstMs int64, flowsMs []int64)
+	Start  func(stage string, fromMs, toMs int64)                                    // период запрашивается сейчас
+	Done   func(stage, key string, fromMs, toMs int64, flowsMs []int64, cached bool) // период обработан
+	Wait   func(d time.Duration)                                                     // пауза из-за лимита
+}
+
+// syncBinance: остатки → оценка в ₴ → минутный ряд (с нуля, если в кеше его нет; иначе дописать до сейчас) → кеш.
+func (s *Server) syncBinance(hk *binanceHooks) error {
+	c := s.bn.client
+	if c == nil {
+		return errors.New("Binance не подключён: нет BINANCE_API_KEY / BINANCE_API_SECRET")
+	}
+	if hk == nil {
+		hk = &binanceHooks{}
+	}
+	progress := func(stage string, d, t int) {
+		if hk.Stage != nil {
+			hk.Stage(stage, d, t)
+		}
+	}
+	progress("остатки", 0, 0)
+	h, warns, err := c.Fetch()
 	if err != nil {
 		return err
 	}
-	prices, err := b.client.Prices()
+	prices, err := c.Prices()
 	if err != nil {
 		return err
 	}
@@ -254,92 +287,137 @@ func (s *Server) syncBinanceLocked() error {
 	if !ok {
 		return errors.New("нет курса USDT/UAH — оценить портфель в гривнах нечем")
 	}
-	if err := s.extendBinanceSeries(h); err != nil {
-		warns = append(warns, "минутный ряд: "+err.Error())
+
+	now := time.Now()
+	detail := map[string]any{
+		"taken_at": now.Unix(), "total": v.TotalUAH, "usdt_uah": v.USDTUAH,
+		"items": v.Items, "unpriced": v.Unpriced,
 	}
-	b.warns = warns
-	detail := map[string]any{"items": v.Items, "unpriced": v.Unpriced, "warnings": warns}
-	return s.storage.SaveBinanceSnapshot(v.TotalUAH, v.USDTUAH, detail, time.Now())
+	var (
+		start   int64
+		vals    []float64
+		replace bool
+		origin  float64 // оценка «до первой точки»: 0 — счёт начался с первого найденного движения
+	)
+	var prevHist any
+	{
+		var prev struct {
+			History any `json:"history"`
+		}
+		_ = json.Unmarshal(s.storage.BinanceDetail(), &prev)
+		prevHist = prev.History
+	}
+	// самым первым шагом — счёт и сегодняшняя оценка в кеш: он виден в «Операционной», пока история ещё собирается
+	early := map[string]any{}
+	for k, v := range detail {
+		early[k] = v
+	}
+	early["history"], early["warnings"] = prevHist, warns
+	if err := s.storage.SaveBinanceAccount(v.TotalUAH, early); err != nil {
+		return err
+	}
+	s.valueBinanceTxs(c) // допишем операции, оценка которых не успела сохраниться в прошлый раз
+	if last, _, have := s.storage.BinanceLastMinute(); have {
+		progress("ряд", 0, 0)
+		res, err := c.ExtendSeries(h, last*1000, now.UnixMilli())
+		if err != nil {
+			warns = append(warns, "минутный ряд: "+err.Error())
+		} else if len(res.Values) > 0 {
+			start, vals = res.StartMs/1000, res.Values
+		}
+		detail["history"] = prevHist
+	} else {
+		cached, err := s.storage.BinanceFlows()
+		if err != nil {
+			return err
+		}
+		opts := binance.HistoryOpts{
+			From: s.binanceFrom(), Now: now, Progress: progress, Period: hk.Period, Start: hk.Start, Wait: hk.Wait,
+			Cached:  toBinanceFlows(cached),
+			Covered: s.storage.BinanceCovered,
+			Done: func(stage, key string, from, to int64, fl []binance.Flow, isCached bool) {
+				if hk.Done != nil {
+					ts := make([]int64, len(fl))
+					for i, f := range fl {
+						ts[i] = f.T
+					}
+					hk.Done(stage, key, from, to, ts, isCached)
+				}
+				if isCached || stage == "цены" {
+					return
+				}
+				// каждый просмотренный период сразу в кеш: прерванный синк продолжится отсюда
+				if err := s.storage.SaveBinanceWindow(stage, key, from, to, fromBinanceFlows(fl)); err != nil {
+					log.Printf("[Sync Error] Binance: кеш периода %s: %v", stage, err)
+				}
+				if stage != "сделки" {
+					s.valueBinanceTxs(c) // депозиты/выводы/… сразу становятся операциями счёта
+				}
+			},
+		}
+		res, err := c.BuildHistory(opts)
+		if err != nil {
+			return err
+		}
+		warns = append(warns, res.Warnings...)
+		replace = true
+		if res.Series != nil && len(res.Series.Values) > 0 {
+			start, vals = res.Series.StartMs/1000, res.Series.Values
+		} else { // движений не нашлось — ряд начинается с сегодняшней оценки
+			start, vals, origin = now.Truncate(time.Minute).Unix(), []float64{v.TotalUAH}, v.TotalUAH
+		}
+		detail["history"] = map[string]any{"flows": res.Flows, "residual": res.Residual, "at": now.Unix(), "flow_at": secs(res.FlowTimes)}
+	}
+	detail["warnings"] = warns
+	if err := s.storage.SaveBinance(db.BinanceSave{Portfolio: v.TotalUAH, Start: start, Vals: vals, Replace: replace, Origin: origin, Detail: detail}); err != nil {
+		return err
+	}
+	for _, w := range warns {
+		log.Printf("[Sync] Binance: %s", w)
+	}
+	first, last, n := s.storage.BinanceSeriesInfo()
+	log.Printf("[Sync] Binance: портфель %.2f ₴, ряд %s — %s (%d мин), история %s", v.TotalUAH,
+		time.Unix(first, 0).Format("2006-01-02"), time.Unix(last, 0).Format("2006-01-02 15:04"), n, map[bool]string{true: "собрана с нуля", false: "дописана"}[replace])
+	return nil
 }
 
-// RunBinanceLoop опрашивает Binance сразу и затем каждые every, пока жив ctx.
-func (s *Server) RunBinanceLoop(ctx context.Context, every time.Duration) {
-	if s.bn.client == nil {
+// valueBinanceTxs оценивает в ₴ внешние движения, которых ещё нет среди операций счёта, и сразу кладёт их в кеш.
+func (s *Server) valueBinanceTxs(c *binance.Client) {
+	rows, err := s.storage.BinanceUnvaluedFlows(binance.ExtKinds())
+	if err != nil {
+		log.Printf("[Sync Error] Binance: операции счёта: %v", err)
 		return
 	}
-	go func() {
-		t := time.NewTicker(every)
-		defer t.Stop()
-		for {
-			if err := s.SyncBinance(); err != nil {
-				log.Printf("WARN: Binance: %v", err)
-			} else if s.storage.BinanceMeta("backfill_at") == "" {
-				// первый успешный опрос: восстанавливаем прошлое (один раз за запуск, пока оно не получилось)
-				s.bn.hmu.Lock()
-				tried := s.bn.hist.tried
-				s.bn.hmu.Unlock()
-				if !tried {
-					_ = s.StartBinanceHistory()
-				}
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-			}
+	var txs []db.BinanceTx
+	for _, r := range rows {
+		lbl, _ := binance.ExtLabel(r.Kind)
+		uah, err := c.ValueUAH(r.Asset, r.Delta, r.T)
+		if err != nil {
+			log.Printf("[Sync] Binance: %s %s — оценить в ₴ не вышло: %v", lbl, r.Asset, err)
 		}
-	}()
+		qty := strconv.FormatFloat(math.Abs(r.Delta), 'f', -1, 64)
+		txs = append(txs, db.BinanceTx{FlowID: r.ID, T: r.T, Desc: fmt.Sprintf("Binance: %s %s %s", lbl, qty, r.Asset), UAH: uah})
+	}
+	if err := s.storage.SaveBinanceTxs(txs); err != nil {
+		log.Printf("[Sync Error] Binance: операции счёта: %v", err)
+	}
 }
 
-// GET /api/binance — последний снимок и состояние интеграции; POST — снять сейчас и вернуть то же.
+// GET /api/binance — что запомнил кеш: разбор по монетам и пределы минутного ряда. Ничего не опрашивает.
 func (s *Server) HandleBinance(w http.ResponseWriter, r *http.Request) {
-	var syncErr string
-	switch r.Method {
-	case http.MethodGet:
-	case http.MethodPost:
-		if err := s.SyncBinance(); err != nil {
-			syncErr = err.Error()
-		}
-	default:
+	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	ov, err := s.storage.BinanceOverview(s.bn.client != nil)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	s.bn.mu.Lock()
-	lastErr := s.bn.lastErr
-	s.bn.mu.Unlock()
-	if syncErr != "" {
-		lastErr = syncErr
-	}
+	first, last, n := s.storage.BinanceSeriesInfo()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"configured": ov.Configured, "snapshot": ov.Snapshot, "days": ov.Days, "error": lastErr, "history": s.historyView(),
+		"configured": s.bn.client != nil, "detail": s.storage.BinanceDetail(),
+		"first": first, "last": last, "points": n,
 	})
 }
 
-// GET /api/binance/history — ход/итог восстановления; POST — запустить (заново).
-func (s *Server) HandleBinanceHistory(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-	case http.MethodPost:
-		if err := s.StartBinanceHistory(); err != nil {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
-		}
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(s.historyView())
-}
-
 // POST /api/binance/candles {starts:[unix…], end:unix} → has/first/last/last_value и свечи оценки портфеля по корзинам [starts[i], starts[i+1]).
-// has=false — минутного ряда нет (график считает Binance как раньше, по дневным снимкам).
 func (s *Server) HandleBinanceCandles(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -377,4 +455,20 @@ func (s *Server) HandleBinanceCandles(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+func toBinanceFlows(in []db.BinanceFlow) []binance.Flow {
+	out := make([]binance.Flow, len(in))
+	for i, f := range in {
+		out[i] = binance.Flow{T: f.T, Asset: f.Asset, Delta: f.Delta, Kind: f.Kind}
+	}
+	return out
+}
+
+func fromBinanceFlows(in []binance.Flow) []db.BinanceFlow {
+	out := make([]db.BinanceFlow, len(in))
+	for i, f := range in {
+		out[i] = db.BinanceFlow{T: f.T, Asset: f.Asset, Delta: f.Delta, Kind: f.Kind}
+	}
+	return out
 }

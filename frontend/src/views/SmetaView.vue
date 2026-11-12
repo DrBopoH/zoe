@@ -44,6 +44,11 @@ const uahTransactions = computed(() => {
   return props.transactions.filter(t => ids.has(t.account_id))
 })
 
+// Операции Binance — обычная история счёта: свечи двигаются по ним сразу, пока разведка идёт. Когда собран минутный ряд
+// оценки, скачки депозитов уже в нём, и график сам перестаёт считать эти операции второй раз (CandleChart, binanceIds).
+const binanceIds = computed(() => new Set(props.accounts.filter(a => a.bank_key === 'binance').map(a => a.id)))
+const binanceIdList = computed(() => [...binanceIds.value])
+
 const currentMonthTransactions = computed(() => {
   return uahTransactions.value.filter(t => {
     if (!t.time) return false
@@ -67,6 +72,41 @@ const monthlyOutflow = computed(() => {
 const monthlyDelta = computed(() => {
   return monthlyInflow.value - monthlyOutflow.value
 })
+
+// ── Разбор выбранной свечи (клик по ней): операции корзины, разделённые по счетам/картам. Нужен для отладки графика:
+// сумма операций корзины + вклад Binance должны сходиться с (закрытие − открытие).
+const picked = ref(null)
+const accById = computed(() => new Map(props.accounts.map(a => [a.id, a])))
+const accTitle = (id) => {
+  const a = accById.value.get(id)
+  if (!a) return id
+  const tail = (a.pans && a.pans[0]) || a.masked_pan || a.iban || ''
+  return tail && a.bank_key !== 'binance' ? `${a.name} · ${String(tail).slice(-8)}` : a.name
+}
+const pickedGroups = computed(() => {
+  const p = picked.value
+  if (!p) return []
+  const by = new Map()
+  for (const t of uahTransactions.value) {
+    if (!t.time) continue
+    const ms = new Date(t.time).getTime()
+    if (ms < p.from || ms >= p.to) continue
+    if (!by.has(t.account_id)) by.set(t.account_id, { id: t.account_id, title: accTitle(t.account_id), inflow: 0, outflow: 0, rows: [] })
+    const g = by.get(t.account_id)
+    if (t.amount > 0) g.inflow += t.amount
+    else g.outflow += -t.amount
+    g.rows.push({ ...t, ms })
+  }
+  const list = [...by.values()]
+  list.forEach(g => g.rows.sort((a, b) => a.ms - b.ms))
+  return list.sort((a, b) => a.title.localeCompare(b.title))
+})
+const isBn = (g) => binanceIds.value.has(g.id)
+const inValuation = (g) => isBn(g) && !!picked.value?.bnSeries // операции Binance «в оценке» только при минутном ряде
+const pickedNet = computed(() => pickedGroups.value.filter(g => !inValuation(g)).reduce((s, g) => s + g.inflow - g.outflow, 0)) // без Binance, если он учтён Δ оценки
+const pickedBn = computed(() => (picked.value ? picked.value.bnClose - picked.value.bnOpen : 0))
+const fmtTime = (ms) => new Date(ms).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+const signed = (v) => (v > 0 ? '+' : '') + formatMoney(v)
 </script>
 
 <template>
@@ -86,6 +126,38 @@ const monthlyDelta = computed(() => {
       </div>
     </section>
 
-    <CandleChart :transactions="uahTransactions" :total-value-u-a-h="totalValueUAH" :events="payEvents" />
+    <CandleChart :transactions="uahTransactions" :binance-ids="binanceIdList" :total-value-u-a-h="totalValueUAH" :events="payEvents" @select="picked = $event" />
+
+    <!-- разбор выбранной свечи: операции по картам -->
+    <section v-if="picked" class="bg-slate-900/60 border border-slate-800 rounded font-mono text-xs">
+      <div class="flex flex-wrap items-baseline justify-between gap-3 p-3 border-b border-slate-800">
+        <div class="text-slate-200 font-bold">{{ picked.title }}</div>
+        <div class="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500">
+          <span>Откр: <strong class="text-slate-200">{{ formatMoney(picked.open) }}</strong></span>
+          <span>Закр: <strong class="text-slate-200">{{ formatMoney(picked.close) }}</strong></span>
+          <span>Δ свечи: <strong :class="picked.close - picked.open >= 0 ? 'text-emerald-400' : 'text-rose-400'">{{ signed(picked.close - picked.open) }}</strong></span>
+          <span>операции карт: <strong class="text-slate-200">{{ signed(pickedNet) }}</strong></span>
+          <span v-if="pickedBn">Δ оценки Binance: <strong class="text-yellow-300">{{ signed(pickedBn) }}</strong></span>
+        </div>
+      </div>
+      <div v-if="!pickedGroups.length" class="p-3 text-slate-500">В этой свече операций нет<template v-if="pickedBn"> — только изменение оценки Binance</template>.</div>
+      <div v-for="g in pickedGroups" :key="g.id" class="border-b border-slate-800/60 last:border-b-0">
+        <div class="flex items-center justify-between gap-3 px-3 py-2 bg-slate-950/40">
+          <span class="text-slate-300 font-bold truncate">{{ g.title }}<span v-if="inValuation(g)" class="ml-2 text-[9px] font-normal uppercase text-yellow-400">внешние движения, в оценке</span></span>
+          <span class="shrink-0 text-[11px]">
+            <span class="text-emerald-400">+{{ formatMoney(g.inflow) }}</span>
+            <span class="text-slate-600"> / </span>
+            <span class="text-rose-400">−{{ formatMoney(g.outflow) }}</span>
+            <span class="text-slate-500"> = </span>
+            <strong :class="g.inflow - g.outflow >= 0 ? 'text-emerald-300' : 'text-rose-300'">{{ signed(g.inflow - g.outflow) }}</strong>
+          </span>
+        </div>
+        <div v-for="t in g.rows" :key="t.id" class="flex items-baseline gap-3 px-3 py-1 border-t border-slate-800/40">
+          <span class="w-28 shrink-0 text-slate-500">{{ fmtTime(t.ms) }}</span>
+          <span class="min-w-0 flex-1 truncate text-slate-300" :title="t.description">{{ t.description }}<span v-if="t.internal" class="ml-2 text-[9px] uppercase text-sky-400">внутр.</span></span>
+          <span class="shrink-0 font-bold" :class="t.amount >= 0 ? 'text-emerald-400' : 'text-rose-400'">{{ signed(t.amount) }}</span>
+        </div>
+      </div>
+    </section>
   </main>
 </template>

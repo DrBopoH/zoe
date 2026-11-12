@@ -178,6 +178,9 @@ func (s *Storage) GetAccounts() ([]Account, error) {
 			a.OpenedAt = firstTx
 		}
 		a.IsClosed = a.ClosedAt > 0
+		if a.Type == BinanceAccountType { // облачный источник со своей модалкой, а не банк с выпиской
+			a.BankKey, a.HasDetail = BinanceAccountType, true
+		}
 		a.Pans = mergePans([]string{main}, splitPans(extra))
 		list = append(list, a)
 	}

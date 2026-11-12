@@ -191,3 +191,35 @@ func TestSeriesNegativeHoleOffsetsProceeds(t *testing.T) {
 		}
 	}
 }
+
+// Вынужденная пауза (лимит) сообщается наружу: «остывание» начинается и заканчивается; короткие паузы — нет.
+func TestWaitHookReportsCooling(t *testing.T) {
+	c := NewClient("K", "S")
+	c.Sleep = func(time.Duration) {}
+	var got []time.Duration
+	c.hk = histHooks{wait: func(d time.Duration) { got = append(got, d) }}
+	c.sleep(120 * time.Millisecond)
+	c.sleep(5 * time.Second)
+	if len(got) != 2 || got[0] != 5*time.Second || got[1] != 0 {
+		t.Fatalf("паузы: %v", got)
+	}
+}
+
+// Окна обходятся от сегодня к прошлому (как у банков); сетка привязана к началу, поэтому границы окон не зависят от «сейчас».
+func TestWindowsWalkNewestFirst(t *testing.T) {
+	c := NewClient("K", "S")
+	var starts, ends []int64
+	c.hk = histHooks{start: func(_ string, a, b int64) { starts = append(starts, a); ends = append(ends, b) }}
+	from := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := from.Add(200 * 24 * time.Hour)
+	var out []Flow
+	if err := c.eachWindow("", from, to, 89*day, &out, func(a, b time.Time) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if len(starts) != 3 || !(starts[0] > starts[1] && starts[1] > starts[2]) {
+		t.Fatalf("окна должны идти от новых к старым: %v", starts)
+	}
+	if starts[2] != from.UnixMilli() || ends[0] != to.UnixMilli() || ends[1] != starts[0] {
+		t.Fatalf("сетка от начала, правый край — сегодня: %v %v", starts, ends)
+	}
+}

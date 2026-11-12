@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,7 +27,12 @@ type Client struct {
 	http        *http.Client
 	Sleep       func(time.Duration) // для тестов; по умолчанию time.Sleep
 
+	hk   histHooks // ход восстановления истории (ставит BuildHistory)
+	reqs atomic.Int64
+
 	mu     sync.Mutex
+	syms   map[string]Sym // exchangeInfo не меняется за сеанс
+	px     map[string]float64
 	offset time.Duration // серверное время − локальное (часы на компе могут уезжать; Binance не принимает отклонение >recvWindow)
 }
 
@@ -63,7 +69,14 @@ func (c *Client) do(method, path string, params url.Values, signed bool) ([]byte
 	}
 }
 
+// Requests — сколько запросов к Binance сделано за жизнь клиента (для оценки времени до конца).
+func (c *Client) Requests() int64 { return c.reqs.Load() }
+
 func (c *Client) sleep(d time.Duration) {
+	if c.hk.wait != nil && d >= time.Second { // вынужденная пауза (лимит) — в панели «остывание»
+		c.hk.wait(d)
+		defer c.hk.wait(0)
+	}
 	if c.Sleep != nil {
 		c.Sleep(d)
 		return
@@ -96,6 +109,7 @@ func (c *Client) once(method, path string, params url.Values, signed bool) ([]by
 	if c.key != "" {
 		req.Header.Set("X-MBX-APIKEY", c.key)
 	}
+	c.reqs.Add(1)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, 0, 0, err

@@ -6,11 +6,15 @@ import { toLocalDateStr, formatMoney, formatDateLong, formatShortDateName, forma
 const props = defineProps({
   transactions: { type: Array, default: () => [] },
   totalValueUAH: { type: Number, default: 0 },
+  // счета Binance: пока минутного ряда оценки нет, их операции считаются как у любого счёта; с рядом — их скачок уже в оценке
+  binanceIds: { type: Array, default: () => [] },
   // выплаты по облигациям инвестиционных счетов: { date: 'ГГГГ-ММ-ДД', kind: coupon|redemption, amount, isin, done }
   events: { type: Array, default: () => [] }
 })
 
+const emit = defineEmits(['select'])
 const hoveredCandle = ref(null)
+const selectedKey = ref(null) // выбранная кликом свеча: под графиком (в Смете) разбор её операций по картам
 const hoveredMarker = ref(null)
 const BLUE = '#93c5fd' // голубой как у бейджа покупки ОВДП
 const CLAIMED = '#64748b' // выплата уже получена — серым
@@ -46,6 +50,7 @@ const setTf = (id) => {
   try { localStorage.setItem('zoe.candle.tf', id) } catch { /* ignore */ }
   zoomLevel.value = 1.0
   hoveredCandle.value = null
+  selectCandle(null)
   nextTick(() => scrollToEnd(true))
 }
 
@@ -139,16 +144,17 @@ const bucketCandles = computed(() => {
   const n = starts.length
   if (n === 0) return []
 
+  const bn = bnData.value && bnData.value.n === n && bnData.value.tf === tfId.value && bnInfo.value.has ? bnData.value : null
+  const skip = bn ? new Set(props.binanceIds) : null // ряд оценки есть — операции Binance не считаем второй раз
   const groups = Array.from({ length: n }, () => [])
   props.transactions.forEach(t => {
-    if (!t.time) return
+    if (!t.time || (skip && skip.has(t.account_id))) return
     const ms = new Date(t.time).getTime()
     const i = bucketOf(starts, ms)
     if (i >= 0) groups[i].push({ ms, amount: t.amount, id: t.id })
   })
   groups.forEach(g => g.sort((a, b) => a.ms - b.ms))
 
-  const bn = bnData.value && bnData.value.n === n && bnData.value.tf === tfId.value && bnInfo.value.has ? bnData.value : null
   let cur = props.totalValueUAH - (bn ? bn.last_value : 0)
   const result = new Array(n)
 
@@ -186,6 +192,7 @@ const bucketCandles = computed(() => {
       date: toLocalDateStr(d),
       time: `${pad2(d.getHours())}:${pad2(d.getMinutes())}`,
       open, high, low, close,
+      bnOpen: b[0], bnClose: b[3], bnSeries: !!bn, // вклад Binance в открытие/закрытие (для разбора свечи)
       inflow, outflow,
       isBullish: close >= open
     }
@@ -333,6 +340,29 @@ const candleScales = computed(() => {
   return { min: minVal, max: maxVal, candles, slots, markers, ticks, monthBoundaries, step }
 })
 
+// Выбор свечи: клик по ней (не перетаскивание); повторный клик снимает. Наружу — границы корзины и вклад Binance.
+const selectCandle = (c) => {
+  if (!c || c.key === selectedKey.value) {
+    selectedKey.value = null
+    emit('select', null)
+    return
+  }
+  selectedKey.value = c.key
+  const list = candleScales.value.candles
+  const i = list.findIndex(x => x.key === c.key)
+  emit('select', {
+    key: c.key, title: hoverTitle(c),
+    from: c.ts, to: i >= 0 && i + 1 < list.length ? list[i + 1].ts : Infinity, // последняя корзина забирает и «будущие» операции
+    open: c.open, close: c.close, high: c.high, low: c.low, bnOpen: c.bnOpen, bnClose: c.bnClose, bnSeries: c.bnSeries
+  })
+}
+const candleAtX = (x) => {
+  const { candles, step } = candleScales.value
+  if (!candles.length) return null
+  const i = Math.round((x - paddingX - step / 2) / step)
+  return i >= 0 && i < candles.length ? candles[i] : null
+}
+
 const tickLabel = (t) => (isDaily.value || t.future ? formatShortDateName(t.date) : t.time)
 const boundaryLabel = (m) => (isDaily.value || m.future ? formatMonthName(m.date) : formatShortDateName(m.date))
 const hoverTitle = (c) => {
@@ -410,6 +440,12 @@ const onPointerMove = (e) => {
 const onPointerUp = (e) => {
   if (!isDragging.value) return
   isDragging.value = false
+  if (Math.abs(e.clientX - dragStartX) < 4) { // это клик, а не перетаскивание
+    const container = chartContainerRef.value
+    const r = container.getBoundingClientRect()
+    selectCandle(candleAtX(e.clientX - r.left + container.scrollLeft))
+    return
+  }
   chartContainerRef.value?.releasePointerCapture?.(e.pointerId)
   // палец/мышь остановились перед отпусканием — инерции нет
   if (performance.now() - lastT > 80) return
@@ -570,6 +606,19 @@ watch(() => bucketCandles.value.length, (n) => {
         <g v-if="futureDays.length && candleScales.candles.length">
           <line :x1="candleScales.candles[candleScales.candles.length - 1].x + candleScales.step / 2" y1="10" :x2="candleScales.candles[candleScales.candles.length - 1].x + candleScales.step / 2" :y2="svgHeight - 25" stroke="#38bdf8" stroke-opacity="0.35" stroke-dasharray="1 3" />
         </g>
+
+        <rect
+          v-for="c in candleScales.candles.filter(x => x.key === selectedKey)"
+          :key="'sel-' + c.key"
+          :x="c.x - candleScales.step / 2"
+          y="8"
+          :width="candleScales.step"
+          :height="svgHeight - 30"
+          fill="#38bdf8"
+          fill-opacity="0.12"
+          stroke="#38bdf8"
+          stroke-opacity="0.5"
+        />
 
         <line
           v-if="hoveredCandle"

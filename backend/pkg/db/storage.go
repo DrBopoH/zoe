@@ -147,6 +147,7 @@ func (s *Storage) initCache() error {
 		`CREATE INDEX IF NOT EXISTS idx_tx_time ON transactions(time DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_tx_account ON transactions(account_id)`,
 		coverageSchema,
+		binanceCacheSchema,
 	}
 	for _, q := range stmts {
 		if _, err := s.cacheDB.Exec(q); err != nil {
@@ -372,8 +373,8 @@ func (s *Storage) initCore() error {
 	if err := s.initManual(); err != nil {
 		return fmt.Errorf("manual schema: %w", err)
 	}
-	if err := s.initBinance(); err != nil {
-		return fmt.Errorf("binance schema: %w", err)
+	if err := s.dropLegacyBinanceCore(); err != nil {
+		return fmt.Errorf("drop legacy binance tables: %w", err)
 	}
 	// ручные даты жизни счёта (NULL — «считай по выписке»)
 	for _, col := range []string{"opened_at INTEGER", "closed_at INTEGER"} {
@@ -397,9 +398,10 @@ func (s *Storage) WipeCache() error {
 	if _, err := s.cacheDB.Exec(`DELETE FROM transactions`); err != nil {
 		return err
 	}
-	if _, err := s.cacheDB.Exec(`DELETE FROM sync_coverage`); err != nil {
-		return err
+	for _, t := range []string{"sync_coverage", "binance_minutes", "binance_state", "binance_flows", "binance_coverage", "accounts"} {
+		if _, err := s.cacheDB.Exec(`DELETE FROM ` + t); err != nil {
+			return err
+		}
 	}
-	_, err := s.cacheDB.Exec(`DELETE FROM accounts`)
-	return err
+	return nil
 }

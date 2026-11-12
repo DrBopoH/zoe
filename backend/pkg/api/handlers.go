@@ -126,77 +126,125 @@ func (s *Server) runFullCrawler() {
 		return
 	}
 
+	// Все источники опрашиваются параллельно: у каждого ключа свой лимит запросов.
 	var wg sync.WaitGroup
-	totalMono := len(s.monoClients)
-	totalRaif := len(s.raifClients)
-
-	// Параллельный опрос ключей Monobank
-	for clientIdx, client := range s.monoClients {
+	run := func(f func()) {
 		wg.Add(1)
-		go func(idx int, c *mono.Client) {
-			defer wg.Done()
-			s.crawlClient(c, idx+1, totalMono)
-		}(clientIdx, client)
+		go func() { defer wg.Done(); f() }()
 	}
-
-	// Параллельный опрос ключей Raiffeisen Bank
-	for clientIdx, client := range s.raifClients {
-		wg.Add(1)
-		go func(idx int, c *raif.Client) {
-			defer wg.Done()
-			s.crawlRaifClient(c, idx+1, totalRaif)
-		}(clientIdx, client)
+	for i, c := range s.monoClients {
+		run(func() { s.crawlBank(s.monoSpec(c, i+1, len(s.monoClients))) })
 	}
-
-	// Binance — такой же клиент в панели прогресса: оценка портфеля, затем (если нужно) история по минутам
+	for i, c := range s.raifClients {
+		run(func() { s.crawlBank(s.raifSpec(c, i+1, len(s.raifClients))) })
+	}
 	if s.bn.client != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			s.crawlBinance()
-		}()
+		run(s.crawlBinance)
 	}
-
 	wg.Wait()
 }
 
-func (s *Server) crawlClient(client *mono.Client, clientNum, totalClients int) {
-	var info *mono.UserInfoDTO
-	var err error
-	for attempt := 0; attempt < 3; attempt++ {
-		info, err = client.GetClientInfo()
-		if _, isRate := err.(*mono.RateLimitError); isRate {
-			s.updateStatus(fmt.Sprintf("MONO %d/%d: 429 ЛИМИТ · ОХЛАЖДЕНИЕ 65С", clientNum, totalClients))
-			time.Sleep(65 * time.Second)
-			continue
-		}
-		break
+// bankSpec — всё, чем один банковский ключ отличается от другого; сам обход (crawlBank) общий.
+type bankSpec struct {
+	kind       string // mono | raif — тип клиента в панели прогресса и префикс статусов
+	num, total int
+	tag        string        // суффикс статусов («RAIF»)
+	pause      time.Duration // пауза между запросами к ключу
+	retryWait  time.Duration
+	pageLimit  int // лимит ответа выписки (0 — неизвестен)
+	info       func() (name string, accounts []mono.AccountDTO, err error)
+	statement  func(accID string, from, to time.Time) ([]mono.StatementItemDTO, error)
+	classify   func(error) errKind
+}
+
+func (sp bankSpec) fallbackName() string {
+	return fmt.Sprintf("%s %d", strings.ToUpper(sp.kind[:1])+sp.kind[1:], sp.num)
+}
+
+func (sp bankSpec) suffix() string {
+	if sp.tag == "" {
+		return ""
 	}
+	return " " + sp.tag
+}
+
+func (s *Server) monoSpec(client *mono.Client, num, total int) bankSpec {
+	return bankSpec{
+		kind: "mono", num: num, total: total,
+		pause: 61 * time.Second, retryWait: 65 * time.Second, pageLimit: 500, // лимит Monobank на ответ выписки
+		info: func() (string, []mono.AccountDTO, error) {
+			var info *mono.UserInfoDTO
+			var err error
+			for attempt := 0; attempt < 3; attempt++ {
+				info, err = client.GetClientInfo()
+				if _, isRate := err.(*mono.RateLimitError); isRate {
+					s.updateStatus(fmt.Sprintf("MONO %d/%d: 429 ЛИМИТ · ОХЛАЖДЕНИЕ 65С", num, total))
+					time.Sleep(65 * time.Second)
+					continue
+				}
+				break
+			}
+			if err != nil {
+				return "", nil, err
+			}
+			return info.Name, info.Accounts, nil
+		},
+		statement: client.GetStatement,
+		classify: func(err error) errKind {
+			switch err.(type) {
+			case *mono.RateLimitError:
+				return errRetry
+			case *mono.BadRequestError:
+				return errHistoryEnd
+			}
+			return networkOrFatal(err)
+		},
+	}
+}
+
+func (s *Server) raifSpec(client *raif.Client, num, total int) bankSpec {
+	return bankSpec{
+		kind: "raif", num: num, total: total, tag: "RAIF",
+		pause: 30 * time.Second, retryWait: 30 * time.Second, pageLimit: 0, // лимит ответа Raif неизвестен — считаем осторожно
+		info:      client.GetUserInfo,
+		statement: client.GetStatement,
+		classify:  networkOrFatal,
+	}
+}
+
+func networkOrFatal(err error) errKind {
+	if isNetworkErr(err) {
+		return errNetwork
+	}
+	return errFatal
+}
+
+// crawlBank — «Разведать» для одного ключа любого банка: счета → закрытые → выписка каждого счёта окнами.
+func (s *Server) crawlBank(sp bankSpec) {
+	kindUp := strings.ToUpper(sp.kind)
+	ownerName, accounts, err := sp.info()
 	if err != nil {
-		log.Printf("[Sync Error] Mono Client %d GetClientInfo: %v", clientNum, err)
-		s.updateStatus(fmt.Sprintf("MONO %d/%d: ОТКАЗ API", clientNum, totalClients))
-		s.prog.clientError(s.prog.client(fmt.Sprintf("Mono %d", clientNum), "mono", 61*time.Second), bankErrText(err))
+		log.Printf("[Sync Error] %s client %d info: %v", kindUp, sp.num, err)
+		s.updateStatus(fmt.Sprintf("%s %d/%d: ОТКАЗ API", kindUp, sp.num, sp.total))
+		s.prog.clientError(s.prog.client(sp.fallbackName(), sp.kind, sp.pause), bankErrText(err))
 		return
 	}
-
-	ownerName := info.Name
 	if ownerName == "" {
-		ownerName = fmt.Sprintf("Mono %d", clientNum)
+		ownerName = sp.fallbackName()
 	}
-
-	if err := s.storage.SaveAccounts(info.Accounts, ownerName); err != nil {
+	if err := s.storage.SaveAccounts(accounts, ownerName); err != nil {
 		log.Printf("[Sync Error] [%s] Save accounts: %v", ownerName, err)
 	}
-
-	if len(info.Accounts) == 0 {
-		s.updateStatus(fmt.Sprintf("[%s] СЧЕТА ПУСТЫ", ownerName))
+	if len(accounts) == 0 {
+		s.updateStatus(fmt.Sprintf("[%s] СЧЕТА ПУСТЫ%s", ownerName, sp.suffix()))
 		return
 	}
-	cp := s.prog.client(ownerName, "mono", 61*time.Second)
-	progs := progAccounts(info.Accounts)
+
+	cp := s.prog.client(ownerName, sp.kind, sp.pause)
+	progs := progAccounts(accounts)
 	s.prog.setAccounts(cp, progs)
-	ids := make([]string, 0, len(info.Accounts))
-	for _, a := range info.Accounts {
+	ids := make([]string, 0, len(accounts))
+	for _, a := range accounts {
 		ids = append(ids, a.ID)
 	}
 	if err := s.storage.MarkClosedAbsent(ownerName, ids); err != nil {
@@ -205,126 +253,37 @@ func (s *Server) crawlClient(client *mono.Client, clientNum, totalClients int) {
 
 	var cur *accProg
 	coolSleep := func(d time.Duration) { s.prog.cool(cur, d); time.Sleep(d); s.prog.fetching(cur) }
-	pace := newPacer(61*time.Second, coolSleep)
-	for accIndex, acc := range info.Accounts {
-		cur = progs[accIndex]
-		label := fmt.Sprintf("[%s] СЧЕТ %d/%d (%s)", ownerName, accIndex+1, len(info.Accounts), acc.Type)
+	pace := newPacer(sp.pause, coolSleep)
+	for i, acc := range accounts {
+		cur = progs[i]
+		label := fmt.Sprintf("[%s] СЧЕТ %d/%d (%s)%s", ownerName, i+1, len(accounts), acc.Type, sp.suffix())
 		s.updateStatus(label)
 
 		accID := acc.ID
 		st, err := s.walkAccount(accID, walkCfg{
 			label:     label,
-			pageLimit: 500, // лимит Monobank на ответ выписки
-			pause:     61 * time.Second,
-			retryWait: 65 * time.Second,
-			classify: func(err error) errKind {
-				switch err.(type) {
-				case *mono.RateLimitError:
-					return errRetry
-				case *mono.BadRequestError:
-					return errHistoryEnd
-				}
-				if isNetworkErr(err) {
-					return errNetwork
-				}
-				return errFatal
-			},
-			fetch: func(from, to time.Time) ([]mono.StatementItemDTO, error) {
-				return client.GetStatement(accID, from, to)
-			},
-			sleep:    coolSleep,
-			pace:     pace,
-			onWindow: func(f, t int64) { s.prog.window(cur, f, t) },
-			now:      time.Now,
-			status:   s.updateStatus,
+			pageLimit: sp.pageLimit,
+			pause:     sp.pause,
+			retryWait: sp.retryWait,
+			classify:  sp.classify,
+			fetch:     func(from, to time.Time) ([]mono.StatementItemDTO, error) { return sp.statement(accID, from, to) },
+			sleep:     coolSleep,
+			pace:      pace,
+			onWindow:  func(f, t int64) { s.prog.window(cur, f, t) },
+			now:       time.Now,
+			status:    s.updateStatus,
 		})
 		s.prog.accDone(cur, st, err)
 		if errors.Is(err, errOffline) {
-			s.abortOffline(progs, accIndex+1)
+			s.abortOffline(progs, i+1)
 			break
 		}
 		if err != nil {
 			log.Printf("[Sync Error] [%s] счёт %s: %v", ownerName, acc.ID, err)
-			s.updateStatus(fmt.Sprintf("[%s] СБОЙ ВЫПИСКИ", acc.Type))
+			s.updateStatus(fmt.Sprintf("[%s] СБОЙ ВЫПИСКИ%s", acc.Type, sp.suffix()))
 			continue
 		}
-		log.Printf("[Sync] [%s] счёт %s: запросов к банку %d, история целиком: %v", ownerName, acc.ID, st.Requests, st.Complete)
-	}
-}
-
-func (s *Server) crawlRaifClient(client *raif.Client, clientNum, totalClients int) {
-	name, accounts, err := client.GetUserInfo()
-	if err != nil {
-		log.Printf("[Sync Error] Raif Client %d GetUserInfo: %v", clientNum, err)
-		s.updateStatus(fmt.Sprintf("RAIF %d/%d: ОТКАЗ API", clientNum, totalClients))
-		s.prog.clientError(s.prog.client(fmt.Sprintf("Raif %d", clientNum), "raif", 30*time.Second), bankErrText(err))
-		return
-	}
-
-	ownerName := name
-	if ownerName == "" {
-		ownerName = fmt.Sprintf("Raif %d", clientNum)
-	}
-
-	if err := s.storage.SaveAccounts(accounts, ownerName); err != nil {
-		log.Printf("[Sync Error] [%s] Save accounts: %v", ownerName, err)
-	}
-
-	if len(accounts) == 0 {
-		s.updateStatus(fmt.Sprintf("[%s] СЧЕТА ПУСТЫ (RAIF)", ownerName))
-		return
-	}
-	rcp := s.prog.client(ownerName, "raif", 30*time.Second)
-	rprogs := progAccounts(accounts)
-	s.prog.setAccounts(rcp, rprogs)
-	rids := make([]string, 0, len(accounts))
-	for _, a := range accounts {
-		rids = append(rids, a.ID)
-	}
-	if err := s.storage.MarkClosedAbsent(ownerName, rids); err != nil {
-		log.Printf("[Sync Error] [%s] closed accounts: %v", ownerName, err)
-	}
-
-	var rcur *accProg
-	rCool := func(d time.Duration) { s.prog.cool(rcur, d); time.Sleep(d); s.prog.fetching(rcur) }
-	pace := newPacer(30*time.Second, rCool)
-	for accIndex, acc := range accounts {
-		rcur = rprogs[accIndex]
-		label := fmt.Sprintf("[%s] СЧЕТ %d/%d (%s) RAIF", ownerName, accIndex+1, len(accounts), acc.Type)
-		s.updateStatus(label)
-
-		accID := acc.ID
-		st, err := s.walkAccount(accID, walkCfg{
-			label:     label,
-			pageLimit: 0, // лимит ответа Raif неизвестен — считаем осторожно
-			pause:     30 * time.Second,
-			retryWait: 30 * time.Second,
-			classify: func(err error) errKind {
-				if isNetworkErr(err) {
-					return errNetwork
-				}
-				return errFatal
-			},
-			fetch: func(from, to time.Time) ([]mono.StatementItemDTO, error) {
-				return client.GetStatement(accID, from, to)
-			},
-			sleep:    rCool,
-			pace:     pace,
-			onWindow: func(f, t int64) { s.prog.window(rcur, f, t) },
-			now:      time.Now,
-			status:   s.updateStatus,
-		})
-		s.prog.accDone(rcur, st, err)
-		if errors.Is(err, errOffline) {
-			s.abortOffline(rprogs, accIndex+1)
-			break
-		}
-		if err != nil {
-			log.Printf("[Sync Error] [%s] Raif счёт %s: %v", ownerName, acc.ID, err)
-			s.updateStatus(fmt.Sprintf("[%s] СБОЙ ВЫПИСКИ RAIF", acc.Type))
-			continue
-		}
-		log.Printf("[Sync] [%s] Raif счёт %s: запросов %d, история целиком: %v", ownerName, acc.ID, st.Requests, st.Complete)
+		log.Printf("[Sync] [%s] счёт %s: запросов %d, история целиком: %v", ownerName, acc.ID, st.Requests, st.Complete)
 	}
 }
 

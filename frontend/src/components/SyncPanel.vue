@@ -55,6 +55,8 @@ const eta = computed(() => {
 
     <div v-if="progress.clients.length === 0" class="mt-3 ui-bar ui-bar--run"></div>
 
+    <!-- список клиентов прокручивается: шапка с временем и крестиком остаётся на месте -->
+    <div class="mt-1 max-h-[calc(100vh-11rem)] overflow-y-auto overscroll-contain pr-2 -mr-1">
     <div v-for="c in progress.clients" :key="keyOf(c)" class="mt-3 space-y-2">
       <button type="button" class="w-full flex items-center gap-2 text-left cursor-pointer" @click="toggle(c)">
         <UiIcon :name="collapsed[keyOf(c)] ? 'arrowDown' : 'arrowUp'" size="sm" class="text-slate-500 shrink-0" />
@@ -77,6 +79,7 @@ const eta = computed(() => {
           <SyncTimeline :acc="a" :now="now" />
         </div>
       </div>
+    </div>
     </div>
   </div>
 </template>

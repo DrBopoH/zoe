@@ -31,15 +31,23 @@ type accProg struct {
 	Complete  bool
 
 	// счета без таймлайна покрытия (Binance): прогресс и подпись задаёт сам источник
-	Custom bool
-	Pct    int
-	Note   string
+	Custom   bool
+	Pct      int
+	Note     string
+	AxisFrom int64   // начало оси (unix); 0 — горизонт поиска
+	FlowAt   []int64 // моменты движений (unix) — клетки с ними зелёные, остальные косые
+	Cov      int64   // просмотрено от этого момента до сейчас (unix, обход справа налево); 0 — заливка по Pct
+	Step     int64   // длина окна запроса, сек (для оценки времени); 0 — не окна
+	Mult     int     // сколько обходов окнами (P2P: покупка и продажа)
+	Left     int     // сколько запросов осталось, если окнами не считается (пары сделок, монеты цен)
+	Ahead    bool    // зелёные клетки видны и впереди заливки (сделки: пары приходят вразнобой по времени)
 }
 
 type clientProg struct {
 	Name     string
 	Kind     string // mono | raif
 	Pause    time.Duration
+	ReqSec   float64 // средняя длительность запроса, сек (клиенты без фиксированной паузы: Binance)
 	Error    string
 	Finished bool
 	Accounts []*accProg
@@ -230,6 +238,13 @@ func (s *Server) progressSnapshot() progressView {
 		if remaining > 0 {
 			// пауза ставится только между запросами: перед первым ждать не нужно; ~2 с на сам запрос
 			wait := int64(remaining-1)*int64(x.c.Pause/time.Second) + int64(remaining)*2
+			if x.c.Kind == "binance" { // у Binance нет фиксированной паузы: считаем по измеренной скорости запросов
+				sec := x.c.ReqSec
+				if sec <= 0 {
+					sec = 0.7
+				}
+				wait = int64(float64(remaining) * sec)
+			}
 			if t := now + wait; t > eta {
 				eta = t
 			}
@@ -336,27 +351,71 @@ func (s *Server) accTimeline(a *accProg, now int64) accView {
 	return av
 }
 
-// customAccView — «таймлайн» источника без покрытия по периодам: ось [начало истории … сейчас], заливка слева направо по проценту.
+// customAccView — таймлайн источника без таблицы покрытия (Binance), по тем же правилам, что у банков:
+// ось [начало … сейчас]; в просмотренной части зелёная клетка — в ней были движения, косая — не было; окно — реальный
+// период, который только что просмотрен/качается.
 func (s *Server) customAccView(a *accProg, now int64) accView {
-	lo := now - 30*86400
-	if first, _, n := s.storage.BinanceSeriesInfo(); n > 0 && first > 0 && first < lo {
-		lo = first
+	lo := a.AxisFrom
+	if lo <= 0 || lo >= now { // начало истории ещё не найдено — показываем горизонт поиска
+		lo = s.binanceFrom().Unix()
 	}
+	span := now - lo
 	pct := a.Pct
+	rtl := a.Cov > 0 && a.State != "done"
+	if rtl {
+		pct = int((now - a.Cov) * 100 / span)
+	}
 	if a.State == "done" {
 		pct = 100
 	}
 	if pct > 100 {
 		pct = 100
 	}
+	if pct < 0 {
+		pct = 0
+	}
+	flows := append([]int64(nil), a.FlowAt...)
+	sort.Slice(flows, func(i, j int) bool { return flows[i] < flows[j] })
 	cells := make([]byte, timelineCells)
 	for i := range cells {
-		cells[i] = '0'
-		if i*100 < pct*timelineCells {
+		ca, cb := lo+span*int64(i)/timelineCells, lo+span*int64(i+1)/timelineCells
+		filled := i*100 < pct*timelineCells
+		if rtl { // заливка растёт от «сейчас» к началу, как у банков
+			filled = i*100 >= (100-pct)*timelineCells
+		}
+		if a.Ahead { // пары сделок идут не по времени: пока не закончили, «просмотренной» части оси нет — только найденные сделки
+			filled = a.State == "done"
+		}
+		j := sort.Search(len(flows), func(k int) bool { return flows[k] >= ca })
+		switch hasFlow := j < len(flows) && flows[j] < cb; {
+		case hasFlow && (filled || a.Ahead) && a.State != "queued":
 			cells[i] = '1'
+		case filled:
+			cells[i] = '2'
+		default:
+			cells[i] = '0'
 		}
 	}
-	return accView{ID: a.ID, Label: a.Label, State: a.State, Percent: pct, AxisFrom: lo, AxisTo: now, Cells: string(cells), Error: a.Error, Note: a.Note}
+	av := accView{ID: a.ID, Label: a.Label, State: a.State, Percent: pct, AxisFrom: lo, AxisTo: now, Cells: string(cells), Error: a.Error, Note: a.Note, CoolUntil: a.CoolUntil}
+	if a.State == "fetch" || a.State == "cooling" {
+		av.Win = a.Win
+	}
+	// сколько запросов осталось (для «закончится ≈»): окнами по времени, либо явным счётчиком (пары сделок, монеты цен)
+	if a.State != "done" && a.State != "error" {
+		switch {
+		case a.Left > 0:
+			av.remaining = a.Left
+		case a.Step > 0:
+			to := now // осталось от начала оси до границы просмотренного
+			if a.Cov > 0 && a.Cov < to {
+				to = a.Cov
+			}
+			if to > lo {
+				av.remaining = int((to-lo+a.Step-1)/a.Step) * max1(a.Mult)
+			}
+		}
+	}
+	return av
 }
 
 // accLabel — подпись счёта в панели: «UA32****0965 · black».
@@ -447,4 +506,11 @@ func (s *Server) remainingRequests(a *accProg, spans []db.Span, txs []int64, com
 		rem = 1
 	}
 	return rem
+}
+
+func max1(n int) int {
+	if n < 1 {
+		return 1
+	}
+	return n
 }

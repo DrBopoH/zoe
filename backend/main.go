@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -123,9 +122,8 @@ func main() {
 	mux.HandleFunc("/api/icu/accept", server.EnableCORS(server.HandleICUAccept))
 	mux.HandleFunc("/api/icu/bonds", server.EnableCORS(server.HandleICUBonds))
 
-	// Binance: портфель в ₴ (GET — последний снимок, POST — обновить сейчас)
+	// Binance (только чтение кеша; обновляется через «Разведать»)
 	mux.HandleFunc("/api/binance", server.EnableCORS(server.HandleBinance))
-	mux.HandleFunc("/api/binance/history", server.EnableCORS(server.HandleBinanceHistory)) // восстановление прошлого по минутам
 	mux.HandleFunc("/api/binance/candles", server.EnableCORS(server.HandleBinanceCandles)) // свечи оценки портфеля для графика
 
 	// API Роуты Синхронизации и Очистки Кэша
@@ -158,14 +156,6 @@ func main() {
 
 	log.Printf("Backend running on http://%s", srv.Addr)
 	log.Printf("Storage Architecture: Cache DB [%s] | Core DB [%s]", cacheDBPath, coreDBPath)
-
-	bctx, bcancel := context.WithCancel(context.Background())
-	defer bcancel()
-	every := 30 * time.Minute
-	if m, err := strconv.Atoi(os.Getenv("BINANCE_SYNC_MINUTES")); err == nil && m >= 5 {
-		every = time.Duration(m) * time.Minute
-	}
-	server.RunBinanceLoop(bctx, every)
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

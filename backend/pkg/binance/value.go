@@ -1,8 +1,14 @@
 package binance
 
 import (
+	"encoding/json"
+	"fmt"
+	"math"
+	"net/url"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Wallets — остатки монеты по кошелькам.
@@ -161,4 +167,83 @@ func (c *Client) Fetch() (Holdings, []string, error) {
 		h.AddEarn(m)
 	}
 	return h, warns, nil
+}
+
+// minuteClose — цена закрытия минутной свечи пары (первая свеча не раньше этой минуты); результат запоминается.
+func (c *Client) minuteClose(symbol string, tMs int64) (float64, error) {
+	t := tMs / minute * minute
+	key := symbol + "|" + strconv.FormatInt(t, 10)
+	c.mu.Lock()
+	if v, ok := c.px[key]; ok {
+		c.mu.Unlock()
+		return v, nil
+	}
+	c.mu.Unlock()
+	body, err := c.do("GET", "/api/v3/klines", url.Values{"symbol": {symbol}, "interval": {"1m"}, "startTime": {strconv.FormatInt(t, 10)}, "limit": {"1"}}, false)
+	if err != nil {
+		return 0, err
+	}
+	var r [][]json.RawMessage
+	if err := json.Unmarshal(body, &r); err != nil {
+		return 0, err
+	}
+	if len(r) == 0 || len(r[0]) < 5 {
+		return 0, fmt.Errorf("нет цены %s на %s", symbol, time.UnixMilli(t).Format("2006-01-02 15:04"))
+	}
+	var s string
+	if err := json.Unmarshal(r[0][4], &s); err != nil {
+		return 0, err
+	}
+	v := num(s)
+	c.mu.Lock()
+	if c.px == nil {
+		c.px = map[string]float64{}
+	}
+	c.px[key] = v
+	c.mu.Unlock()
+	return v, nil
+}
+
+// ValueUAH — сколько стоило qty монеты в гривнах в момент tMs (по минутным свечам: монета → USDT → ₴).
+func (c *Client) ValueUAH(asset string, qty float64, tMs int64) (float64, error) {
+	if asset == "UAH" {
+		return qty, nil
+	}
+	usdt := 1.0
+	if !stable[asset] {
+		syms, err := c.Symbols()
+		if err != nil {
+			return 0, err
+		}
+		usdt = 0
+		if syms[asset+"USDT"].Base != "" {
+			if usdt, err = c.minuteClose(asset+"USDT", tMs); err != nil {
+				return 0, err
+			}
+		} else {
+			for _, m := range []string{"BTC", "ETH", "BNB"} {
+				if syms[asset+m].Base == "" {
+					continue
+				}
+				a, err := c.minuteClose(asset+m, tMs)
+				if err != nil {
+					return 0, err
+				}
+				b, err := c.minuteClose(m+"USDT", tMs)
+				if err != nil {
+					return 0, err
+				}
+				usdt = a * b
+				break
+			}
+		}
+		if usdt <= 0 {
+			return 0, fmt.Errorf("нет пары для оценки %s", asset)
+		}
+	}
+	rate, err := c.minuteClose("USDTUAH", tMs)
+	if err != nil {
+		return 0, err
+	}
+	return math.Round(qty*usdt*rate*100) / 100, nil
 }

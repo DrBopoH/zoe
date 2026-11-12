@@ -3,200 +3,147 @@ package db
 import (
 	"database/sql"
 	"encoding/json"
-	"errors"
-	"time"
+	"fmt"
+	"strconv"
+	"strings"
 )
 
-// Binance: оценка портфеля в гривнах снимается при каждой синхронизации и копится по дням в core.db
-// (кеш одноразовый, а история оценок — единственный источник, откуда график берёт движение крипты до сегодняшнего дня).
-// Баланс счёта «Binance» — последний снимок; на график он ложится синтетическими внутренними операциями-дельтами дня.
+// Binance — такой же источник из облака, как банки: всё, что отсюда приходит, — КЕШ (cache.db, одноразовый).
+// Счёт «Binance» — обычная строка accounts (type=binance), оценка портфеля по минутам — binance_minutes,
+// разбор по монетам для модалки — binance_state. В core.db от Binance нет ничего.
 
-const binanceSchema = `
-CREATE TABLE IF NOT EXISTS binance_snapshots (
-	day TEXT PRIMARY KEY,            -- ГГГГ-ММ-ДД по местному времени; за день хранится последний снимок
-	taken_at INTEGER NOT NULL,
-	total REAL NOT NULL,             -- оценка портфеля, ₴
-	usdt_uah REAL NOT NULL DEFAULT 0,
-	detail TEXT NOT NULL DEFAULT ''  -- JSON: монеты с оценкой и предупреждения
-);
--- минутный ряд оценки портфеля (восстановленная история + дописывание при каждом опросе)
+const binanceCacheSchema = `
 CREATE TABLE IF NOT EXISTS binance_minutes (
 	ts INTEGER PRIMARY KEY,          -- unix-секунды, начало минуты
-	v REAL NOT NULL                  -- оценка, ₴
+	v REAL NOT NULL                  -- оценка портфеля, ₴
 );
-CREATE TABLE IF NOT EXISTS binance_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS binance_state (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+-- найденные движения по счёту (депозиты, выводы, сделки, …): каждый просмотренный период пишется сразу
+CREATE TABLE IF NOT EXISTS binance_flows (
+	id TEXT PRIMARY KEY,             -- время|монета|сумма|вид|№ повтора
+	t INTEGER NOT NULL,              -- мс
+	asset TEXT NOT NULL,
+	delta REAL NOT NULL,
+	kind TEXT NOT NULL
+);
+-- какие периоды уже просмотрены (stage + key: P2P BUY/SELL, пара сделок), чтобы не качать их заново
+CREATE TABLE IF NOT EXISTS binance_coverage (
+	stage TEXT NOT NULL,
+	key TEXT NOT NULL,
+	from_ms INTEGER NOT NULL,
+	to_ms INTEGER NOT NULL,
+	PRIMARY KEY (stage, key, from_ms, to_ms)
+);
 `
 
-const BinanceAccountID = "binance"
+const (
+	BinanceAccountID   = "binance"
+	BinanceAccountType = "binance"
+)
 
-type BinanceSnapshot struct {
-	Day     string          `json:"day"`
-	TakenAt int64           `json:"taken_at"`
-	Total   float64         `json:"total"`
-	USDTUAH float64         `json:"usdt_uah"`
-	Detail  json.RawMessage `json:"detail,omitempty"`
-}
+// legacyBinanceCore — таблицы старой схемы, когда оценки копились в core.db (там им не место).
+var legacyBinanceCore = []string{"binance_snapshots", "binance_minutes", "binance_meta"}
 
-func (s *Storage) initBinance() error {
-	_, err := s.coreDB.Exec(binanceSchema)
-	return err
-}
-
-func localDay(t time.Time) string { return t.In(time.Local).Format("2006-01-02") }
-
-// SaveBinanceSnapshot записывает снимок за день `now` (повторный за тот же день заменяет прежний).
-func (s *Storage) SaveBinanceSnapshot(total, usdtUAH float64, detail any, now time.Time) error {
-	raw, err := json.Marshal(detail)
-	if err != nil {
-		return err
-	}
-	defer s.bump()
-	s.coreMu.Lock()
-	defer s.coreMu.Unlock()
-	_, err = s.coreDB.Exec(`
-		INSERT INTO binance_snapshots(day, taken_at, total, usdt_uah, detail) VALUES(?,?,?,?,?)
-		ON CONFLICT(day) DO UPDATE SET taken_at=excluded.taken_at, total=excluded.total, usdt_uah=excluded.usdt_uah, detail=excluded.detail`,
-		localDay(now), now.Unix(), round2(total), usdtUAH, string(raw))
-	return err
-}
-
-func (s *Storage) binanceSnapshots() ([]BinanceSnapshot, error) {
-	rows, err := s.coreDB.Query(`SELECT day, taken_at, total, usdt_uah, detail FROM binance_snapshots ORDER BY day`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var list []BinanceSnapshot
-	for rows.Next() {
-		var b BinanceSnapshot
-		var detail string
-		if err := rows.Scan(&b.Day, &b.TakenAt, &b.Total, &b.USDTUAH, &detail); err != nil {
-			return nil, err
+func (s *Storage) dropLegacyBinanceCore() error {
+	for _, t := range legacyBinanceCore {
+		if _, err := s.coreDB.Exec(`DROP TABLE IF EXISTS ` + t); err != nil {
+			return err
 		}
-		if detail != "" {
-			b.Detail = json.RawMessage(detail)
-		}
-		list = append(list, b)
 	}
-	return list, rows.Err()
+	return nil
 }
 
-// BinanceLatest — последний снимок (ok == false, если Binance ещё ни разу не снимали).
-func (s *Storage) BinanceLatest() (BinanceSnapshot, bool, error) {
-	var b BinanceSnapshot
-	var detail string
-	err := s.coreDB.QueryRow(`SELECT day, taken_at, total, usdt_uah, detail FROM binance_snapshots ORDER BY day DESC LIMIT 1`).
-		Scan(&b.Day, &b.TakenAt, &b.Total, &b.USDTUAH, &detail)
-	if errors.Is(err, sql.ErrNoRows) {
-		return b, false, nil
-	}
-	if err != nil {
-		return b, false, err
-	}
-	if detail != "" {
-		b.Detail = json.RawMessage(detail)
-	}
-	return b, true, nil
+// BinanceFlow — движение по счёту Binance (как его отдал API).
+type BinanceFlow struct {
+	T     int64
+	Asset string
+	Delta float64
+	Kind  string
 }
 
-// binanceAccount — счёт «Binance» как обычный Account (появляется после первого снимка).
-func (s *Storage) binanceAccount() (Account, bool) {
-	last, ok, err := s.BinanceLatest()
-	if err != nil || !ok {
-		return Account{}, false
-	}
-	var first int64
-	_ = s.coreDB.QueryRow(`SELECT MIN(taken_at) FROM binance_snapshots`).Scan(&first)
-	if f, _, n := s.BinanceSeriesInfo(); n > 0 && f > 0 && f < first {
-		first = f
-	}
-	return Account{
-		ID: BinanceAccountID, Name: "Binance", Balance: last.Total, Type: "crypto", Currency: 980,
-		Pans: []string{}, Source: "binance", OpenedAt: first, BankKey: "binance", HasDetail: true,
-	}, true
+func flowID(f BinanceFlow, occ int) string {
+	return fmt.Sprintf("%d|%s|%.12g|%s|%d", f.T, f.Asset, f.Delta, f.Kind, occ)
 }
 
-// binanceTransactions — синтетические операции: изменение оценки между соседними снимками, на день снимка.
-// Первый снимок — «вход» всей суммы (до него Binance в капитале не было). Все они внутренние: не доход и не расход.
-func (s *Storage) binanceTransactions() ([]Transaction, error) {
-	snaps, err := s.binanceSnapshots()
-	if err != nil {
-		return nil, err
-	}
-	if first, _, n := s.BinanceSeriesInfo(); n > 0 && first > 0 {
-		return nil, nil // история идёт минутным рядом, дельты снимков больше не нужны
-	}
-	var out []Transaction
-	prev := 0.0
-	for i, b := range snaps {
-		delta := round2(b.Total - prev)
-		prev = b.Total
-		if delta == 0 {
-			continue
-		}
-		day, err := time.ParseInLocation("2006-01-02", b.Day, time.Local)
-		if err != nil {
-			continue
-		}
-		desc := "Binance: изменение оценки"
-		if i == 0 {
-			desc = "Binance: подключено"
-		}
-		out = append(out, Transaction{
-			ID: "binance_" + b.Day, AccountID: BinanceAccountID,
-			Time:        day.Add(12 * time.Hour).Format(time.RFC3339),
-			Description: desc, Amount: delta, CurrencyCode: 980, OperationAmount: delta, Internal: true,
-		})
-	}
-	return out, nil
-}
-
-// BinanceOverview — последний снимок + сколько дней истории.
-type BinanceOverview struct {
-	Configured bool             `json:"configured"`
-	Snapshot   *BinanceSnapshot `json:"snapshot,omitempty"`
-	Days       int              `json:"days"`
-}
-
-func (s *Storage) BinanceOverview(configured bool) (BinanceOverview, error) {
-	ov := BinanceOverview{Configured: configured}
-	last, ok, err := s.BinanceLatest()
-	if err != nil {
-		return ov, err
-	}
-	if ok {
-		ov.Snapshot = &last
-	}
-	_ = s.coreDB.QueryRow(`SELECT COUNT(*) FROM binance_snapshots`).Scan(&ov.Days)
-	return ov, nil
-}
-
-// ───────────────────────── минутный ряд ─────────────────────────
-
-// BinanceSeriesInfo — первая и последняя минута ряда (unix) и число точек.
-func (s *Storage) BinanceSeriesInfo() (first, last int64, n int) {
-	var f, l sql.NullInt64
-	_ = s.coreDB.QueryRow(`SELECT MIN(ts), MAX(ts), COUNT(*) FROM binance_minutes`).Scan(&f, &l, &n)
-	return f.Int64, l.Int64, n
-}
-
-// BinanceLastMinute — последняя точка ряда (ok == false, если ряда нет).
-func (s *Storage) BinanceLastMinute() (ts int64, v float64, ok bool) {
-	err := s.coreDB.QueryRow(`SELECT ts, v FROM binance_minutes ORDER BY ts DESC LIMIT 1`).Scan(&ts, &v)
-	return ts, v, err == nil
-}
-
-func (s *Storage) putMinutes(startUnix int64, vals []float64, replace bool) error {
-	defer s.bump()
-	s.coreMu.Lock()
-	defer s.coreMu.Unlock()
-	tx, err := s.coreDB.Begin()
+// SaveBinanceWindow кладёт в кеш найденные за период движения и сам период (одной транзакцией): прерванный синк
+// продолжится с того места, где остановился. key различает независимые обходы одного этапа (P2P BUY/SELL, пара сделок).
+func (s *Storage) SaveBinanceWindow(stage, key string, fromMs, toMs int64, fl []BinanceFlow) error {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	tx, err := s.cacheDB.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if replace {
+	seen := map[string]int{}
+	for _, f := range fl {
+		base := flowID(f, 0)
+		occ := seen[base]
+		seen[base]++
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO binance_flows(id,t,asset,delta,kind) VALUES(?,?,?,?,?)`, flowID(f, occ), f.T, f.Asset, f.Delta, f.Kind); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`INSERT OR IGNORE INTO binance_coverage(stage,key,from_ms,to_ms) VALUES(?,?,?,?)`, stage, key, fromMs, toMs); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// BinanceCovered — период (или пара сделок: from=to=0) уже просмотрен и лежит в кеше.
+func (s *Storage) BinanceCovered(stage, key string, fromMs, toMs int64) bool {
+	var n int
+	_ = s.cacheDB.QueryRow(`SELECT COUNT(*) FROM binance_coverage WHERE stage=? AND key=? AND from_ms<=? AND to_ms>=?`, stage, key, fromMs, toMs).Scan(&n)
+	return n > 0
+}
+
+// BinanceFlows — все сохранённые движения.
+func (s *Storage) BinanceFlows() ([]BinanceFlow, error) {
+	rows, err := s.cacheDB.Query(`SELECT t, asset, delta, kind FROM binance_flows ORDER BY t`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []BinanceFlow
+	for rows.Next() {
+		var f BinanceFlow
+		if err := rows.Scan(&f.T, &f.Asset, &f.Delta, &f.Kind); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// BinanceSave — результат опроса Binance для записи в кеш.
+type BinanceSave struct {
+	Portfolio float64   // оценка портфеля сейчас, ₴
+	Start     int64     // unix-секунды первой минуты Vals
+	Vals      []float64 // точки минутного ряда
+	Replace   bool      // заменить весь ряд (полная история); иначе дописать точки
+	Origin    float64   // оценка «до первой точки» (0 — счёт начался с первого движения); хранится при Replace
+	Detail    any
+}
+
+// SaveBinance одной транзакцией кладёт в кеш счёт с оценкой, точки минутного ряда, операции счёта и JSON-разбор по монетам.
+func (s *Storage) SaveBinance(in BinanceSave) error {
+	raw, err := json.Marshal(in.Detail)
+	if err != nil {
+		return err
+	}
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	defer s.bump()
+	tx, err := s.cacheDB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if in.Replace {
 		if _, err := tx.Exec(`DELETE FROM binance_minutes`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO binance_state(k,v) VALUES('origin',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`, strconv.FormatFloat(in.Origin, 'f', -1, 64)); err != nil {
 			return err
 		}
 	}
@@ -205,35 +152,146 @@ func (s *Storage) putMinutes(startUnix int64, vals []float64, replace bool) erro
 		return err
 	}
 	defer st.Close()
-	for i, v := range vals {
-		if _, err := st.Exec(startUnix+int64(i)*60, v); err != nil {
+	for i, v := range in.Vals {
+		if _, err := st.Exec(in.Start+int64(i)*60, v); err != nil {
+			return err
+		}
+	}
+	if err := upsertBinanceAccount(tx, in.Portfolio, raw); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func upsertBinanceAccount(tx *sql.Tx, balance float64, detail []byte) error {
+	if _, err := tx.Exec(`
+		INSERT INTO accounts (id, name, balance, type, currency_code, iban, masked_pan, extra_pans, source, owner, opened_at)
+		VALUES (?, 'Binance', ?, ?, 980, '', '', '', 'api', 'Binance',
+			COALESCE((SELECT MIN(ts) FROM binance_minutes), (SELECT MIN(time) FROM transactions WHERE account_id = ?), 0))
+		ON CONFLICT(id) DO UPDATE SET balance = excluded.balance, closed_at = 0, opened_at = excluded.opened_at`,
+		BinanceAccountID, round2(balance), BinanceAccountType, BinanceAccountID); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`INSERT INTO binance_state(k,v) VALUES('detail',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`, string(detail))
+	return err
+}
+
+// SaveBinanceAccount кладёт в кеш счёт Binance с текущей оценкой и разбором по монетам — самым первым шагом синка,
+// чтобы счёт был в «Операционной» ещё до того, как соберётся история.
+func (s *Storage) SaveBinanceAccount(portfolio float64, detail any) error {
+	raw, err := json.Marshal(detail)
+	if err != nil {
+		return err
+	}
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	defer s.bump()
+	tx, err := s.cacheDB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := upsertBinanceAccount(tx, portfolio, raw); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// BinanceFlowRow — сохранённое движение вместе с его id в кеше.
+type BinanceFlowRow struct {
+	ID string
+	BinanceFlow
+}
+
+// BinanceTx — внешнее движение как операция счёта Binance; UAH — со знаком, на момент движения.
+type BinanceTx struct {
+	FlowID string
+	T      int64 // мс
+	Desc   string
+	UAH    float64
+}
+
+// BinanceUnvaluedFlows — внешние движения (по видам kinds), которых ещё нет среди операций счёта.
+func (s *Storage) BinanceUnvaluedFlows(kinds []string) ([]BinanceFlowRow, error) {
+	if len(kinds) == 0 {
+		return nil, nil
+	}
+	ph := strings.TrimSuffix(strings.Repeat("?,", len(kinds)), ",")
+	args := make([]any, len(kinds))
+	for i, k := range kinds {
+		args[i] = k
+	}
+	rows, err := s.cacheDB.Query(`SELECT f.id, f.t, f.asset, f.delta, f.kind FROM binance_flows f
+		WHERE f.kind IN (`+ph+`) AND NOT EXISTS (SELECT 1 FROM transactions x WHERE x.id = 'binance_' || f.id) ORDER BY f.t`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []BinanceFlowRow
+	for rows.Next() {
+		var r BinanceFlowRow
+		if err := rows.Scan(&r.ID, &r.T, &r.Asset, &r.Delta, &r.Kind); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// SaveBinanceTxs кладёт операции счёта Binance сразу после оценки (по одной на движение).
+func (s *Storage) SaveBinanceTxs(txs []BinanceTx) error {
+	if len(txs) == 0 {
+		return nil
+	}
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	defer s.bump()
+	tx, err := s.cacheDB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, t := range txs {
+		if _, err := tx.Exec(`INSERT OR REPLACE INTO transactions (id, account_id, time, description, amount, operation_amount, currency_code, is_hold)
+			VALUES (?,?,?,?,?,?,980,0)`, "binance_"+t.FlowID, BinanceAccountID, t.T/1000, t.Desc, round2(t.UAH), round2(t.UAH)); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
 }
 
-// ReplaceBinanceMinutes заменяет весь ряд (vals[i] — минута startUnix+i*60).
-func (s *Storage) ReplaceBinanceMinutes(startUnix int64, vals []float64) error {
-	return s.putMinutes(startUnix, vals, true)
-}
-
-// AppendBinanceMinutes дописывает/перезаписывает точки ряда.
-func (s *Storage) AppendBinanceMinutes(startUnix int64, vals []float64) error {
-	return s.putMinutes(startUnix, vals, false)
-}
-
-func (s *Storage) SetBinanceMeta(k, v string) error {
-	s.coreMu.Lock()
-	defer s.coreMu.Unlock()
-	_, err := s.coreDB.Exec(`INSERT INTO binance_meta(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v`, k, v)
-	return err
-}
-
-func (s *Storage) BinanceMeta(k string) string {
+// binanceOrigin — оценка «до начала ряда» (ok == false у рядов старой схемы: тогда открытие первой свечи — первая точка).
+func (s *Storage) binanceOrigin() (float64, bool) {
 	var v string
-	_ = s.coreDB.QueryRow(`SELECT v FROM binance_meta WHERE k=?`, k).Scan(&v)
-	return v
+	if err := s.cacheDB.QueryRow(`SELECT v FROM binance_state WHERE k='origin'`).Scan(&v); err != nil {
+		return 0, false
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	return f, err == nil
+}
+
+// BinanceDetail — сохранённый разбор по монетам (пусто, если Binance ещё не опрашивали).
+func (s *Storage) BinanceDetail() json.RawMessage {
+	var v string
+	if err := s.cacheDB.QueryRow(`SELECT v FROM binance_state WHERE k='detail'`).Scan(&v); err != nil {
+		return nil
+	}
+	return json.RawMessage(v)
+}
+
+// ───────────────────────── минутный ряд ─────────────────────────
+
+// BinanceSeriesInfo — первая и последняя минута ряда (unix) и число точек.
+func (s *Storage) BinanceSeriesInfo() (first, last int64, n int) {
+	var f, l sql.NullInt64
+	_ = s.cacheDB.QueryRow(`SELECT MIN(ts), MAX(ts), COUNT(*) FROM binance_minutes`).Scan(&f, &l, &n)
+	return f.Int64, l.Int64, n
+}
+
+// BinanceLastMinute — последняя точка ряда (ok == false, если ряда нет).
+func (s *Storage) BinanceLastMinute() (ts int64, v float64, ok bool) {
+	err := s.cacheDB.QueryRow(`SELECT ts, v FROM binance_minutes ORDER BY ts DESC LIMIT 1`).Scan(&ts, &v)
+	return ts, v, err == nil
 }
 
 // BinanceCandles агрегирует ряд в свечи: корзина i — [starts[i], starts[i+1]), последняя — до end (unix).
@@ -247,11 +305,12 @@ func (s *Storage) BinanceCandles(starts []int64, end int64) ([][4]float64, []boo
 	}
 	var prev float64
 	havePrev := false
+	origin, hasOrigin := s.binanceOrigin()
 	var pv sql.NullFloat64
-	if err := s.coreDB.QueryRow(`SELECT v FROM binance_minutes WHERE ts < ? ORDER BY ts DESC LIMIT 1`, starts[0]).Scan(&pv); err == nil && pv.Valid {
+	if err := s.cacheDB.QueryRow(`SELECT v FROM binance_minutes WHERE ts < ? ORDER BY ts DESC LIMIT 1`, starts[0]).Scan(&pv); err == nil && pv.Valid {
 		prev, havePrev = pv.Float64, true
 	}
-	rows, err := s.coreDB.Query(`SELECT ts, v FROM binance_minutes WHERE ts >= ? AND ts < ? ORDER BY ts`, starts[0], end)
+	rows, err := s.cacheDB.Query(`SELECT ts, v FROM binance_minutes WHERE ts >= ? AND ts < ? ORDER BY ts`, starts[0], end)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -289,6 +348,8 @@ func (s *Storage) BinanceCandles(starts []int64, end int64) ([][4]float64, []boo
 			o := v
 			if havePrev {
 				o = prev
+			} else if hasOrigin { // первая свеча ряда: до неё в портфеле не было ничего (или была «origin») — скачок виден
+				o = origin
 			}
 			cand = [4]float64{o, maxf(o, v), minf(o, v), v}
 			started = true

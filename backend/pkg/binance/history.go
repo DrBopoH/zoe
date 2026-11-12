@@ -2,6 +2,7 @@ package binance
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"sort"
 	"strconv"
@@ -96,15 +97,48 @@ func maxf(a, b float64) float64 {
 
 const day = 24 * time.Hour
 
-// eachWindow режет [from,to] на окна не длиннее span (Binance ограничивает длину периода).
-func eachWindow(from, to time.Time, span time.Duration, fn func(a, b time.Time) error) error {
+// histHooks — связь восстановления истории с прогрессом и кешем (ставит BuildHistory, пусто — ничего не делаем).
+type histHooks struct {
+	stage   string
+	covered func(stage, key string, fromMs, toMs int64) bool
+	start   func(stage string, fromMs, toMs int64)
+	done    func(stage, key string, fromMs, toMs int64, fl []Flow, cached bool)
+	wait    func(d time.Duration)
+}
+
+// eachWindow режет [from,to] на окна не длиннее span (Binance ограничивает длину периода) и идёт по ним от сегодня к прошлому,
+// как банки. Сетка окон привязана к from, а не к «сейчас», поэтому в следующий раз окна те же и пропускаются по кешу
+// (кроме крайнего справа: его конец — сегодня). Уже сохранённые окна (covered) пропускает; перед окном сообщает «качаю период»,
+// после — «период обработан» с найденными движениями (out — накопитель вызывающего: всё, что добавилось за окно, и есть его
+// движения). key различает независимые обходы одного этапа (P2P BUY/SELL).
+func (c *Client) eachWindow(key string, from, to time.Time, span time.Duration, out *[]Flow, fn func(a, b time.Time) error) error {
+	hk := c.hk
+	type win struct{ a, b time.Time }
+	var grid []win
 	for a := from; a.Before(to); a = a.Add(span) {
 		b := a.Add(span)
 		if b.After(to) {
 			b = to
 		}
+		grid = append(grid, win{a, b})
+	}
+	for i := len(grid) - 1; i >= 0; i-- {
+		a, b := grid[i].a, grid[i].b
+		if hk.covered != nil && hk.covered(hk.stage, key, a.UnixMilli(), b.UnixMilli()) {
+			if hk.done != nil {
+				hk.done(hk.stage, key, a.UnixMilli(), b.UnixMilli(), nil, true)
+			}
+			continue
+		}
+		if hk.start != nil {
+			hk.start(hk.stage, a.UnixMilli(), b.UnixMilli())
+		}
+		before := len(*out)
 		if err := fn(a, b); err != nil {
 			return err
+		}
+		if hk.done != nil {
+			hk.done(hk.stage, key, a.UnixMilli(), b.UnixMilli(), (*out)[before:], false)
 		}
 	}
 	return nil
@@ -116,7 +150,7 @@ func skipLD(a string) bool { return strings.HasPrefix(a, "LD") && len(a) > 2 }
 
 func (c *Client) Deposits(from, to time.Time) ([]Flow, error) {
 	var out []Flow
-	err := eachWindow(from, to, 89*day, func(a, b time.Time) error {
+	err := c.eachWindow("", from, to, 89*day, &out, func(a, b time.Time) error {
 		for off := 0; ; off += 1000 {
 			body, err := c.do("GET", "/sapi/v1/capital/deposit/hisrec", url.Values{"startTime": {ms(a)}, "endTime": {ms(b)}, "limit": {"1000"}, "offset": {strconv.Itoa(off)}}, true)
 			if err != nil {
@@ -146,7 +180,7 @@ func (c *Client) Deposits(from, to time.Time) ([]Flow, error) {
 
 func (c *Client) Withdrawals(from, to time.Time) ([]Flow, error) {
 	var out []Flow
-	err := eachWindow(from, to, 89*day, func(a, b time.Time) error {
+	err := c.eachWindow("", from, to, 89*day, &out, func(a, b time.Time) error {
 		for off := 0; ; off += 1000 {
 			body, err := c.do("GET", "/sapi/v1/capital/withdraw/history", url.Values{"startTime": {ms(a)}, "endTime": {ms(b)}, "limit": {"1000"}, "offset": {strconv.Itoa(off)}}, true)
 			if err != nil {
@@ -183,7 +217,7 @@ func (c *Client) Withdrawals(from, to time.Time) ([]Flow, error) {
 
 func (c *Client) Converts(from, to time.Time) ([]Flow, error) {
 	var out []Flow
-	err := eachWindow(from, to, 29*day, func(a, b time.Time) error {
+	err := c.eachWindow("", from, to, 29*day, &out, func(a, b time.Time) error {
 		body, err := c.do("GET", "/sapi/v1/convert/tradeFlow", url.Values{"startTime": {ms(a)}, "endTime": {ms(b)}, "limit": {"1000"}}, true)
 		if err != nil {
 			return err
@@ -217,7 +251,7 @@ func (c *Client) Converts(from, to time.Time) ([]Flow, error) {
 // FiatBuys — покупки криптовалюты картой/банком за фиат.
 func (c *Client) FiatBuys(from, to time.Time) ([]Flow, error) {
 	var out []Flow
-	err := eachWindow(from, to, 29*day, func(a, b time.Time) error {
+	err := c.eachWindow("", from, to, 29*day, &out, func(a, b time.Time) error {
 		for page := 1; ; page++ {
 			body, err := c.do("GET", "/sapi/v1/fiat/payments", url.Values{"transactionType": {"0"}, "beginTime": {ms(a)}, "endTime": {ms(b)}, "page": {strconv.Itoa(page)}, "rows": {"500"}}, true)
 			if err != nil {
@@ -255,7 +289,7 @@ func (c *Client) P2P(from, to time.Time) ([]Flow, error) {
 		if side == "SELL" {
 			sign = -1
 		}
-		err := eachWindow(from, to, 29*day, func(a, b time.Time) error {
+		err := c.eachWindow(side, from, to, 29*day, &out, func(a, b time.Time) error {
 			for page := 1; ; page++ {
 				body, err := c.do("GET", "/sapi/v1/c2c/orderMatch/listUserOrderHistory", url.Values{"tradeType": {side}, "startTimestamp": {ms(a)}, "endTimestamp": {ms(b)}, "page": {strconv.Itoa(page)}, "rows": {"100"}}, true)
 				if err != nil {
@@ -292,7 +326,7 @@ func (c *Client) P2P(from, to time.Time) ([]Flow, error) {
 // Dividends — начисления (ставки, раздачи, награды), которые Binance отдаёт как asset dividend.
 func (c *Client) Dividends(from, to time.Time) ([]Flow, error) {
 	var out []Flow
-	err := eachWindow(from, to, 89*day, func(a, b time.Time) error {
+	err := c.eachWindow("", from, to, 89*day, &out, func(a, b time.Time) error {
 		body, err := c.do("GET", "/sapi/v1/asset/assetDividend", url.Values{"startTime": {ms(a)}, "endTime": {ms(b)}, "limit": {"500"}}, true)
 		if err != nil {
 			return err
@@ -320,6 +354,22 @@ type Sym struct{ Base, Quote string }
 
 // Symbols — все пары биржи: symbol → (base, quote).
 func (c *Client) Symbols() (map[string]Sym, error) {
+	c.mu.Lock()
+	cached := c.syms
+	c.mu.Unlock()
+	if cached != nil {
+		return cached, nil
+	}
+	out, err := c.loadSymbols()
+	if err == nil {
+		c.mu.Lock()
+		c.syms = out
+		c.mu.Unlock()
+	}
+	return out, err
+}
+
+func (c *Client) loadSymbols() (map[string]Sym, error) {
 	body, err := c.do("GET", "/api/v3/exchangeInfo", nil, false)
 	if err != nil {
 		return nil, err
@@ -384,6 +434,9 @@ const minute = int64(60_000)
 func (c *Client) klines(symbol string, fromMs, toMs int64, put func(t int64, closeP float64)) error {
 	start := fromMs
 	for start <= toMs {
+		if c.hk.start != nil {
+			c.hk.start(c.hk.stage, start, min64(toMs, start+1000*minute))
+		}
 		body, err := c.do("GET", "/api/v3/klines", url.Values{"symbol": {symbol}, "interval": {"1m"}, "startTime": {strconv.FormatInt(start, 10)}, "endTime": {strconv.FormatInt(toMs, 10)}, "limit": {"1000"}}, false)
 		if err != nil {
 			return err
@@ -396,6 +449,9 @@ func (c *Client) klines(symbol string, fromMs, toMs int64, put func(t int64, clo
 			return nil
 		}
 		var last int64
+		if c.hk.done != nil {
+			c.hk.done(c.hk.stage, "", start, start+int64(len(r))*minute, nil, false)
+		}
 		for _, k := range r {
 			if len(k) < 5 {
 				continue
@@ -642,22 +698,42 @@ const errNoRate = histErr("нет минутных цен USDT/UAH — оцен�
 
 // HistoryOpts — параметры восстановления.
 type HistoryOpts struct {
-	From     time.Time                           // как далеко в прошлое искать движения
-	Now      time.Time                           // конец истории (по умолчанию — сейчас)
-	Progress func(stage string, done, total int) // для окна прогресса
-	Quotes   []string                            // котировочные монеты, по парам с которыми ищем сделки (по умолчанию стейблы/BTC/ETH/BNB)
+	From     time.Time                            // как далеко в прошлое искать движения
+	Now      time.Time                            // конец истории (по умолчанию — сейчас)
+	Progress func(stage string, done, total int)  // для окна прогресса
+	Period   func(firstMs int64, flowsMs []int64) // когда движения найдены: с какой даты реально идёт история и когда были движения
+	Quotes   []string                             // котировочные монеты, по парам с которыми ищем сделки (по умолчанию стейблы/BTC/ETH/BNB)
+
+	// Кеш периодов: каждый просмотренный период сразу уходит наружу (Done) и в следующий раз пропускается (Covered).
+	Covered func(stage, key string, fromMs, toMs int64) bool                    // период уже в кеше — не запрашивать
+	Start   func(stage string, fromMs, toMs int64)                              // период, который сейчас запрашивается
+	Done    func(stage, key string, fromMs, toMs int64, fl []Flow, cached bool) // период обработан (fl — найденные в нём движения; cached — взят из кеша, не запрашивался)
+	Wait    func(d time.Duration)                                               // вынужденная пауза из-за лимита (0 — закончилась)
+	Cached  []Flow                                                              // движения из пропущенных (уже сохранённых) периодов
 }
 
 // History — результат восстановления.
 type History struct {
-	Series   *SeriesResult
-	Flows    int
-	Warnings []string
-	Residual map[string]float64 // монета → остаток − Σдвижений (то, что API не объяснил)
-	Assets   []string
+	Series    *SeriesResult
+	Flows     int
+	FlowTimes []int64 // моменты движений (мс), по возрастанию
+	Warnings  []string
+	Residual  map[string]float64 // монета → остаток − Σдвижений (то, что API не объяснил)
+	Assets    []string
 }
 
 var defaultQuotes = []string{"USDT", "USDC", "FDUSD", "BTC", "ETH", "BNB", "EUR", "UAH"}
+
+var extLabels = map[string]string{"deposit": "депозит", "withdraw": "вывод", "fiat": "покупка картой", "p2p": "P2P", "dividend": "начисление"}
+
+// ExtLabel — подпись внешнего движения (депозит, вывод, …); ok == false у внутренних (сделки, комиссии, конвертации).
+func ExtLabel(kind string) (string, bool) { l, ok := extLabels[kind]; return l, ok }
+
+// ExtKinds — виды внешних движений, которые становятся операциями счёта.
+func ExtKinds() []string { return []string{"deposit", "withdraw", "fiat", "p2p", "dividend"} }
+
+// flowKey — отпечаток движения (для слияния кеша с заново запрошенным хвостом).
+func flowKey(f Flow) string { return fmt.Sprintf("%d|%s|%.12g|%s", f.T, f.Asset, f.Delta, f.Kind) }
 
 // BuildHistory собирает движения, откатывает остатки назад и оценивает их по минутам.
 func (c *Client) BuildHistory(o HistoryOpts) (*History, error) {
@@ -669,6 +745,8 @@ func (c *Client) BuildHistory(o HistoryOpts) (*History, error) {
 			o.Progress(stage, d, t)
 		}
 	}
+	c.hk = histHooks{covered: o.Covered, start: o.Start, done: o.Done, wait: o.Wait}
+	defer func() { c.hk = histHooks{} }()
 	_ = c.SyncTime()
 	prog("остатки", 0, 1)
 	h, warns, err := c.Fetch()
@@ -682,11 +760,26 @@ func (c *Client) BuildHistory(o HistoryOpts) (*History, error) {
 		}
 	}
 
-	var flows []Flow
+	// кеш: счётчики уже известных движений; свежие дописываем только сверх них (хвост окна запрашивается заново целиком)
+	have := map[string]int{}
+	flows := append([]Flow(nil), o.Cached...)
+	for _, f := range o.Cached {
+		have[flowKey(f)]++
+	}
+	add := func(fl []Flow) {
+		for _, f := range fl {
+			if k := flowKey(f); have[k] > 0 {
+				have[k]--
+				continue
+			}
+			flows = append(flows, f)
+		}
+	}
 	collect := func(name string, f func() ([]Flow, error)) {
+		c.hk.stage = name
 		prog(name, 0, 1)
 		got, err := f()
-		flows = append(flows, got...)
+		add(got)
 		if err != nil {
 			warns = append(warns, name+": "+err.Error())
 		}
@@ -728,15 +821,22 @@ func (c *Client) BuildHistory(o HistoryOpts) (*History, error) {
 		}
 	}
 	sort.Strings(scan)
+	c.hk.stage = "сделки"
 	for i, sym := range scan {
 		prog("сделки", i, len(scan))
+		if o.Covered != nil && o.Covered("сделки", sym, 0, 0) { // пара уже просмотрена и лежит в кеше
+			continue
+		}
 		tr, err := c.Trades(sym, syms[sym])
-		flows = append(flows, tr...)
+		add(tr)
 		if err != nil {
 			warns = append(warns, "сделки "+sym+": "+err.Error())
+		} else if o.Done != nil {
+			o.Done("сделки", sym, 0, o.Now.UnixMilli(), tr, false)
 		}
 		c.sleep(120 * time.Millisecond) // myTrades весит 20, лимит 6000 в минуту на IP
 	}
+	prog("сделки", len(scan), len(scan))
 
 	// конечные точки: движения за пределами периода нам не нужны, лишние монеты LD* — зеркала Earn
 	var use []Flow
@@ -747,12 +847,19 @@ func (c *Client) BuildHistory(o HistoryOpts) (*History, error) {
 		use = append(use, f)
 	}
 	res := &History{Flows: len(use), Warnings: warns}
+	for _, f := range use {
+		res.FlowTimes = append(res.FlowTimes, f.T)
+	}
+	sort.Slice(res.FlowTimes, func(i, j int) bool { return res.FlowTimes[i] < res.FlowTimes[j] })
 	if len(use) == 0 {
 		res.Warnings = append(res.Warnings, "движений по счёту не найдено — истории нет")
 		return res, nil
 	}
 	pts, resid := Timeline(nowTotals, use, o.Now.UnixMilli())
 	res.Residual = resid
+	if o.Period != nil {
+		o.Period(res.FlowTimes[0], res.FlowTimes)
+	}
 	for a := range known {
 		res.Assets = append(res.Assets, a)
 	}
@@ -760,6 +867,7 @@ func (c *Client) BuildHistory(o HistoryOpts) (*History, error) {
 
 	g0 := pts[0].T / minute * minute
 	end := o.Now.UnixMilli() / minute * minute
+	c.hk.stage = "цены"
 	s, err := c.Series(pts, g0, end, syms, func(d, t int) { prog("цены", d, t) })
 	if err != nil {
 		return nil, err
@@ -789,4 +897,11 @@ func (c *Client) ExtendSeries(cur Holdings, fromMs, endMs int64) (*SeriesResult,
 		return &SeriesResult{StartMs: g0}, nil
 	}
 	return c.Series([]Point{{T: g0, H: m}}, g0, end, syms, nil)
+}
+
+func min64(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
 }
