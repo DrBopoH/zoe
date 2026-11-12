@@ -50,7 +50,7 @@ func sleepCtx(ctx context.Context, d time.Duration) {
 	}
 }
 
-func (s *Server) runFullCrawler(ctx context.Context, done chan struct{}) {
+func (s *Server) runFullCrawler(ctx context.Context, done chan struct{}, save bool) {
 	s.prog.begin()
 	defer close(done)
 	defer func() {
@@ -86,6 +86,33 @@ func (s *Server) runFullCrawler(ctx context.Context, done chan struct{}) {
 		run(func() { s.crawlBinance(ctx) })
 	}
 	wg.Wait()
+	if save {
+		s.saveToSources(ctx)
+	}
+}
+
+// saveToSources — «Разведать» с галочкой: после обхода снятое с API дописывается в файлы-источники, чтобы кеш всегда
+// восстанавливался с диска, а снятые отрезки заново не качались. Отменённый обход (сброс кеша) ничего не пишет.
+func (s *Server) saveToSources(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
+	s.updateStatus("ЗАПИСЬ В ИСТОЧНИКИ")
+	res, err := s.saveAPISources(nil)
+	var errs []progError
+	if err != nil {
+		errs = append(errs, progError{"Источники", err.Error()})
+	}
+	saved := 0
+	for _, r := range res {
+		if r.Saved {
+			saved++
+		}
+		if r.Error != "" {
+			errs = append(errs, progError{"Источники · " + r.Name, r.Error})
+		}
+	}
+	s.prog.saveDone(saved, errs)
 }
 
 // bankSpec — всё, чем один банковский ключ отличается от другого; сам обход (crawlBank) общий.

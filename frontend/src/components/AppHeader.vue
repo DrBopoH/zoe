@@ -1,13 +1,11 @@
 <script setup>
-import UiButton from './ui/UiButton.vue'
-
 defineProps({
   activeTab: { type: String, required: true },
   isSyncing: { type: Boolean, default: false },
   personsCount: { type: Number, default: 0 }
 })
 
-const emit = defineEmits(['update:activeTab', 'sync'])
+const emit = defineEmits(['update:activeTab'])
 
 const TABS = [
   { key: 'dashboard', label: 'Смета' },
@@ -36,13 +34,6 @@ const TABS = [
           <span v-if="tab.counter" class="text-[9px] px-1.5 py-0.2 bg-slate-900 border border-slate-700 rounded text-slate-400">{{ personsCount }}</span>
         </button>
       </nav>
-    </div>
-
-    <div class="flex items-center gap-3">
-      <UiButton variant="primary" size="lg" :disabled="isSyncing" @click="emit('sync')">
-        <template v-if="isSyncing">РАЗВЕДЫВАЮ...</template>
-        <template v-else>РАЗВЕДАТЬ</template>
-      </UiButton>
     </div>
   </header>
 </template>

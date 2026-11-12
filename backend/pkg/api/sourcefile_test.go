@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -225,4 +226,68 @@ func TestSaveAPIBinanceSeriesRestores(t *testing.T) {
 	if _, _, n := st.BinanceSeriesInfo(); n != 0 {
 		t.Fatal("устаревший ряд не должен попасть в кеш")
 	}
+}
+
+// «Разведать» с галочкой: после обхода снятое с API само попадает в файлы-источники, итог — в результате синка
+func TestAutoSaveAfterSync(t *testing.T) {
+	t.Setenv("ECONOMIC_SOURCES_DIR", t.TempDir())
+	e := newEnv(t)
+	acc := mono.AccountDTO{ID: "acc1", Type: "black", CurrencyCode: 980, Balance: 100, MaskedPan: []string{"5375****1111"}, IBAN: "UA00"}
+	if err := e.st.SaveAccounts([]mono.AccountDTO{acc}, "Ivan"); err != nil {
+		t.Fatal(err)
+	}
+	e.st.SaveTransactions("acc1", []mono.StatementItemDTO{{ID: "t1", Time: 1_700_000_000, Description: "кава", Amount: -5000, OperationAmount: -5000, CurrencyCode: 980}})
+	e.st.AddCoverage("acc1", db.HistoryStart, 1_700_200_000)
+
+	last := func() *syncResult {
+		_, body := post2(t, e.s.HandleGetStatus)
+		var st struct{ Progress struct{ Last *syncResult } }
+		if err := json.Unmarshal(body, &st); err != nil {
+			t.Fatal(err)
+		}
+		return st.Progress.Last
+	}
+
+	e.s.prog.begin()
+	e.s.saveToSources(context.Background())
+	e.s.prog.finish()
+	if l := last(); l == nil || !l.AutoSave || l.Saved != 1 || len(l.Errors) != 0 {
+		t.Fatalf("итог автозаписи: %+v", l)
+	}
+	if list, _ := store().List(); len(list) != 1 || list[0].File.Origin != source.OriginAPI {
+		t.Fatalf("источник должен появиться: %+v", list)
+	}
+
+	// повторная разведка без новых данных: записывать нечего
+	e.s.prog.begin()
+	e.s.saveToSources(context.Background())
+	e.s.prog.finish()
+	if l := last(); l.Saved != 0 || !l.AutoSave {
+		t.Fatalf("тот же снимок второй раз не пишется: %+v", l)
+	}
+
+	// без галочки итог не говорит про автозапись
+	e.s.prog.begin()
+	e.s.prog.finish()
+	if l := last(); l.AutoSave {
+		t.Fatalf("автозапись не запрашивали: %+v", l)
+	}
+
+	// отменённый обход (сброс кеша) ничего не пишет
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	before, _ := store().List()
+	e.s.prog.begin()
+	e.s.saveToSources(ctx)
+	e.s.prog.finish()
+	if after, _ := store().List(); len(after) != len(before) || last().AutoSave {
+		t.Fatal("после отмены запись не нужна")
+	}
+}
+
+func post2(t *testing.T, h http.HandlerFunc) (int, []byte) {
+	t.Helper()
+	w := httptest.NewRecorder()
+	h(w, httptest.NewRequest(http.MethodGet, "/api/sync/status", nil))
+	return w.Code, w.Body.Bytes()
 }
