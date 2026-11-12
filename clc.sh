@@ -367,7 +367,7 @@ cmd_next() {
 }
 
 # ------------------------------------------------ git-инструменты
-is_protected() { [[ $1 =~ ^(dev|build|release)$ ]]; }
+is_protected() { [[ $1 =~ ^(dev|build|fix|release)$ ]]; }
 pushed_head() { git branch -r --contains HEAD 2>/dev/null | grep -q .; }
 has_patches() { compgen -G "$DL/patch*.zip" >/dev/null || [[ -f $DL/backend.zip || -f $DL/frontend.zip ]]; }
 
@@ -654,6 +654,48 @@ cmd_merge() {
 # ./clc.sh done "сводка" [-v R.B] — pr + merge одной командой (фича закончена)
 cmd_done() { cmd_pr "$@"; cmd_merge; }
 
+# ./clc.sh build [a|b|s|m] — срез билда: ветка build = последний именованный коммит dev + аннотированный тег vR.<буква>B.C+T
+#   Версия берётся из именованного коммита dev (C и T не двигаются, буква добавляется): v1.1.20+20.<хэш> → тег v1.b1.20+20.
+#   Исходники не меняются. Перед срезом проверяется, что CI на этом коммите зелёный. По умолчанию буква b (бета).
+#   Если build уже есть, команда доводит тег только когда build стоит ровно на этом коммите; иначе обновление — PR dev → build.
+cmd_build() {
+  need_gh
+  local letter=${1:-b}
+  [[ $letter =~ ^[absm]$ ]] || die "буква состояния: a|b|s|m (по умолчанию b)"
+  [[ -z $(git status --porcelain --untracked-files=no) ]] || die "есть незакоммиченные правки: ./${SELF} commit … или park"
+  git fetch -q --tags origin
+  git rev-parse -q --verify refs/remotes/origin/dev >/dev/null || die "нет origin/dev"
+  local sha subj
+  sha=$(git rev-parse origin/dev)
+  is_named "$sha" || die "вершина dev — не именованный коммит («сводка | vR.B.C+T.хэш»): билд режется только по ним"
+  subj=$(git log -1 --format=%s "$sha")
+  [[ $subj =~ $VER_RE ]] || die "не разобрал версию в «$subj»"
+  local base=${BASH_REMATCH[1]} c=${BASH_REMATCH[2]} t=${BASH_REMATCH[3]} r b
+  [[ $base =~ ^([0-9]+)\.[a-z]?([0-9]+)$ ]] || die "не разобрал R.B из «$base»"
+  r=${BASH_REMATCH[1]}; b=${BASH_REMATCH[2]}
+  local tag="v${r}.${letter}${b}.${c}+${t}"
+  git rev-parse -q --verify "refs/tags/$tag" >/dev/null && die "тег $tag уже есть"
+  local total bad i pend
+  for i in $(seq 1 40); do   # после мержа CI на dev ещё идёт — ждём до ~3,5 минут
+    pend=$(gh api "repos/:owner/:repo/commits/$sha/check-runs" --jq '[.check_runs[] | select(.status != "completed")] | length')
+    total=$(gh api "repos/:owner/:repo/commits/$sha/check-runs" --jq '.total_count')
+    (( total > 0 && pend == 0 )) && break
+    (( i == 1 )) && echo "… жду проверки на ${sha:0:7}"
+    sleep 5
+  done
+  bad=$(gh api "repos/:owner/:repo/commits/$sha/check-runs" --jq '[.check_runs[] | select(.conclusion != "success")] | length')
+  (( total > 0 && bad == 0 )) || die "проверки на ${sha:0:7} не зелёные (не успех: $bad из $total) — билд не режу"
+  if git rev-parse -q --verify refs/remotes/origin/build >/dev/null; then
+    [[ $(git rev-parse origin/build) == "$sha" ]] || die "build уже есть и стоит не на вершине dev: обновление — PR dev → build"
+  else
+    git push -q origin "$sha:refs/heads/build" || die "GitHub не дал создать build (правила ветки). Создай ветку build от dev в вебе и запусти ./${SELF} build ещё раз"
+  fi
+  git tag -a "$tag" -m "${subj%% | v*}" "$sha"
+  git push -q origin "$tag"
+  echo "✓ билд $tag → build @ ${sha:0:7}"
+  echo "  ${subj%% | v*}"
+}
+
 # ./clc.sh publish — запушить текущую wip-ветку на origin (дальше: pr / done)
 cmd_publish() {
   local br; br=$(cur_branch)
@@ -699,6 +741,7 @@ Git
   ./${SELF} pr "сводка" [-v R.B]         push + PR в dev, заголовок = «сводка | vR.B.C+T.хэш»
   ./${SELF} merge                        дождаться проверок → Squash and merge → dev ← origin/dev
   ./${SELF} done "сводка" [-v R.B]       pr + merge (с remote то же делает land и ship … -z)
+  ./${SELF} build [a|b|s|m]              срез билда: ветка build = вершина dev + тег vR.<буква>B.C+T (по умолчанию b — бета)
   ./${SELF} sw <ветка> | drop <ветка> [-f]     перейти / удалить локальную ветку
 Папка загрузок: ZOE_DL=/путь
 EOF
@@ -726,6 +769,7 @@ case "${1:-help}" in
   pr)       shift; cmd_pr "$@" ;;
   merge)    cmd_merge ;;
   done)     shift; cmd_done "$@" ;;
+  build)    shift; cmd_build "$@" ;;
   sw)       shift; cmd_sw "$@" ;;
   drop)     shift; cmd_drop "$@" ;;
   help|-h|--help) cmd_help ;;
