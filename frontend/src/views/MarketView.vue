@@ -7,10 +7,11 @@ import MacroInflationView from './MacroInflationView.vue'
 import MacroFxView from './MacroFxView.vue'
 import MacroUsView from './MacroUsView.vue'
 import MacroUsEconView from './MacroUsEconView.vue'
+import MacroCryptoView from './MacroCryptoView.vue'
 import { useSection } from '../composables/useSection.js'
 import { useMacro } from '../composables/useMacro.js'
 import { toLocalDateStr } from '../utils/formatters.js'
-import { FX_IDS, US_IDS, USECON_IDS } from '../utils/macro.js'
+import { FX_IDS, US_IDS, USECON_IDS, CRYPTO_IDS } from '../utils/macro.js'
 import { MARKET_TREE, MARKET_SECTIONS, isBondSection } from '../utils/marketNav.js'
 
 // Оболочка вкладки «Рынок»: шторка с группами («Ценные бумаги», «Макро») и экран выбранного раздела.
@@ -27,7 +28,8 @@ const macro = useMacro()
 const fx = useMacro(FX_IDS)
 const us = useMacro(US_IDS)
 const econ = useMacro(USECON_IDS)
-const heavy = { fx, fed: us, usecon: econ }
+const crypto = useMacro(CRYPTO_IDS)
+const heavy = { fx, fed: us, usecon: econ, crypto }
 // Таблицы облигаций считают доходность в долларах: нужны курсы и инфляция США (тяжёлые ряды, поэтому только на этих экранах)
 const dollar = computed(() => ({ ...fx.series.value, ...us.series.value }))
 const loadBond = () => { if (!bondSection.value) return; for (const h of [fx, us]) if (!Object.keys(h.series.value).length) h.load() }
@@ -49,5 +51,6 @@ const bondSection = computed(() => (isBondSection(section.value) ? section.value
     <MacroFxView v-else-if="section === 'fx'" :fx="fx.series.value" :macro="macro.series.value" :today="today" :running="running" />
     <MacroUsView v-else-if="section === 'fed'" :us="us.series.value" :macro="macro.series.value" :today="today" :running="running" />
     <MacroUsEconView v-else-if="section === 'usecon'" :econ="econ.series.value" :today="today" :running="running" />
+    <MacroCryptoView v-else-if="section === 'crypto'" :crypto="crypto.series.value" :today="today" :running="running" />
   </div>
 </template>
