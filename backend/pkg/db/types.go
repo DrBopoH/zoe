@@ -58,6 +58,9 @@ type Account struct {
 	IsClosed     bool     `json:"is_closed"`
 	ManualOpened bool     `json:"manual_opened"` // дата задана руками (core.db), синк её не трогает
 	ManualClosed bool     `json:"manual_closed"`
+
+	Manual  bool   `json:"manual"`             // ручной счёт (ICU и т.п.): баланс считается из журнала в core.db
+	BankKey string `json:"bank_key,omitempty"` // бренд ручного счёта (icu)
 }
 
 type Transaction struct {
@@ -79,4 +82,8 @@ type Transaction struct {
 	IsHold          bool    `json:"is_hold"`
 
 	ResolvedUserID string `json:"resolved_user_id,omitempty"` // считается на чтении, в кеш не пишется
+
+	// Перемещение между своими счетами (на ручной счёт и записи его журнала): не доход и не расход.
+	Internal        bool   `json:"internal,omitempty"`
+	LinkedAccountID string `json:"linked_account_id,omitempty"` // куда ушла операция кеша (ручной счёт)
 }

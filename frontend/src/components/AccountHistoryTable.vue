@@ -36,6 +36,7 @@ const totals = computed(() => {
   let income = 0
   let expense = 0
   for (const t of rows.value) {
+    if (t.internal) continue // перевод между своими счетами — не доход и не расход
     if (t.amount >= 0) income += t.amount
     else expense += t.amount
   }
@@ -137,7 +138,9 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
                 </span>
               </td>
               <td class="p-3 max-w-[360px]">
-                <div class="font-bold text-slate-200 truncate">{{ title(t) }}</div>
+                <div class="font-bold text-slate-200 truncate">
+                  <span v-if="t.internal" class="mr-1.5 text-[9px] px-1.5 py-0.5 rounded border font-normal bg-blue-500/15 text-blue-300 border-blue-500/30">ИНВЕСТИЦИЯ</span>{{ title(t) }}
+                </div>
                 <div v-if="subtitle(t)" class="text-[10px] text-slate-500 truncate">{{ subtitle(t) }}</div>
               </td>
               <td class="p-3 whitespace-nowrap">
@@ -148,7 +151,7 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
                 <span v-else class="text-slate-600">—</span>
               </td>
               <td class="p-3 text-right whitespace-nowrap font-bold" :class="tone(t.amount)">
-                {{ money(t.amount, t) }}
+                <span :class="t.internal && 'opacity-60'">{{ money(t.amount, t) }}</span>
                 <span v-if="t.is_hold" class="ml-1 text-[9px] text-amber-400 font-normal">HOLD</span>
               </td>
             </tr>

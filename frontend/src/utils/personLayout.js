@@ -66,6 +66,8 @@ export const detectBankKey = (ibanStr, cacheAcc, pans = []) => {
   const mfo = isIbanLike(norm) ? norm.slice(4, 10) : ''
   const type = (cacheAcc?.type || '').toLowerCase()
 
+  if (cacheAcc?.bank_key === 'icu') return 'icu'
+  if (mfo === '380946') return 'icu' // ICU Trader: IBAN UA67 380946…
   if (mfo === '300335' || mfo === '380805') return 'raif'
   if (mfo === '305299') return 'privat'
   if (mfo === '322001') return 'mono'
@@ -218,7 +220,7 @@ export const buildCacheIndex = (accounts = [], transactions = []) => {
       if (iban) ibanByPan.set(idKey(p), iban)
     })
 
-    const holder = ensure(cleanAccountName(acc.name))
+    const holder = acc.manual ? null : ensure(cleanAccountName(acc.name)) // ручной счёт (ICU) своего алиаса не имеет
     if (holder) {
       if (iban) addLink(holder, iban, '')
       pans.forEach(p => addLink(holder, p, iban))
@@ -334,6 +336,21 @@ export const buildAliasGraph = ({ accounts = [], transactions = [], users = [], 
     n.inCache = true
     n.txCount = c.txCount
     c.links.forEach(l => addRaw(n, l.id, l.parent, { cached: true }))
+  })
+
+  // 3б. частичная карта (414949****48) из статики и полный номер (414949******1748) — одна карта:
+  //     частичная растворяется в полной, если полная в алиасе ровно одна (как в addLink для кэша)
+  nodes.forEach(n => {
+    const all = [...n.raw.values()]
+    all.filter(e => isPartialPan(e.id)).forEach(p => {
+      const fulls = all.filter(f => f !== p && !isPartialPan(f.id) && !isIbanLike(f.id) && sameId(p.id, f.id))
+      if (fulls.length !== 1) return
+      const f = fulls[0]
+      f.persisted = f.persisted || p.persisted
+      f.cached = f.cached || p.cached
+      if (!f.parent && p.parent) f.parent = p.parent
+      n.raw.delete(p.key)
+    })
   })
 
   // 4. эффективная структура: родитель PAN из кэша → из статики; минус баны

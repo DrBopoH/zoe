@@ -634,7 +634,7 @@ func (s *Server) HandleUpdateAccountManual(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) HandleGetAccounts(w http.ResponseWriter, r *http.Request) {
-	accounts, err := s.storage.GetAccounts()
+	accounts, err := s.storage.GetAllAccounts() // счета кеша + ручные (ICU)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -648,7 +648,7 @@ func (s *Server) HandleGetTransactions(w http.ResponseWriter, r *http.Request) {
 	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 && v <= 500000 {
 		limit = v
 	}
-	txs, err := s.storage.GetTransactions(limit)
+	txs, err := s.storage.GetAllTransactions(limit) // кеш + записи журналов ручных счетов
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

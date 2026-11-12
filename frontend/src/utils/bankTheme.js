@@ -30,6 +30,12 @@ const THEMES = {
     tag: 'MONO',
     tagStyle: 'bg-zinc-700/40 text-zinc-200 border-zinc-500/50'
   },
+  icu: {
+    tile: 'bg-gradient-to-br from-blue-700/40 via-blue-950/60 to-slate-950 border-blue-500/60 text-blue-100',
+    panel: 'bg-gradient-to-br from-blue-700/40 via-blue-950/60 to-slate-950 border-blue-500/60 text-blue-100',
+    tag: 'OVDP',
+    tagStyle: 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+  },
   other: {
     tile: 'bg-gradient-to-br from-slate-800 to-slate-950 border-slate-700 text-slate-300',
     panel: 'bg-slate-900/60 border-slate-800 text-slate-200',
@@ -43,6 +49,7 @@ export const bankTheme = (bankKey, type = '') => {
   const t = String(type || '').toLowerCase()
   if (bankKey === 'raif') return THEMES.raif
   if (bankKey === 'privat') return THEMES.privat
+  if (bankKey === 'icu') return THEMES.icu
   if (bankKey === 'mono') {
     if (t === 'fop') return THEMES.fop
     if (t === 'white') return THEMES.white

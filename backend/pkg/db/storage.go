@@ -369,6 +369,9 @@ func (s *Storage) initCore() error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	if err := s.initManual(); err != nil {
+		return fmt.Errorf("manual schema: %w", err)
+	}
 	// ручные даты жизни счёта (NULL — «считай по выписке»)
 	for _, col := range []string{"opened_at INTEGER", "closed_at INTEGER"} {
 		if !hasColumn(s.coreDB, "account_overrides", strings.Fields(col)[0]) {

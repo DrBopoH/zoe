@@ -1,8 +1,9 @@
 <script setup>
-import { ref, watch, inject } from 'vue'
+import { ref, watch, inject, computed } from 'vue'
 import { API_BASE } from '../utils/api.js'
 import UiModal from './ui/UiModal.vue'
 import UiButton from './ui/UiButton.vue'
+import { parseDateText, isoToText, isDateTextOk } from '../utils/dateText.js'
 
 // Ручные даты открытия/закрытия счёта — костыль для банков, которые их не отдают.
 // Хранятся в core.db (переживают снос кеша). Пустое поле = «считать по выписке».
@@ -13,7 +14,7 @@ const props = defineProps({
 const emit = defineEmits(['close'])
 const refresh = inject('refreshData', null)
 
-const toInput = (unix) => (unix ? new Date(unix * 1000).toISOString().slice(0, 10) : '')
+const toInput = (unix) => (unix ? isoToText(new Date(unix * 1000).toISOString().slice(0, 10)) : '')
 const opened = ref('')
 const closed = ref('')
 const busy = ref(false)
@@ -27,15 +28,17 @@ watch(() => props.isOpen, (v) => {
   error.value = ''
 })
 
+const datesOk = computed(() => isDateTextOk(opened.value) && isDateTextOk(closed.value))
+
 const save = async () => {
-  if (!props.account) return
+  if (!props.account || !datesOk.value) return
   busy.value = true
   error.value = ''
   try {
     const res = await fetch(`${API_BASE}/accounts/life`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ account_id: props.account.id, opened: opened.value, closed: closed.value })
+      body: JSON.stringify({ account_id: props.account.id, opened: parseDateText(opened.value) || '', closed: parseDateText(closed.value) || '' })
     })
     if (!res.ok) throw new Error((await res.text()) || res.status)
     if (refresh) await refresh()
@@ -58,7 +61,7 @@ const save = async () => {
 
       <label class="block space-y-1">
         <span class="text-[10px] uppercase tracking-wider text-slate-500">Открыт</span>
-        <input v-model="opened" type="date" class="ui-input w-full" />
+        <input v-model="opened" type="text" inputmode="numeric" placeholder="ДД.ММ.ГГГГ" class="ui-input w-full" :class="!isDateTextOk(opened) && 'ui-input--invalid'" @keyup.enter="save" />
         <span v-if="account && !account.manual_opened && account.opened_at" class="text-[10px] text-slate-600">
           по выписке: {{ toInput(account.opened_at) }}
         </span>
@@ -66,7 +69,7 @@ const save = async () => {
 
       <label class="block space-y-1">
         <span class="text-[10px] uppercase tracking-wider text-slate-500">Закрыт</span>
-        <input v-model="closed" type="date" class="ui-input w-full" />
+        <input v-model="closed" type="text" inputmode="numeric" placeholder="ДД.ММ.ГГГГ" class="ui-input w-full" :class="!isDateTextOk(closed) && 'ui-input--invalid'" @keyup.enter="save" />
         <span class="text-[10px] text-slate-600">пусто — счёт жив (или закроется сам, когда банк перестанет его отдавать)</span>
       </label>
 
@@ -74,7 +77,7 @@ const save = async () => {
 
       <div class="flex justify-end gap-2">
         <UiButton variant="cancel" size="sm" @click="emit('close')">Отмена</UiButton>
-        <UiButton variant="primary" size="sm" :disabled="busy" @click="save">Сохранить</UiButton>
+        <UiButton variant="primary" size="sm" :disabled="busy || !datesOk" @click="save">Сохранить</UiButton>
       </div>
     </div>
   </UiModal>

@@ -98,6 +98,12 @@ func main() {
 	mux.HandleFunc("/api/accounts/credit-limit", server.EnableCORS(server.HandleUpdateCreditLimit))
 	mux.HandleFunc("/api/transactions", server.EnableCORS(server.HandleGetTransactions))
 
+	// Ручные счета (ICU Trader): счёт и журнал в core.db
+	mux.HandleFunc("/api/manual-accounts", server.EnableCORS(server.HandleManualAccounts))
+	mux.HandleFunc("/api/icu/ledger", server.EnableCORS(server.HandleICULedger))
+	mux.HandleFunc("/api/icu/accept", server.EnableCORS(server.HandleICUAccept))
+	mux.HandleFunc("/api/icu/bonds", server.EnableCORS(server.HandleICUBonds))
+
 	// API Роуты Синхронизации и Очистки Кэша
 	mux.HandleFunc("/api/sync/status", server.EnableCORS(server.HandleGetStatus))
 	mux.HandleFunc("/api/sync/full", server.EnableCORS(server.HandleFullHistoricalSync))

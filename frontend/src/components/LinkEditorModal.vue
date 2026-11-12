@@ -11,6 +11,7 @@ import UiIcon from './ui/UiIcon.vue'
 import UiIconButton from './ui/UiIconButton.vue'
 import UiButton from './ui/UiButton.vue'
 import UiDot from './ui/UiDot.vue'
+import IcuBondsEditor from './IcuBondsEditor.vue'
 
 const props = defineProps({
   isOpen: { type: Boolean, default: false },
@@ -32,6 +33,8 @@ const initialTreeJson = ref('')
 const rootAccountInput = ref('')
 const activeParentIban = ref(null)
 const childAccountInput = ref('')
+const activeBondsIban = ref(null) // у счёта ICU вместо карт — форма облигаций
+const isIcuIban = (iban) => !!iban && detectBankKey(iban, null, []) === 'icu'
 
 const LOOSE = ''
 
@@ -97,6 +100,7 @@ watch(
     rootAccountInput.value = ''
     activeParentIban.value = null
     childAccountInput.value = ''
+    activeBondsIban.value = null
   },
   { immediate: true }
 )
@@ -211,7 +215,7 @@ const cardOf = (iban, pans) => {
   const base = acc
     ? prepareAccount(acc)
     : { displayIban: iban ? formatMaskedIBAN(iban) : 'КАРТА', balance: null, theme: bankTheme(detectBankKey(iban || '', null, pans), '') }
-  return { ...base, pans: pans.map(formatMaskedIBAN) }
+  return { ...base, manual: false, pans: pans.map(formatMaskedIBAN) } // карандаш журнала только в Операционной
 }
 const looseCard = (pan) => ({ displayIban: 'КАРТА', balance: null, pans: [formatMaskedIBAN(pan)], theme: bankTheme(detectBankKey('', null, [pan]), '') })
 
@@ -313,6 +317,16 @@ const handleSave = () => {
             />
             <div class="absolute right-2 bottom-2 flex items-center gap-1.5 z-20">
               <UiButton
+                v-if="isIcuIban(parentIban)"
+                :variant="activeBondsIban === parentIban ? 'cancel' : 'outline'"
+                size="sm"
+                title="Облигации счёта ICU"
+                @click="activeBondsIban = activeBondsIban === parentIban ? null : parentIban"
+              >
+                {{ activeBondsIban === parentIban ? 'Скрыть' : 'Облигации' }}
+              </UiButton>
+              <UiButton
+                v-else
                 :variant="activeParentIban === parentIban ? 'cancel' : 'outline'"
                 size="sm"
                 :title="activeParentIban === parentIban ? 'Отменить добавление' : 'Привязать карту к этому IBAN'"
@@ -325,6 +339,9 @@ const handleSave = () => {
           </div>
 
           <div v-else class="px-3 py-1 ui-label">Карты без IBAN</div>
+
+          <!-- Счёт ICU: облигации вместо карт -->
+          <IcuBondsEditor v-if="parentIban && activeBondsIban === parentIban" :iban="parentIban" />
 
           <!-- Ввод карты (PAN) под IBAN -->
           <div v-if="activeParentIban === parentIban" class="ml-5 flex items-center gap-2 pt-0.5 pb-1">

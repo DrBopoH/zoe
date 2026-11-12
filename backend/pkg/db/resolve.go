@@ -216,6 +216,11 @@ func (r *resolver) resolve(counterIBAN, counterName, description string) string 
 			return u
 		}
 	}
+	return r.byAlias[txAliasKey(counterIBAN, counterName, description)] // "" если не найдено
+}
+
+// txAliasKey — алиас контрагента операции: имя, иначе контакт из описания, иначе псевдо-алиас по карте.
+func txAliasKey(counterIBAN, counterName, description string) string {
 	key := aliasKey(cleanPersonName(counterName))
 	if key == "" {
 		key = aliasKey(cleanPersonName(description))
@@ -223,5 +228,5 @@ func (r *resolver) resolve(counterIBAN, counterName, description string) string 
 	if key == "" {
 		key = aliasKey(pseudoCounterName(counterIBAN, description))
 	}
-	return r.byAlias[key] // "" если не найдено
+	return key
 }

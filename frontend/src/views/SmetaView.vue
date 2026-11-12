@@ -35,13 +35,13 @@ const currentMonthTransactions = computed(() => {
 
 const monthlyInflow = computed(() => {
   return currentMonthTransactions.value
-    .filter(t => t.amount > 0)
+    .filter(t => t.amount > 0 && !t.internal)
     .reduce((sum, t) => sum + t.amount, 0)
 })
 
 const monthlyOutflow = computed(() => {
   return currentMonthTransactions.value
-    .filter(t => t.amount < 0)
+    .filter(t => t.amount < 0 && !t.internal)
     .reduce((sum, t) => sum + Math.abs(t.amount), 0)
 })
 
