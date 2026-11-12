@@ -20,12 +20,18 @@ export const SERIES = {
   fed_target: { label: 'ФРС: верх коридора', color: '#34d399', step: true },
   ust_10y: { label: 'Treasury 10 л.', color: '#38bdf8', step: false, thin: true },
   us_cpi_yoy: { label: 'Инфляция США г/г', color: '#fbbf24', step: false },
-  us_cpi_mom: { label: 'Инфляция США м/м', color: '#fb923c', step: false }
+  us_cpi_mom: { label: 'Инфляция США м/м', color: '#fb923c', step: false },
+  us_unrate: { label: 'Безработица США', color: '#38bdf8', step: false },
+  us_gdp: { label: 'Рост ВВП США (в год)', color: '#34d399', step: true },
+  us_spread: { label: 'Кривая: 10 л. − 2 г.', color: '#a78bfa', step: false },
+  us_vix: { label: 'VIX (индекс страха)', color: '#fb923c', step: false },
+  us_sentiment: { label: 'Настроения потребителей', color: '#fbbf24', step: false }
 }
 
 // Ряды по группам: для запроса /macro (ставки и инфляция — малые, курсы — тысячи точек, грузятся отдельно)
 export const MACRO_IDS = ['policy_rate', 'overnight_cd', 'overnight_loans', 'cpi_yoy', 'cpi_mom', 'core_yoy', 'core_mom']
 export const FX_IDS = ['usd_uah', 'eur_uah', 'xau_uah']
+export const USECON_IDS = ['us_unrate', 'us_gdp', 'us_spread', 'us_vix', 'us_sentiment']
 export const US_IDS = ['fed_funds', 'fed_target', 'ust_10y', 'us_cpi_yoy', 'us_cpi_mom']
 
 // Число для оси и подсказки по единице ряда: «%» — процент, «₴»/«$» — деньги (тысячи сокращаются: 183 562 → «184 тыс.»)
@@ -199,3 +205,33 @@ export function buildMacroChart({ series, ids, view, yRange, todayIso, width = 1
     empty: false
   }
 }
+
+// ── Экономика США: сигналы по рядам FRED (чистые функции; подсказки на экране, не советы).
+
+/**
+ * Правило Сам (Sahm): средняя безработица за 3 месяца минус её минимум за последние 12 месяцев (включая текущий).
+ * Рост на 0,5 п. п. и больше исторически совпадал с началом рецессии. Ряд — помесячные точки по возрастанию; меньше 14 точек — null.
+ * Возвращает { value, signal } (value в п. п.).
+ */
+export function sahmRule(points) {
+  const v = (points || []).map((p) => p.v)
+  if (v.length < 14) return null
+  const avg = []
+  for (let i = 2; i < v.length; i++) avg.push((v[i] + v[i - 1] + v[i - 2]) / 3)
+  const last = avg[avg.length - 1]
+  const min = Math.min(...avg.slice(-12))
+  const value = Math.round((last - min) * 100) / 100
+  return { value, signal: value >= 0.5 }
+}
+
+/** Два квартала подряд спада ВВП — «техническая рецессия». Ряд поквартальный; false, если меньше двух точек. */
+export function technicalRecession(points) {
+  const n = (points || []).length
+  return n >= 2 && points[n - 1].v < 0 && points[n - 2].v < 0
+}
+
+/** Состояние кривой доходности (10 л. − 2 г., п. п.): отрицательная — «инвертирована» (исторически опережала рецессии). null — нет данных. */
+export const curveState = (spread) => (spread === null || spread === undefined || !isFinite(spread) ? null : spread < 0 ? 'inverted' : spread < 0.5 ? 'flat' : 'normal')
+
+/** Уровень VIX словами: до 20 спокойно, 20–30 тревожно, выше 30 паника. */
+export const vixLevel = (v) => (v === null || v === undefined || !isFinite(v) ? null : v < 20 ? 'calm' : v <= 30 ? 'nervous' : 'panic')

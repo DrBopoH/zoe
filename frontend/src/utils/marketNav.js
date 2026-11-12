@@ -6,7 +6,8 @@ export const MACRO_SECTIONS = [
   { key: 'rates', label: 'Ставка НБУ', icon: 'rate', feed: 'macro' },
   { key: 'inflation', label: 'Инфляция', icon: 'inflation', feed: 'macro' },
   { key: 'fx', label: 'Курсы', icon: 'fx', feed: 'fx' },
-  { key: 'fed', label: 'Ставка ФРС', icon: 'usa', feed: 'us' }
+  { key: 'fed', label: 'Ставка ФРС', icon: 'usa', feed: 'us' },
+  { key: 'usecon', label: 'Экономика США', icon: 'usa', feed: 'usecon' }
 ]
 
 export const MARKET_TREE = [
@@ -21,7 +22,7 @@ export const MARKET_SECTIONS = leafKeys(MARKET_TREE)
 export const isBondSection = (key) => SOURCES.some((s) => s.key === key)
 export const isMacroSection = (key) => MACRO_SECTIONS.some((s) => s.key === key)
 
-// Какой источник опрашивает кнопка «Обновить» в разделе: бумаги — свой (nbu/ust), ставка и инфляция — общий macro, курсы — fx
+// Какой источник опрашивает кнопка «Обновить» в разделе: бумаги — свой (nbu/ust), ставка и инфляция — общий macro, курсы — fx, ФРС — us, экономика США — usecon
 export const feedOf = (key) => MACRO_SECTIONS.find((s) => s.key === key)?.feed ?? key
 
 // Ключ группы, в которой лежит раздел (null — раздел не в группе)
