@@ -127,3 +127,24 @@ export function candleYRanges(S, view) {
   for (let i = a; i < b; i++) { if (S.L[i] < lo) lo = S.L[i]; if (S.H[i] > hi) hi = S.H[i] }
   return { auto: lo === Infinity ? ext : make(lo, hi), ext }
 }
+
+// ── Время ↔ слоты свечного графика (для слоёв по календарю, например цикла Беннера). Слот s — дробный индекс: s = i — начало i-й свечи.
+// Внутри данных — по реальным стартам корзин; левее и правее — по длине первой/последней корзины.
+const slotMs = (starts, i) => (i + 1 < starts.length ? starts[i + 1] - starts[i] : i > 0 ? starts[i] - starts[i - 1] : 86400000)
+
+/** мс → слот (дробный); starts — отсортированные старты корзин. Пустые starts → null. */
+export function msToSlot(starts, ms) {
+  const n = starts.length
+  if (!n) return null
+  if (ms <= starts[0]) return (ms - starts[0]) / slotMs(starts, 0)
+  const i = Math.min(n - 1, lowerBound(starts, ms + 1) - 1) // последняя корзина, начатая не позже ms
+  return i + (ms - starts[i]) / slotMs(starts, i)
+}
+/** слот → мс (обратное к msToSlot). */
+export function slotToMs(starts, s) {
+  const n = starts.length
+  if (!n) return null
+  if (s <= 0) return starts[0] + s * slotMs(starts, 0)
+  const i = Math.min(n - 1, Math.floor(s))
+  return starts[i] + (s - i) * slotMs(starts, i)
+}
