@@ -1,14 +1,11 @@
 package privat
 
 import (
-	"bytes"
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
-	"html"
 	"io"
 	"math"
-	"os/exec"
 	"regexp"
 	"sort"
 	"strconv"
@@ -17,6 +14,7 @@ import (
 	_ "time/tzdata"
 
 	"economic/pkg/mono"
+	"economic/pkg/pdftext"
 )
 
 // ParsedResult — результат разбора PDF-выписки ПриватБанка.
@@ -92,8 +90,6 @@ var (
 
 	reParty = regexp.MustCompile(`(?:отримувач|платник)\s+(.+?),\s+(?:банк\s+(?:отримувача|платника)|номер\s+картки|\d{4,6}[*Xx]+\d{2,4})`)
 	reFrom  = regexp.MustCompile(`^від\s+(.+)$`)
-
-	bboxTokenRe = regexp.MustCompile(`<page [^>]*>|<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">([^<]*)</word>`)
 )
 
 var footerPrefixes = []string{"Вклади", "Довідка", "Керівник", "Сформовано", "Інформація"}
@@ -124,14 +120,14 @@ func ParsePDF(r io.Reader) (*ParsedResult, error) {
 		return nil, err
 	}
 
-	layoutText, err := pdftotext(raw, "-layout")
+	layoutText, err := pdftext.Run(raw, "-layout")
 	if err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(layoutText) == "" {
 		return nil, fmt.Errorf("empty text extracted from PDF")
 	}
-	bboxText, err := pdftotext(raw, "-bbox")
+	bboxText, err := pdftext.Run(raw, "-bbox")
 	if err != nil {
 		return nil, err
 	}
@@ -233,18 +229,6 @@ func ParsePDF(r io.Reader) (*ParsedResult, error) {
 	return res, nil
 }
 
-func pdftotext(raw []byte, mode string) (string, error) {
-	cmd := exec.Command("pdftotext", mode, "-", "-")
-	cmd.Stdin = bytes.NewReader(raw)
-	var out, stderr bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("pdftotext %s failed: %w: %s", mode, err, strings.TrimSpace(stderr.String()))
-	}
-	return out.String(), nil
-}
-
 func headerMoney(re *regexp.Regexp, text string) (int64, bool) {
 	m := re.FindStringSubmatch(text)
 	if len(m) < 2 {
@@ -275,19 +259,12 @@ func parseCents(s string) (int64, bool) {
 
 func parseBBox(s string) [][]word {
 	var pages [][]word
-	for _, m := range bboxTokenRe.FindAllStringSubmatch(s, -1) {
-		if strings.HasPrefix(m[0], "<page") {
-			pages = append(pages, nil)
-			continue
+	for _, pg := range pdftext.ParseBBox(s) {
+		ws := make([]word, len(pg))
+		for i, w := range pg {
+			ws[i] = word{w.X0, w.Y0, w.X1, w.Y1, w.Text}
 		}
-		if len(pages) == 0 {
-			continue
-		}
-		x0, _ := strconv.ParseFloat(m[1], 64)
-		y0, _ := strconv.ParseFloat(m[2], 64)
-		x1, _ := strconv.ParseFloat(m[3], 64)
-		y1, _ := strconv.ParseFloat(m[4], 64)
-		pages[len(pages)-1] = append(pages[len(pages)-1], word{x0, y0, x1, y1, html.UnescapeString(m[5])})
+		pages = append(pages, ws)
 	}
 	return pages
 }

@@ -27,7 +27,10 @@ const emit = defineEmits(['remove-pan', 'edit'])
       <div class="space-y-1 min-w-0">
         <div class="flex items-center gap-2 min-w-0">
           <UiDot :cached="cached" />
-          <div class="text-sm font-bold truncate tracking-wide">
+          <div
+            class="truncate"
+            :class="card.displayIban === 'КАРТА' ? 'text-sm font-bold tracking-wide opacity-50 select-none' : 'text-sm font-bold tracking-wide'"
+          >
             {{ card.displayIban }}
           </div>
         </div>
@@ -54,7 +57,7 @@ const emit = defineEmits(['remove-pan', 'edit'])
           {{ card.theme.tag }}
         </span>
         <span v-if="card.is_closed" class="ui-closed-tag">Закрыта</span>
-        <UiIconButton v-if="card.manual || card.has_detail" icon="edit" tone="accent" :title="card.bank_key === 'binance' ? 'Портфель' : 'Журнал счёта'" @click.stop="emit('edit')" />
+        <UiIconButton v-if="card.has_detail" icon="edit" tone="accent" :title="card.bank_key === 'binance' ? 'Портфель' : 'Журнал счёта'" @click.stop="emit('edit')" />
       </div>
     </div>
 

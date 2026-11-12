@@ -55,6 +55,9 @@ func maskPAN(card string) string {
 	if card == "" {
 		return "unknown"
 	}
+	if card == "binance" || card == "icu" { // выписка Binance и брокерский отчёт ICU — не карты: своя папка
+		return card
+	}
 	var out string
 	if i := strings.IndexAny(card, "*•xX"); i >= 0 {
 		lead, tail := digitsOf(card[:i]), digitsOf(card[i:])

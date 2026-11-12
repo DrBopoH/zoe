@@ -90,6 +90,19 @@ func (s *Storage) SaveBinanceWindow(stage, key string, fromMs, toMs int64, fl []
 	return tx.Commit()
 }
 
+// DropBinanceSeries сбрасывает минутный ряд оценки (движения и покрытие периодов остаются): новые движения, например из
+// выписки, меняют прошлое, поэтому следующий «Разведать» соберёт ряд заново из кеша движений — дёшево, запросов почти нет.
+func (s *Storage) DropBinanceSeries() error {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	defer s.bump()
+	if _, err := s.cacheDB.Exec(`DELETE FROM binance_minutes`); err != nil {
+		return err
+	}
+	_, err := s.cacheDB.Exec(`DELETE FROM binance_state WHERE k = 'origin'`)
+	return err
+}
+
 // BinanceCovered — период (или пара сделок: from=to=0) уже просмотрен и лежит в кеше.
 func (s *Storage) BinanceCovered(stage, key string, fromMs, toMs int64) bool {
 	var n int

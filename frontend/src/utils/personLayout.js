@@ -221,7 +221,7 @@ export const buildCacheIndex = (accounts = [], transactions = []) => {
       if (iban) ibanByPan.set(idKey(p), iban)
     })
 
-    const holder = acc.manual || acc.bank_key === 'binance' ? null : ensure(cleanAccountName(acc.name)) // ручной счёт (ICU) своего алиаса не имеет
+    const holder = acc.bank_key === 'binance' ? null : ensure(cleanAccountName(acc.name)) // брокерский счёт ICU — обычный счёт: алиас по имени файла отчёта
     if (holder) {
       if (iban) addLink(holder, iban, '')
       pans.forEach(p => addLink(holder, p, iban))
@@ -388,7 +388,8 @@ export const buildAliasGraph = ({ accounts = [], transactions = [], users = [], 
   }
 
   const orphans = Array.from(nodes.values())
-    .filter(n => !n.userId && (n.effective.length > 0 || n.txCount > 0))
+    // алиас файла из кэша виден в бесхозе и без привязок: IBAN брокера ему ставят руками
+    .filter(n => !n.userId && (n.effective.length > 0 || n.txCount > 0 || n.inCache))
 
   return { nodes, cache, isCached, orphans, nodeFor: (alias) => nodes.get(aliasKey(alias)) || null }
 }

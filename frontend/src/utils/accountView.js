@@ -5,12 +5,14 @@ import { bankTheme } from './bankTheme.js'
 // Счёт кэша → данные для <AccountPanel> (как раньше считала Операционная)
 export const prepareAccount = (acc) => {
   const rawIban = acc.iban || acc.account_identifier || acc.name || ''
+  const noIban = acc.bank_key === 'icu' && !acc.iban
   const pans = pansOf(acc).filter(p => p !== rawIban)
   const theme = bankTheme(detectBankKey(rawIban, acc, pans), acc.type)
   return {
     ...acc,
     key: acc.id || acc.iban,
-    displayIban: acc.has_detail && !isIbanLike(rawIban) ? String(rawIban).toUpperCase() : formatMaskedIBAN(rawIban), // «BINANCE», а не Bina****ance
+    // без IBAN в алиасе файла имя счёта не показываем: как у любой карты без IBAN — «КАРТА»
+    displayIban: noIban ? 'КАРТА' : acc.has_detail && !isIbanLike(rawIban) ? String(rawIban).toUpperCase() : formatMaskedIBAN(rawIban), // «BINANCE», а не Bina****ance
     pans: pans.map(formatMaskedIBAN),
     ids: [rawIban, ...pans].filter(x => x && (isIbanLike(x) || isPanLike(x))), // для сопоставления контрагента операций
     theme

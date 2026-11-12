@@ -349,6 +349,195 @@ func (c *Client) Dividends(from, to time.Time) ([]Flow, error) {
 	return out, err
 }
 
+// Окна, за которыми Binance не хранит историю (или сервис не существовал): ось этапа и запросы начинаются не раньше.
+var (
+	futuresBack   = 180 * day                                    // универсальные переводы — только последние 6 месяцев
+	dustSince     = time.Date(2020, 12, 1, 0, 0, 0, 0, time.UTC) // «пыль»: записи только после 2020-12-01
+	solStakeSince = time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)  // стейкинг SOL (BNSOL) запущен в 2024-м
+)
+
+// gridFrom — первое окно сетки (from + k·span), не раньше lim: сетка остаётся той же, поэтому уже просмотренные окна берутся из кеша.
+func gridFrom(from, lim time.Time, span time.Duration) time.Time {
+	if !from.Before(lim) {
+		return from
+	}
+	k := (lim.Sub(from) + span - 1) / span
+	return from.Add(k * span)
+}
+
+// StageStart — с какого момента этап реально запрашивается (для оси в панели): ограничения Binance по глубине истории.
+// Нулевое время — этап без ограничений (идёт с общего начала).
+func StageStart(stage string, from, to time.Time) time.Time {
+	switch stage {
+	case "фьючерсы":
+		return gridFrom(from, to.Add(-futuresBack), 29*day)
+	case "пыль":
+		return gridFrom(from, dustSince, 89*day)
+	case "стейкинг":
+		return gridFrom(from, solStakeSince, 89*day)
+	}
+	return time.Time{}
+}
+
+// FuturesTransfers — переводы Spot ↔ USD-M Futures (универсальные переводы; Binance отдаёт только последние 6 месяцев).
+// Фьючерсный кошелёк в портфель не входит: перевод туда — уход монеты из портфеля, обратно — приход.
+func (c *Client) FuturesTransfers(from, to time.Time) ([]Flow, error) {
+	var out []Flow
+	from = gridFrom(from, to.Add(-futuresBack), 29*day)
+	for _, typ := range []struct {
+		name string
+		sign float64
+	}{{"MAIN_UMFUTURE", -1}, {"UMFUTURE_MAIN", 1}} {
+		err := c.eachWindow(typ.name, from, to, 29*day, &out, func(a, b time.Time) error {
+			for page := 1; ; page++ {
+				body, err := c.do("GET", "/sapi/v1/asset/transfer", url.Values{"type": {typ.name}, "startTime": {ms(a)}, "endTime": {ms(b)}, "current": {strconv.Itoa(page)}, "size": {"100"}}, true)
+				if err != nil {
+					return err
+				}
+				var r struct {
+					Rows []struct {
+						Asset     string
+						Amount    string
+						Status    string
+						Timestamp int64
+					} `json:"rows"`
+				}
+				if err := json.Unmarshal(body, &r); err != nil {
+					return err
+				}
+				for _, d := range r.Rows {
+					if d.Status == "CONFIRMED" {
+						out = append(out, Flow{T: d.Timestamp, Asset: d.Asset, Delta: typ.sign * num(d.Amount), Kind: "futures"})
+					}
+				}
+				if len(r.Rows) < 100 {
+					return nil
+				}
+			}
+		})
+		if err != nil {
+			return out, err
+		}
+	}
+	return out, nil
+}
+
+// Dust — конвертация мелких остатков («пыли») в BNB: монета уходит, BNB (за вычетом комиссии) приходит.
+func (c *Client) Dust(from, to time.Time) ([]Flow, error) {
+	var out []Flow
+	from = gridFrom(from, dustSince, 89*day)
+	err := c.eachWindow("", from, to, 89*day, &out, func(a, b time.Time) error {
+		body, err := c.do("GET", "/sapi/v1/asset/dribblet", url.Values{"startTime": {ms(a)}, "endTime": {ms(b)}, "accountType": {"SPOT"}}, true)
+		if err != nil {
+			return err
+		}
+		var r struct {
+			Events []struct {
+				OperateTime int64 `json:"operateTime"`
+				Details     []struct {
+					Amount      string `json:"amount"`
+					Transfered  string `json:"transferedAmount"`
+					FromAsset   string `json:"fromAsset"`
+					TargetAsset string `json:"targetAsset"`
+					OperateTime int64  `json:"operateTime"`
+				} `json:"userAssetDribbletDetails"`
+			} `json:"userAssetDribblets"`
+		}
+		if err := json.Unmarshal(body, &r); err != nil {
+			return err
+		}
+		for _, e := range r.Events {
+			for _, d := range e.Details {
+				t := d.OperateTime
+				if t == 0 {
+					t = e.OperateTime
+				}
+				target := d.TargetAsset
+				if target == "" {
+					target = "BNB"
+				}
+				out = append(out, Flow{T: t, Asset: d.FromAsset, Delta: -num(d.Amount), Kind: "dust"}, Flow{T: t, Asset: target, Delta: num(d.Transfered), Kind: "dust"})
+			}
+		}
+		return nil
+	})
+	return out, err
+}
+
+// SolStaking — стейкинг SOL: покупка BNSOL за SOL и обратный выкуп.
+func (c *Client) SolStaking(from, to time.Time) ([]Flow, error) {
+	var out []Flow
+	from = gridFrom(from, solStakeSince, 89*day)
+	for _, side := range []struct{ key, path string }{{"stake", "stakingHistory"}, {"redeem", "redemptionHistory"}} {
+		err := c.eachWindow(side.key, from, to, 89*day, &out, func(a, b time.Time) error {
+			for page := 1; ; page++ {
+				body, err := c.do("GET", "/sapi/v1/sol-staking/sol/history/"+side.path, url.Values{"startTime": {ms(a)}, "endTime": {ms(b)}, "current": {strconv.Itoa(page)}, "size": {"100"}}, true)
+				if err != nil {
+					return err
+				}
+				var r struct {
+					Rows []struct {
+						Time             int64
+						ArrivalTime      int64
+						Asset            string
+						Amount           string
+						DistributeAsset  string
+						DistributeAmount string
+						Status           string
+					} `json:"rows"`
+				}
+				if err := json.Unmarshal(body, &r); err != nil {
+					return err
+				}
+				for _, d := range r.Rows {
+					if d.Status != "" && d.Status != "SUCCESS" {
+						continue
+					}
+					tIn := d.Time
+					if d.ArrivalTime > 0 {
+						tIn = d.ArrivalTime // у выкупа монета приходит позже заявки
+					}
+					out = append(out, Flow{T: d.Time, Asset: d.Asset, Delta: -num(d.Amount), Kind: "staking"}, Flow{T: tIn, Asset: d.DistributeAsset, Delta: num(d.DistributeAmount), Kind: "staking"})
+				}
+				if len(r.Rows) < 100 {
+					return nil
+				}
+			}
+		})
+		if err != nil {
+			return out, err
+		}
+	}
+	return out, nil
+}
+
+// mergeStatement: движения из выписки вида «stmt:X» берутся, только если API не отдал то же событие (рядом по времени есть
+// движение вида X из API). Так выписка закрывает то, что API не видит (старше 6 месяцев и т.п.), и ничего не дублирует.
+func mergeStatement(fl []Flow) []Flow {
+	api := map[string][]int64{}
+	for _, f := range fl {
+		if !strings.HasPrefix(f.Kind, "stmt:") {
+			api[f.Kind] = append(api[f.Kind], f.T)
+		}
+	}
+	for _, ts := range api {
+		sort.Slice(ts, func(i, j int) bool { return ts[i] < ts[j] })
+	}
+	out := make([]Flow, 0, len(fl))
+	for _, f := range fl {
+		if k, ok := strings.CutPrefix(f.Kind, "stmt:"); ok {
+			ts := api[k]
+			i := sort.Search(len(ts), func(i int) bool { return ts[i] >= f.T-2000 })
+			if i < len(ts) && ts[i] <= f.T+2000 {
+				continue // то же событие уже есть из API
+			}
+			f.Kind = k
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
 // Sym — торговая пара.
 type Sym struct{ Base, Quote string }
 
@@ -724,13 +913,15 @@ type History struct {
 
 var defaultQuotes = []string{"USDT", "USDC", "FDUSD", "BTC", "ETH", "BNB", "EUR", "UAH"}
 
-var extLabels = map[string]string{"deposit": "депозит", "withdraw": "вывод", "fiat": "покупка картой", "p2p": "P2P", "dividend": "начисление"}
+var extLabels = map[string]string{"deposit": "депозит", "withdraw": "вывод", "fiat": "покупка картой", "p2p": "P2P", "dividend": "начисление", "strategy": "Strategy", "bonus": "бонус"}
 
 // ExtLabel — подпись внешнего движения (депозит, вывод, …); ok == false у внутренних (сделки, комиссии, конвертации).
 func ExtLabel(kind string) (string, bool) { l, ok := extLabels[kind]; return l, ok }
 
 // ExtKinds — виды внешних движений, которые становятся операциями счёта.
-func ExtKinds() []string { return []string{"deposit", "withdraw", "fiat", "p2p", "dividend"} }
+func ExtKinds() []string {
+	return []string{"deposit", "withdraw", "fiat", "p2p", "dividend", "strategy", "bonus"}
+}
 
 // flowKey — отпечаток движения (для слияния кеша с заново запрошенным хвостом).
 func flowKey(f Flow) string { return fmt.Sprintf("%d|%s|%.12g|%s", f.T, f.Asset, f.Delta, f.Kind) }
@@ -790,6 +981,9 @@ func (c *Client) BuildHistory(o HistoryOpts) (*History, error) {
 	collect("покупки картой", func() ([]Flow, error) { return c.FiatBuys(o.From, o.Now) })
 	collect("P2P", func() ([]Flow, error) { return c.P2P(o.From, o.Now) })
 	collect("начисления", func() ([]Flow, error) { return c.Dividends(o.From, o.Now) })
+	collect("фьючерсы", func() ([]Flow, error) { return c.FuturesTransfers(o.From, o.Now) })
+	collect("пыль", func() ([]Flow, error) { return c.Dust(o.From, o.Now) })
+	collect("стейкинг", func() ([]Flow, error) { return c.SolStaking(o.From, o.Now) })
 
 	syms, err := c.Symbols()
 	if err != nil {
@@ -840,7 +1034,7 @@ func (c *Client) BuildHistory(o HistoryOpts) (*History, error) {
 
 	// конечные точки: движения за пределами периода нам не нужны, лишние монеты LD* — зеркала Earn
 	var use []Flow
-	for _, f := range flows {
+	for _, f := range mergeStatement(flows) {
 		if f.Delta == 0 || skipLD(f.Asset) || f.T > o.Now.UnixMilli() {
 			continue
 		}

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,17 +41,19 @@ func (s *Server) binanceFrom() time.Time {
 
 // Этапы Binance: в панели «Разведать» каждый — своя строка-таймлайн (кроме быстрых «остатков»).
 var (
-	rowStages = []string{"депозиты", "выводы", "конвертации", "покупки картой", "P2P", "начисления", "сделки", "цены"}
+	rowStages = []string{"депозиты", "выводы", "конвертации", "покупки картой", "P2P", "начисления", "фьючерсы", "пыль", "стейкинг", "сделки", "цены"}
 	stageName = map[string]string{
 		"остатки": "Остатки и оценка в ₴", "депозиты": "Депозиты", "выводы": "Выводы", "конвертации": "Конвертации",
 		"покупки картой": "Покупки картой", "P2P": "P2P", "начисления": "Начисления", "сделки": "Сделки", "цены": "Минутные цены",
+		"фьючерсы": "Переводы на фьючерсы", "пыль": "Конвертация пыли", "стейкинг": "Стейкинг SOL",
 		"ряд": "Минутный ряд",
 	}
 	// длина окна запроса у этапов, поддерживающих период (Binance ограничивает: 89 или 29 суток) и число обходов
 	stageStep = map[string]struct {
 		days int64
 		mult int
-	}{"депозиты": {89, 1}, "выводы": {89, 1}, "конвертации": {29, 1}, "покупки картой": {29, 1}, "P2P": {29, 2}, "начисления": {89, 1}}
+	}{"депозиты": {89, 1}, "выводы": {89, 1}, "конвертации": {29, 1}, "покупки картой": {29, 1}, "P2P": {29, 2}, "начисления": {89, 1},
+		"фьючерсы": {29, 2}, "пыль": {89, 1}, "стейкинг": {89, 2}}
 )
 
 // crawlBinance — Binance в «Разведать»: клиент в панели прогресса. Пока истории нет — строки по статьям (депозиты, выводы,
@@ -79,6 +82,9 @@ func (s *Server) crawlBinance() {
 			r := &accProg{ID: "binance-" + st, Label: stageName[st], State: "queued", Custom: true, Ahead: st == "сделки"}
 			if sp, ok := stageStep[st]; ok {
 				r.Step, r.Mult = sp.days*86400, sp.mult
+			}
+			if t := binance.StageStart(st, s.binanceFrom(), time.Now()); !t.IsZero() { // Binance не отдаёт историю глубже — ось честная
+				r.AxisFrom = t.Unix()
 			}
 			rows, byStage[st] = append(rows, r), r
 		}
@@ -391,6 +397,9 @@ func (s *Server) valueBinanceTxs(c *binance.Client) {
 	var txs []db.BinanceTx
 	for _, r := range rows {
 		lbl, _ := binance.ExtLabel(r.Kind)
+		if r.Kind == "strategy" { // у перевода есть направление
+			lbl = map[bool]string{true: "возврат из Strategy", false: "перевод в Strategy"}[r.Delta > 0]
+		}
 		uah, err := c.ValueUAH(r.Asset, r.Delta, r.T)
 		if err != nil {
 			log.Printf("[Sync] Binance: %s %s — оценить в ₴ не вышло: %v", lbl, r.Asset, err)
@@ -401,6 +410,28 @@ func (s *Server) valueBinanceTxs(c *binance.Client) {
 	if err := s.storage.SaveBinanceTxs(txs); err != nil {
 		log.Printf("[Sync Error] Binance: операции счёта: %v", err)
 	}
+}
+
+// importBinanceStatement — выписка Binance в общем импорте («Дебаг → Импорт», «Загрузить»): движения, которых нет в API
+// (Strategy, фьючерсы, стейкинг, пыль, кэшбэк), попадают в кеш движений рядом с API-шными; ряд пересоберётся при «Разведать».
+func (s *Server) importBinanceStatement(filename string, raw []byte) (*importResult, error) {
+	flows, _, err := binance.ParseStatement(bytes.NewReader(raw), binance.StatementZone(filename))
+	if err != nil {
+		return nil, &importError{http.StatusBadRequest, "Failed to parse Binance statement: " + err.Error()}
+	}
+	if len(flows) > 0 {
+		from, to := flows[0].T, flows[0].T
+		for _, f := range flows {
+			from, to = min(from, f.T), max(to, f.T)
+		}
+		if err := s.storage.SaveBinanceWindow("выписка", contentHash(raw), from, to, fromBinanceFlows(flows)); err != nil {
+			return nil, &importError{http.StatusInternalServerError, "Failed to save Binance statement: " + err.Error()}
+		}
+		if err := s.storage.DropBinanceSeries(); err != nil {
+			return nil, &importError{http.StatusInternalServerError, "Failed to reset Binance series: " + err.Error()}
+		}
+	}
+	return &importResult{AccountID: db.BinanceAccountID, Card: "binance", Count: len(flows)}, nil
 }
 
 // GET /api/binance — что запомнил кеш: разбор по монетам и пределы минутного ряда. Ничего не опрашивает.

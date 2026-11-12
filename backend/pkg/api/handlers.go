@@ -14,7 +14,9 @@ import (
 	"sync"
 	"time"
 
+	"economic/pkg/binance"
 	"economic/pkg/db"
+	"economic/pkg/icu"
 	"economic/pkg/mono"
 	"economic/pkg/privat"
 	"economic/pkg/raif"
@@ -352,14 +354,20 @@ type importResult struct {
 	Count                 int
 }
 
-// importSource разбирает выписку (PDF Привата / CSV Райфа) и пишет её в кеш-базу.
+// importSource разбирает выписку (PDF Привата / CSV Райфа / выписка Binance / брокерский отчёт ICU) и пишет её в кеш-базу.
 // Общий путь и для загрузки файла в интерфейсе, и для «Загрузить» из кэша источников.
 func (s *Server) importSource(filename string, rawBytes []byte) (*importResult, error) {
 	var accountID, targetIBAN, targetCard, bankType string
 	var balance float64
 	var transactions []mono.StatementItemDTO
 
-	// Автоопределение формата: PDF (Приват) vs CSV (Райф / CSV)
+	// Автоопределение формата: выписка Binance, PDF (Приват) vs CSV (Райф / CSV)
+	if binance.IsStatement(rawBytes) {
+		return s.importBinanceStatement(filename, rawBytes)
+	}
+	if icu.IsReport(rawBytes) {
+		return s.importICUReport(filename, rawBytes)
+	}
 	if bytes.HasPrefix(rawBytes, []byte("%PDF")) || strings.HasSuffix(strings.ToLower(filename), ".pdf") {
 		parsed, err := privat.ParsePDF(bytes.NewReader(rawBytes))
 		if err != nil {

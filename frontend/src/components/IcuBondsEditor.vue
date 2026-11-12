@@ -1,13 +1,13 @@
 <script setup>
-import { ref, watch, inject, computed } from 'vue'
+import { ref, inject, computed } from 'vue'
 import { apiGetJson, apiSend, q } from '../utils/api.js'
 import UiButton from './ui/UiButton.vue'
 import UiIconButton from './ui/UiIconButton.vue'
 import { parseDateText, isoToText } from '../utils/dateText.js'
 
-// Облигации счёта ICU вместо ввода карт: плитка на каждую ОВДП (ISIN, погашение, ставка, номинал).
-// Пишутся сразу (не ждут «Сохранить» алиаса). Покупки/продажи вносятся в журнале счёта.
-const props = defineProps({ iban: { type: String, required: true } })
+// Справочник облигаций вместо ввода карт: плитка на каждую ОВДП (ISIN, погашение, ставка, номинал).
+// В брокерском отчёте этих данных нет; один справочник на всех счетах. Пишется сразу (не ждёт «Сохранить» алиаса).
+// Покупки и продажи берутся из отчёта.
 const refresh = inject('refreshData', null)
 
 const bonds = ref([])
@@ -17,13 +17,13 @@ const busy = ref(false)
 
 const load = async () => {
   try {
-    bonds.value = await apiGetJson(`/icu/bonds?iban=${q(props.iban)}`)
+    bonds.value = await apiGetJson('/icu/bonds')
     error.value = ''
   } catch (e) {
     error.value = String(e.message || e)
   }
 }
-watch(() => props.iban, load, { immediate: true })
+load()
 
 const blank = () => ({ isin: '', name: '', maturity: '', coupon_rate: null, nominal: 1000 })
 // дата в форме — строкой ДД.ММ.ГГГГ; название и номинал (всегда 1000) не спрашиваем
@@ -51,12 +51,12 @@ const run = async (fn) => {
 const save = () => run(async () => {
   const f = form.value
   await apiSend('POST', '/icu/bonds', {
-    iban: props.iban, isin: f.isin.trim().toUpperCase(), name: f.name || '',
+    isin: f.isin.trim().toUpperCase(), name: f.name || '',
     maturity: parseDateText(f.maturity), coupon_rate: Number(f.coupon_rate), nominal: f.nominal || 1000
   })
   form.value = null
 })
-const remove = (b) => run(() => apiSend('DELETE', `/icu/bonds?iban=${q(props.iban)}&isin=${q(b.isin)}`))
+const remove = (b) => run(() => apiSend('DELETE', `/icu/bonds?isin=${q(b.isin)}`))
 
 const fmtDate = (iso) => iso.split('-').reverse().join('.')
 </script>
@@ -64,7 +64,7 @@ const fmtDate = (iso) => iso.split('-').reverse().join('.')
 <template>
   <div class="ml-5 space-y-2 border-l border-blue-500/30 pl-3">
     <div class="flex items-center justify-between">
-      <span class="ui-label">Облигации</span>
+      <span class="ui-label">Справочник облигаций</span>
       <UiButton variant="subtle" size="sm" @click="edit(null)">+ ОВДП</UiButton>
     </div>
 

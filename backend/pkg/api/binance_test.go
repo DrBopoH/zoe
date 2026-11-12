@@ -326,7 +326,7 @@ func TestBinanceResumesFromCachedWindows(t *testing.T) {
 		t.Fatalf("депозит должен лежать в истории операций сразу после периода: %+v", allTx)
 	}
 	accs := s.progressSnapshot().Clients[0].Accounts
-	if accs[0].State != "done" || accs[4].State != "done" || accs[5].State != "error" || accs[7].State != "queued" {
+	if accs[0].State != "done" || accs[4].State != "done" || accs[8].State != "error" || accs[10].State != "queued" {
 		t.Fatalf("после сбоя пройденные строки готовы, упавшая — ошибка, остальные в очереди: %+v", accs)
 	}
 
@@ -459,5 +459,60 @@ func TestBinanceFillGrowsRightToLeft(t *testing.T) {
 	}
 	if av.remaining < 5 || av.remaining > 6 { // осталось ≈ 500 суток слева: 6 окон по 89
 		t.Fatalf("осталось окон: %d", av.remaining)
+	}
+}
+
+// Выписка Binance идёт через общий импорт: движения из неё ложатся в кеш движений рядом с API-шными, ряд сбрасывается и
+// пересобирается при «Разведать»; повторный импорт ничего не задваивает; файл складывается в свою папку кеша источников.
+func TestBinanceStatementViaCommonImport(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	fake := newHistFake(now.Add(-3*time.Hour), now.Add(-2*time.Hour))
+	defer fake.Close()
+	s, st := newBinanceServer(t, fake)
+	s.SetBinanceHistoryFrom(now.Add(-24 * time.Hour))
+	crawlBinanceOnce(s)
+	if _, _, n := st.BinanceSeriesInfo(); n == 0 {
+		t.Fatal("ряд должен быть собран")
+	}
+
+	csvText := "Ідентифікатор користувача,Час,Акаунт,Операція,Монета,Змінити,Примітка\n" +
+		"1," + now.Add(-150*time.Minute).Format("2006-01-02 15:04:05") + ",Spot,Transfer Between Spot and Strategy,USDT,-5,\n" +
+		"1," + now.Add(-150*time.Minute).Format("2006-01-02 15:04:05") + ",Strategy,Transfer Between Spot and Strategy,USDT,5,\n"
+	res, err := s.importSource("Binance-(UTC+0).csv", []byte(csvText))
+	if err != nil || res.Count != 1 {
+		t.Fatalf("импорт: %+v %v", res, err)
+	}
+	if _, err := s.importSource("Binance-(UTC+0).csv", []byte(csvText)); err != nil { // тот же файл ещё раз
+		t.Fatal(err)
+	}
+	var strategy int
+	flows, _ := st.BinanceFlows()
+	for _, f := range flows {
+		if f.Kind == "strategy" {
+			strategy++
+		}
+	}
+	if strategy != 1 {
+		t.Fatalf("повторный импорт не должен задваивать: %d", strategy)
+	}
+	if _, _, n := st.BinanceSeriesInfo(); n != 0 {
+		t.Fatal("после импорта ряд сброшен до пересборки")
+	}
+
+	crawlBinanceOnce(s) // пересборка из кеша: к трём движениям API прибавилось четвёртое
+	_, b := call(t, s.HandleBinance, "GET", "/api/binance", "")
+	var gv struct {
+		Detail struct {
+			History struct {
+				Flows int `json:"flows"`
+			} `json:"history"`
+		} `json:"detail"`
+	}
+	json.Unmarshal(b, &gv)
+	if gv.Detail.History.Flows != 4 {
+		t.Fatalf("движений должно быть 4: %s", b)
+	}
+	if maskPAN("binance") != "binance" {
+		t.Fatalf("папка источников: %s", maskPAN("binance"))
 	}
 }

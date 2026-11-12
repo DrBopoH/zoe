@@ -215,7 +215,7 @@ const cardOf = (iban, pans) => {
   const base = acc
     ? prepareAccount(acc)
     : { displayIban: iban ? formatMaskedIBAN(iban) : 'КАРТА', balance: null, theme: bankTheme(detectBankKey(iban || '', null, pans), '') }
-  return { ...base, manual: false, pans: pans.map(formatMaskedIBAN) } // карандаш журнала только в Операционной
+  return { ...base, has_detail: false, pans: pans.map(formatMaskedIBAN) } // карандаш журнала/портфеля только в Операционной
 }
 const looseCard = (pan) => ({ displayIban: 'КАРТА', balance: null, pans: [formatMaskedIBAN(pan)], theme: bankTheme(detectBankKey('', null, [pan]), '') })
 
@@ -341,7 +341,7 @@ const handleSave = () => {
           <div v-else class="px-3 py-1 ui-label">Карты без IBAN</div>
 
           <!-- Счёт ICU: облигации вместо карт -->
-          <IcuBondsEditor v-if="parentIban && activeBondsIban === parentIban" :iban="parentIban" />
+          <IcuBondsEditor v-if="parentIban && activeBondsIban === parentIban" />
 
           <!-- Ввод карты (PAN) под IBAN -->
           <div v-if="activeParentIban === parentIban" class="ml-5 flex items-center gap-2 pt-0.5 pb-1">

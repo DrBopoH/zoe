@@ -4,24 +4,26 @@ import { formatMoney } from '../utils/formatters.js'
 import CandleChart from '../components/CandleChart.vue'
 import { apiGetJson, q } from '../utils/api.js'
 import { bankTheme } from '../utils/bankTheme.js'
+import { prepareAccount } from '../utils/accountView.js'
+import AccountPanel from '../components/AccountPanel.vue'
 
 const props = defineProps({
   accounts: { type: Array, default: () => [] },
   transactions: { type: Array, default: () => [] }
 })
 
-// Выплаты по облигациям инвестиционных счетов (купоны и погашения) — маркеры на графике и таймлайн вперёд.
+// Выплаты по облигациям брокерских счетов (купоны и погашения) — маркеры на графике и таймлайн вперёд.
 // Счета обновляются вместе с версией данных, поэтому перечитываем при каждой новой загрузке.
-const payEvents = ref([])
+const allPayEvents = ref([])
 watch(() => props.accounts, async (list) => {
-  const manual = (list || []).filter(a => a.manual)
+  const manual = (list || []).filter(a => a.bank_key === 'icu')
   try {
     const all = await Promise.all(manual.map(async a => {
       const ov = await apiGetJson(`/icu/ledger?account_id=${q(a.id)}`)
       const color = bankTheme(a.bank_key || 'icu', a.type).color // маркеры в цвет счёта
-      return (ov.events || []).map(e => ({ ...e, color }))
+      return (ov.events || []).map(e => ({ ...e, color, account_id: a.id }))
     }))
-    payEvents.value = all.flat()
+    allPayEvents.value = all.flat()
   } catch (e) {
     console.error('ICU events error:', e)
   }
@@ -33,9 +35,25 @@ const currentMonth = now.getMonth()
 
 const uahAccounts = computed(() => props.accounts.filter(a => a.currency_code === 980))
 
-const totalValueUAH = computed(() => {
-  return uahAccounts.value.reduce((sum, a) => sum + a.balance, 0)
-})
+// ВРЕМЕННО (отладка графика): слева все счета как в «Операционной», на графике — только выбранные. null — выбраны все,
+// пока ничего не трогали (новые счета во время разведки подхватываются сами).
+const preparedAccounts = computed(() => props.accounts.map(prepareAccount))
+const chosen = ref(null)
+const isChosen = (id) => chosen.value === null || chosen.value.has(id)
+const toggleAcc = (id) => {
+  const next = new Set(chosen.value === null ? props.accounts.map(a => a.id) : chosen.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  chosen.value = next
+}
+const chooseAll = () => { chosen.value = null }
+const chooseNone = () => { chosen.value = new Set() }
+const isUah = (acc) => acc.currency_code === 980
+const chartAccounts = computed(() => uahAccounts.value.filter(a => isChosen(a.id)))
+
+// Капитал на карточке — по всем гривневым счетам; на графике — по выбранным (валютные в ₴-график не входят и раньше)
+const totalValueUAH = computed(() => uahAccounts.value.reduce((sum, a) => sum + a.balance, 0))
+const chartTotalUAH = computed(() => chartAccounts.value.reduce((sum, a) => sum + a.balance, 0))
 
 // Капитал считается по гривневым счетам, значит и динамика/месячные итоги — только по их транзакциям
 // (иначе валютные операции искажают свечи относительно текущего баланса)
@@ -43,11 +61,16 @@ const uahTransactions = computed(() => {
   const ids = new Set(uahAccounts.value.map(a => a.id))
   return props.transactions.filter(t => ids.has(t.account_id))
 })
+const chartIds = computed(() => new Set(chartAccounts.value.map(a => a.id)))
+const chartTransactions = computed(() => uahTransactions.value.filter(t => chartIds.value.has(t.account_id)))
+// Брокерский счёт (ICU): маркеры купонов/погашений и таймлайн вперёд — только по выбранным счетам
+const payEvents = computed(() => allPayEvents.value.filter(e => chartIds.value.has(e.account_id)))
 
 // Операции Binance — обычная история счёта: свечи двигаются по ним сразу, пока разведка идёт. Когда собран минутный ряд
 // оценки, скачки депозитов уже в нём, и график сам перестаёт считать эти операции второй раз (CandleChart, binanceIds).
 const binanceIds = computed(() => new Set(props.accounts.filter(a => a.bank_key === 'binance').map(a => a.id)))
-const binanceIdList = computed(() => [...binanceIds.value])
+// крипто-счёт влияет на график (минутный ряд оценки), только если он выбран
+const binanceIdList = computed(() => [...binanceIds.value].filter(id => chartIds.value.has(id)))
 
 const currentMonthTransactions = computed(() => {
   return uahTransactions.value.filter(t => {
@@ -76,6 +99,7 @@ const monthlyDelta = computed(() => {
 // ── Разбор выбранной свечи (клик по ней): операции корзины, разделённые по счетам/картам. Нужен для отладки графика:
 // сумма операций корзины + вклад Binance должны сходиться с (закрытие − открытие).
 const picked = ref(null)
+watch(chosen, () => { picked.value = null })
 const accById = computed(() => new Map(props.accounts.map(a => [a.id, a])))
 const accTitle = (id) => {
   const a = accById.value.get(id)
@@ -87,7 +111,7 @@ const pickedGroups = computed(() => {
   const p = picked.value
   if (!p) return []
   const by = new Map()
-  for (const t of uahTransactions.value) {
+  for (const t of chartTransactions.value) {
     if (!t.time) continue
     const ms = new Date(t.time).getTime()
     if (ms < p.from || ms >= p.to) continue
@@ -126,7 +150,35 @@ const signed = (v) => (v > 0 ? '+' : '') + formatMoney(v)
       </div>
     </section>
 
-    <CandleChart :transactions="uahTransactions" :binance-ids="binanceIdList" :total-value-u-a-h="totalValueUAH" :events="payEvents" @select="picked = $event" />
+    <div class="grid grid-cols-1 lg:grid-cols-[17rem_minmax(0,1fr)] gap-6 items-start">
+    <!-- ВРЕМЕННО: выбор счетов для графика -->
+    <aside class="space-y-3 font-mono select-none lg:sticky lg:top-4">
+      <div class="flex items-center justify-between text-[10px] uppercase tracking-wider text-slate-500">
+        <span>Счета на графике</span>
+        <span class="flex gap-3">
+          <button class="hover:text-slate-200 underline" @click="chooseAll">все</button>
+          <button class="hover:text-slate-200 underline" @click="chooseNone">никакие</button>
+        </span>
+      </div>
+      <div class="space-y-2 max-h-[70vh] overflow-y-auto pr-1">
+        <div v-for="acc in preparedAccounts" :key="acc.key" :class="!isUah(acc) && 'opacity-40'" :title="isUah(acc) ? '' : 'Не в гривне — в ₴-график не входит'">
+          <AccountPanel
+            :card="acc"
+            compact
+            selectable
+            :selected="isUah(acc) && isChosen(acc.id)"
+            role="checkbox"
+            tabindex="0"
+            :aria-checked="isUah(acc) && isChosen(acc.id)"
+            @click="isUah(acc) && toggleAcc(acc.id)"
+            @keydown.enter.prevent="isUah(acc) && toggleAcc(acc.id)"
+            @keydown.space.prevent="isUah(acc) && toggleAcc(acc.id)"
+          />
+        </div>
+      </div>
+    </aside>
+    <div class="space-y-6 min-w-0">
+    <CandleChart :transactions="chartTransactions" :binance-ids="binanceIdList" :total-value-u-a-h="chartTotalUAH" :events="payEvents" @select="picked = $event" />
 
     <!-- разбор выбранной свечи: операции по картам -->
     <section v-if="picked" class="bg-slate-900/60 border border-slate-800 rounded font-mono text-xs">
@@ -159,5 +211,7 @@ const signed = (v) => (v > 0 ? '+' : '') + formatMoney(v)
         </div>
       </div>
     </section>
+    </div>
+    </div>
   </main>
 </template>

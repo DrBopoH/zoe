@@ -12,15 +12,15 @@ import (
 // Облигации (ОВДП) ручного счёта. В базе лежат только «тела» облигаций (ISIN, погашение, ставка, номинал)
 // и покупки/продажи в журнале. Купоны, погашения, накопленный купон и стоимость позиций считаются на лету.
 
+// Справочник облигаций (ОВДП): ISIN → погашение, ставка, номинал. В брокерском отчёте этих данных нет,
+// поэтому до появления внешнего источника они лежат в core.db — один справочник на всех, без привязки к счёту.
 const bondsSchema = `
-CREATE TABLE IF NOT EXISTS icu_bonds (
-	account_id TEXT NOT NULL,
-	isin TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS bonds (
+	isin TEXT PRIMARY KEY,
 	name TEXT NOT NULL DEFAULT '',
 	maturity TEXT NOT NULL,           -- YYYY-MM-DD
 	coupon_rate REAL NOT NULL,        -- годовая ставка, % (16.44)
-	nominal REAL NOT NULL DEFAULT 1000,
-	PRIMARY KEY (account_id, isin)
+	nominal REAL NOT NULL DEFAULT 1000
 );
 `
 
@@ -32,8 +32,6 @@ const (
 )
 
 type Bond struct {
-	AccountID  string  `json:"account_id"`
-	IBAN       string  `json:"iban,omitempty"` // только во входящих запросах: счёт по IBAN
 	ISIN       string  `json:"isin"`
 	Name       string  `json:"name"`
 	Maturity   string  `json:"maturity"`
@@ -45,10 +43,11 @@ type Bond struct {
 type Position struct {
 	Bond
 	Qty        float64 `json:"qty"`
-	Accrued    float64 `json:"accrued"`     // накопленный купон на одну бумагу
-	Value      float64 `json:"value"`       // qty × (номинал + накопленный купон)
-	NextDate   string  `json:"next_date"`   // ближайшая выплата
-	NextAmount float64 `json:"next_amount"` // на всю позицию (купон; в дату погашения — вместе с номиналом)
+	Accrued    float64 `json:"accrued"`            // накопленный купон на одну бумагу
+	Value      float64 `json:"value"`              // qty × (номинал + накопленный купон); без условий — qty × средняя цена покупки
+	NoTerms    bool    `json:"no_terms,omitempty"` // в справочнике нет ставки и погашения: оценка по себестоимости
+	NextDate   string  `json:"next_date"`          // ближайшая выплата
+	NextAmount float64 `json:"next_amount"`        // на всю позицию (купон; в дату погашения — вместе с номиналом)
 }
 
 // PayEvent — вычисляемая выплата: купон или погашение. Done — уже прошла (деньги в свободных средствах).
@@ -132,7 +131,9 @@ func ComputeState(rows []LedgerRow, bonds []Bond, now time.Time) AccountState {
 		}
 	}
 
+	known := map[string]bool{}
 	for _, b := range bonds {
+		known[b.ISIN] = true
 		mat, err := b.maturityDate()
 		if err != nil || b.Nominal <= 0 {
 			continue
@@ -199,6 +200,39 @@ func ComputeState(rows []LedgerRow, bonds []Bond, now time.Time) AccountState {
 		st.Positions = append(st.Positions, p)
 		st.Balance += p.Value
 	}
+
+	// облигации, которых нет в справочнике: в отчёте брокера ставки и погашения нет — не теряем позицию, а оцениваем
+	// по средней цене покупки; купоны и погашение по ней не считаются, пока не заданы условия
+	type cost struct{ held, bought, spent float64 }
+	byISIN := map[string]*cost{}
+	var unknown []string
+	for _, r := range rows {
+		if r.ISIN == "" || known[r.ISIN] {
+			continue
+		}
+		c := byISIN[r.ISIN]
+		if c == nil {
+			c = &cost{}
+			byISIN[r.ISIN] = c
+			unknown = append(unknown, r.ISIN)
+		}
+		switch r.Kind {
+		case KindBuy:
+			c.held, c.bought, c.spent = c.held+r.Qty, c.bought+r.Qty, c.spent-r.Amount
+		case KindSell:
+			c.held -= r.Qty
+		}
+	}
+	sort.Strings(unknown)
+	for _, isin := range unknown {
+		c := byISIN[isin]
+		if c.held <= 0 || c.bought <= 0 {
+			continue
+		}
+		v := round2(c.held * c.spent / c.bought)
+		st.Positions = append(st.Positions, Position{Bond: Bond{ISIN: isin, Name: "условия не заданы"}, Qty: c.held, Value: v, NoTerms: true})
+		st.Balance += v
+	}
 	sort.SliceStable(st.Events, func(i, j int) bool { return st.Events[i].Date < st.Events[j].Date })
 	st.Cash = round2(st.Cash)
 	st.Balance = round2(st.Balance + st.Cash)
@@ -207,17 +241,23 @@ func ComputeState(rows []LedgerRow, bonds []Bond, now time.Time) AccountState {
 
 // ───────────────────────── хранение ─────────────────────────
 
-func (s *Storage) initManual() error {
-	if _, err := s.coreDB.Exec(manualSchema); err != nil {
-		return err
-	}
+// legacyICUCore — таблицы ручного слоя: ручные счета, журнал и «облигации счёта». Журнал теперь из отчёта (cache.db),
+// облигации — общий справочник. Старые таблицы не удаляются (core.db — данные пользователя), а переименовываются.
+var legacyICUCore = []string{"icu_bonds", "icu_ledger", "manual_accounts"}
+
+func (s *Storage) initICU() error {
 	if _, err := s.coreDB.Exec(bondsSchema); err != nil {
 		return err
 	}
-	// журнал мог быть создан в фазе 1 без isin/qty
-	for _, col := range []string{"isin TEXT NOT NULL DEFAULT ''", "qty REAL NOT NULL DEFAULT 0"} {
-		if !hasColumn(s.coreDB, "icu_ledger", strings.Fields(col)[0]) {
-			if _, err := s.coreDB.Exec(`ALTER TABLE icu_ledger ADD COLUMN ` + col); err != nil {
+	if tableExists(s.coreDB, "icu_bonds") {
+		if _, err := s.coreDB.Exec(`INSERT OR IGNORE INTO bonds(isin, name, maturity, coupon_rate, nominal)
+			SELECT isin, name, maturity, coupon_rate, nominal FROM icu_bonds ORDER BY account_id`); err != nil {
+			return err
+		}
+	}
+	for _, t := range legacyICUCore {
+		if tableExists(s.coreDB, t) && !tableExists(s.coreDB, t+"_legacy") {
+			if _, err := s.coreDB.Exec(`ALTER TABLE ` + t + ` RENAME TO ` + t + `_legacy`); err != nil {
 				return err
 			}
 		}
@@ -225,14 +265,8 @@ func (s *Storage) initManual() error {
 	return nil
 }
 
-func (s *Storage) ListBonds(accountID string) ([]Bond, error) {
-	q := `SELECT account_id, isin, name, maturity, coupon_rate, nominal FROM icu_bonds`
-	args := []any{}
-	if accountID != "" {
-		q += ` WHERE account_id = ?`
-		args = append(args, accountID)
-	}
-	rows, err := s.coreDB.Query(q+` ORDER BY maturity, isin`, args...)
+func (s *Storage) ListBonds() ([]Bond, error) {
+	rows, err := s.coreDB.Query(`SELECT isin, name, maturity, coupon_rate, nominal FROM bonds ORDER BY maturity, isin`)
 	if err != nil {
 		return nil, err
 	}
@@ -240,7 +274,7 @@ func (s *Storage) ListBonds(accountID string) ([]Bond, error) {
 	list := []Bond{}
 	for rows.Next() {
 		var b Bond
-		if err := rows.Scan(&b.AccountID, &b.ISIN, &b.Name, &b.Maturity, &b.CouponRate, &b.Nominal); err != nil {
+		if err := rows.Scan(&b.ISIN, &b.Name, &b.Maturity, &b.CouponRate, &b.Nominal); err != nil {
 			return nil, err
 		}
 		list = append(list, b)
@@ -270,41 +304,38 @@ func (s *Storage) SaveBond(b Bond) (Bond, error) {
 	if b.Nominal < 0 {
 		return b, errors.New("номинал должен быть положительным")
 	}
-	if _, err := s.manualAccount(b.AccountID); err != nil {
-		return b, err
-	}
 	defer s.bump()
 	s.coreMu.Lock()
 	defer s.coreMu.Unlock()
 	_, err = s.coreDB.Exec(`
-		INSERT INTO icu_bonds(account_id, isin, name, maturity, coupon_rate, nominal) VALUES(?,?,?,?,?,?)
-		ON CONFLICT(account_id, isin) DO UPDATE SET name=excluded.name, maturity=excluded.maturity,
+		INSERT INTO bonds(isin, name, maturity, coupon_rate, nominal) VALUES(?,?,?,?,?)
+		ON CONFLICT(isin) DO UPDATE SET name=excluded.name, maturity=excluded.maturity,
 			coupon_rate=excluded.coupon_rate, nominal=excluded.nominal`,
-		b.AccountID, b.ISIN, b.Name, b.Maturity, b.CouponRate, b.Nominal)
+		b.ISIN, b.Name, b.Maturity, b.CouponRate, b.Nominal)
 	return b, err
 }
 
-// DeleteBond удаляет облигацию; нельзя, пока в журнале есть покупки/продажи по ней.
-func (s *Storage) DeleteBond(accountID, isin string) error {
+// DeleteBond удаляет облигацию из справочника; нельзя, пока в журнале есть покупки/продажи по ней.
+func (s *Storage) DeleteBond(isin string) error {
 	var n int
-	_ = s.coreDB.QueryRow(`SELECT COUNT(*) FROM icu_ledger WHERE account_id = ? AND isin = ?`, accountID, isin).Scan(&n)
+	_ = s.cacheDB.QueryRow(`SELECT COUNT(*) FROM icu_flows WHERE isin = ?`, isin).Scan(&n)
 	if n > 0 {
-		return fmt.Errorf("по %s есть %d записей в журнале — сначала удалите их", isin, n)
+		return fmt.Errorf("по %s есть %d записей в журнале счёта — облигацию удалить нельзя", isin, n)
 	}
 	defer s.bump()
 	s.coreMu.Lock()
 	defer s.coreMu.Unlock()
-	_, err := s.coreDB.Exec(`DELETE FROM icu_bonds WHERE account_id = ? AND isin = ?`, accountID, isin)
+	_, err := s.coreDB.Exec(`DELETE FROM bonds WHERE isin = ?`, isin)
 	return err
 }
 
-// accountState — состояние ручного счёта на сейчас.
+// accountState — состояние брокерского счёта на сейчас.
 func (s *Storage) accountState(accountID string) (AccountState, error) {
 	rows, err := s.loadLedger(accountID)
 	if err != nil {
 		return AccountState{}, err
 	}
-	bonds, err := s.ListBonds(accountID)
+	bonds, err := s.ListBonds()
 	if err != nil {
 		return AccountState{}, err
 	}

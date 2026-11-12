@@ -60,6 +60,8 @@ const alignDown = (ms, step) => { const ds = dayStartOf(ms); return ds + Math.fl
 
 // Минутный ряд Binance (восстановленная история): первая/последняя минута, есть ли он вообще
 const bnInfo = ref({ has: false, first: 0, last: 0 })
+// ряд оценки участвует в графике, только если Binance среди выбранных счетов
+const bnHas = computed(() => props.binanceIds.length > 0 && bnInfo.value.has)
 const bnData = ref(null) // свечи оценки Binance под текущие корзины: { has, last_value, candles, sig }
 let bnToken = 0
 const loadBnInfo = async () => {
@@ -78,7 +80,7 @@ const minTimeMs = computed(() => {
     const v = new Date(t.time).getTime()
     if (m === null || v < m) m = v
   }
-  if (bnInfo.value.has && bnInfo.value.first) {
+  if (bnHas.value && bnInfo.value.first) {
     const f = bnInfo.value.first * 1000
     if (m === null || f < m) m = f
   }
@@ -117,7 +119,7 @@ const requestBn = () => {
   clearTimeout(bnTimer)
   bnTimer = setTimeout(async () => {
     const starts = bucketStarts.value
-    if (!starts.length || !bnInfo.value.has) { bnData.value = null; return }
+    if (!starts.length || !bnHas.value) { bnData.value = null; return }
     const my = ++bnToken
     const tfAt = tfId.value
     try {
@@ -127,7 +129,7 @@ const requestBn = () => {
     } catch { if (my === bnToken) bnData.value = null }
   }, 120)
 }
-watch([bucketStarts, () => props.totalValueUAH, () => bnInfo.value.has], requestBn)
+watch([bucketStarts, () => props.totalValueUAH, bnHas], requestBn)
 watch(() => props.transactions, loadBnInfo)
 onMounted(() => { loadBnInfo() })
 onBeforeUnmount(() => clearTimeout(bnTimer))
@@ -144,7 +146,7 @@ const bucketCandles = computed(() => {
   const n = starts.length
   if (n === 0) return []
 
-  const bn = bnData.value && bnData.value.n === n && bnData.value.tf === tfId.value && bnInfo.value.has ? bnData.value : null
+  const bn = bnData.value && bnData.value.n === n && bnData.value.tf === tfId.value && bnHas.value ? bnData.value : null
   const skip = bn ? new Set(props.binanceIds) : null // ряд оценки есть — операции Binance не считаем второй раз
   const groups = Array.from({ length: n }, () => [])
   props.transactions.forEach(t => {

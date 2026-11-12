@@ -59,8 +59,7 @@ type Account struct {
 	ManualOpened bool     `json:"manual_opened"` // дата задана руками (core.db), синк её не трогает
 	ManualClosed bool     `json:"manual_closed"`
 
-	Manual    bool   `json:"manual"`               // ручной счёт (ICU и т.п.): баланс считается из журнала в core.db
-	BankKey   string `json:"bank_key,omitempty"`   // бренд ручного счёта (icu) или внешнего источника (binance)
+	BankKey   string `json:"bank_key,omitempty"`   // бренд счёта-«не банка»: icu (брокерский отчёт) или binance
 	HasDetail bool   `json:"has_detail,omitempty"` // у счёта есть своя модалка (журнал ICU, портфель Binance)
 }
 
@@ -84,7 +83,7 @@ type Transaction struct {
 
 	ResolvedUserID string `json:"resolved_user_id,omitempty"` // считается на чтении, в кеш не пишется
 
-	// Перемещение между своими счетами (на ручной счёт и записи его журнала): не доход и не расход.
+	// Перемещение между своими счетами (на брокерский счёт и записи его журнала): не доход и не расход.
 	Internal        bool   `json:"internal,omitempty"`
-	LinkedAccountID string `json:"linked_account_id,omitempty"` // куда ушла операция кеша (ручной счёт)
+	LinkedAccountID string `json:"linked_account_id,omitempty"` // куда ушла операция кеша (брокерский счёт)
 }

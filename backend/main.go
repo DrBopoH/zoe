@@ -116,10 +116,8 @@ func main() {
 	mux.HandleFunc("/api/accounts/credit-limit", server.EnableCORS(server.HandleUpdateCreditLimit))
 	mux.HandleFunc("/api/transactions", server.EnableCORS(server.HandleGetTransactions))
 
-	// Ручные счета (ICU Trader): счёт и журнал в core.db
-	mux.HandleFunc("/api/manual-accounts", server.EnableCORS(server.HandleManualAccounts))
+	// Брокерский счёт ICU: журнал из отчёта (только чтение) и справочник облигаций
 	mux.HandleFunc("/api/icu/ledger", server.EnableCORS(server.HandleICULedger))
-	mux.HandleFunc("/api/icu/accept", server.EnableCORS(server.HandleICUAccept))
 	mux.HandleFunc("/api/icu/bonds", server.EnableCORS(server.HandleICUBonds))
 
 	// Binance (только чтение кеша; обновляется через «Разведать»)

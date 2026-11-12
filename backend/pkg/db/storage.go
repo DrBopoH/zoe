@@ -148,6 +148,7 @@ func (s *Storage) initCache() error {
 		`CREATE INDEX IF NOT EXISTS idx_tx_account ON transactions(account_id)`,
 		coverageSchema,
 		binanceCacheSchema,
+		icuCacheSchema,
 	}
 	for _, q := range stmts {
 		if _, err := s.cacheDB.Exec(q); err != nil {
@@ -370,8 +371,8 @@ func (s *Storage) initCore() error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	if err := s.initManual(); err != nil {
-		return fmt.Errorf("manual schema: %w", err)
+	if err := s.initICU(); err != nil {
+		return fmt.Errorf("icu schema: %w", err)
 	}
 	if err := s.dropLegacyBinanceCore(); err != nil {
 		return fmt.Errorf("drop legacy binance tables: %w", err)
@@ -398,7 +399,7 @@ func (s *Storage) WipeCache() error {
 	if _, err := s.cacheDB.Exec(`DELETE FROM transactions`); err != nil {
 		return err
 	}
-	for _, t := range []string{"sync_coverage", "binance_minutes", "binance_state", "binance_flows", "binance_coverage", "accounts"} {
+	for _, t := range []string{"sync_coverage", "binance_minutes", "binance_state", "binance_flows", "binance_coverage", "icu_flows", "accounts"} {
 		if _, err := s.cacheDB.Exec(`DELETE FROM ` + t); err != nil {
 			return err
 		}

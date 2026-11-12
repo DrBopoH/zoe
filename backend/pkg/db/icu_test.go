@@ -1,7 +1,7 @@
 package db
 
 import (
-	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,43 +9,52 @@ import (
 )
 
 const (
-	icuIban  = "UA503220010000026009000000001"
-	icuAlias = "ТОВ «ІНВЕСТИЦІЙНИЙ КАПІТАЛ УКРАЇНА»"
+	icuIban   = "UA673809460000000000000005004"       // IBAN брокерского счёта: в отчёте его нет, его знает только пользователь
+	icuAlias  = "ТОВ «ІНВЕСТИЦІЙНИЙ КАПІТАЛ УКРАЇНА»" // контрагент в выписке Райфа
+	icuFile   = "ОВГЗ Тест.pdf"                       // имя файла отчёта = алиас счёта
+	icuAccID  = "icu_2610210000"
+	icuOpened = "БО-261021-0000"
 )
-
-// три реальных перевода с Raif на ICU: у банка нет IBAN контрагента, только имя
-func seedICU(t *testing.T, s *Storage) ManualAccount {
-	t.Helper()
-	acc, err := s.SaveManualAccount(ManualAccount{Name: "ICU Trader", IBAN: icuIban})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.SaveImportedAccount(mono.AccountDTO{ID: "raif_" + ibRaif, IBAN: ibRaif, Type: "raif"}, "Петро Іваненко.csv"); err != nil {
-		t.Fatal(err)
-	}
-	seedICUTransfers(t, s)
-	return acc
-}
 
 func ts(y int, m time.Month, d, h int) int64 {
 	return time.Date(y, m, d, h, 0, 0, 0, time.Local).Unix()
 }
 
-func seedICUTransfers(t *testing.T, s *Storage) {
+// отчёт: три пополнения и три покупки (как в реальном образце), открытие счёта 21.10.2026
+func reportRows() []LedgerRow {
+	return []LedgerRow{
+		{ID: "op|23.10.2026|deposit|204858|1", Time: ts(2026, 10, 23, 12), Kind: KindDeposit, Amount: 2048.58, Note: "Зарахування ГК"},
+		{ID: "ord:ЗМФ-261023-1269", Time: ts(2026, 10, 23, 12), Kind: KindBuy, Amount: -2048.58, ISIN: "UA4000239131", Qty: 2},
+		{ID: "op|30.10.2026|deposit|103244|1", Time: ts(2026, 10, 30, 12), Kind: KindDeposit, Amount: 1032.44, Note: "Зарахування ГК"},
+		{ID: "ord:ЗМФ-261030-1981", Time: ts(2026, 10, 30, 12), Kind: KindBuy, Amount: -1032.44, ISIN: "UA4000239081", Qty: 1},
+		{ID: "op|05.11.2026|deposit|207112|1", Time: ts(2026, 11, 5, 12), Kind: KindDeposit, Amount: 2071.12, Note: "Зарахування ГК"},
+		{ID: "ord:ЗМФ-261105-2320", Time: ts(2026, 11, 6, 12), Kind: KindBuy, Amount: -2071.12, ISIN: "UA4000239081", Qty: 2},
+	}
+}
+
+// как это делает importICUReport: счёт из отчёта (имя = имя файла) + журнал
+func seedReport(t *testing.T, s *Storage) {
 	t.Helper()
+	if err := s.SaveImportedAccount(mono.AccountDTO{ID: icuAccID, Type: ICUAccountType, CurrencyCode: 980}, icuFile); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveICUFlows(icuAccID, ts(2026, 10, 21, 12), reportRows()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// три реальных перевода с Raif на ICU: у банка нет IBAN контрагента, только имя
+func seedRaifTransfers(t *testing.T, s *Storage) {
+	t.Helper()
+	if err := s.SaveImportedAccount(mono.AccountDTO{ID: "raif_" + ibRaif, IBAN: ibRaif, Type: "raif"}, "Петро Іваненко.csv"); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.SaveTransactions("raif_"+ibRaif, []mono.StatementItemDTO{
 		{ID: "x1", Time: ts(2026, 10, 23, 12), Amount: -204858, CounterName: icuAlias, CurrencyCode: 980},
 		{ID: "x2", Time: ts(2026, 10, 30, 12), Amount: -103244, CounterName: icuAlias, CurrencyCode: 980},
 		{ID: "x3", Time: ts(2026, 11, 5, 12), Amount: -207112, CounterName: icuAlias, CurrencyCode: 980},
 		{ID: "x4", Time: ts(2026, 11, 6, 12), Amount: -50000, CounterName: "Магазин", CurrencyCode: 980},
 	}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func linkICU(t *testing.T, s *Storage) {
-	t.Helper()
-	if err := s.LinkAccount("", icuAlias, icuIban, ""); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -59,313 +68,254 @@ func txByID(list []Transaction, id string) (Transaction, bool) {
 	return Transaction{}, false
 }
 
-func near(a, b float64) bool { return math.Abs(a-b) < 0.005 }
-
-func TestICUAccountAndBalance(t *testing.T) {
-	s, _, _ := newS(t)
-	acc, err := s.SaveManualAccount(ManualAccount{Name: "ICU Trader", IBAN: icuIban})
+func icuAccount(t *testing.T, s *Storage) Account {
+	t.Helper()
+	accs, err := s.GetAllAccounts()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if acc.Type != "invest" || acc.BankKey != "icu" || acc.Currency != 980 {
-		t.Fatalf("defaults: %+v", acc)
-	}
-	if _, err := s.SaveManualAccount(ManualAccount{Name: "X", IBAN: "не iban"}); err == nil {
-		t.Fatal("bad IBAN accepted")
-	}
-	// знак задаёт вид записи: вывод вводится положительным числом
-	mustLedger := func(kind string, amount float64, day int) LedgerRow {
-		r, err := s.SaveLedgerRow(LedgerRow{AccountID: acc.ID, Time: ts(2026, 10, day, 12), Kind: kind, Amount: amount})
-		if err != nil {
-			t.Fatal(err)
+	for _, a := range accs {
+		if a.Type == ICUAccountType {
+			return a
 		}
-		return r
 	}
-	mustLedger(KindDeposit, 100.50, 1)
-	w := mustLedger(KindWithdraw, 30, 2)
-	if w.Amount != -30 {
-		t.Fatalf("withdraw must be negative: %v", w.Amount)
-	}
-	mustLedger(KindAdjust, -0.5, 3)
-	if _, err := s.SaveLedgerRow(LedgerRow{AccountID: acc.ID, Time: 1, Kind: "buy", Amount: 1}); err == nil {
-		t.Fatal("unknown kind accepted")
-	}
-	if _, err := s.SaveLedgerRow(LedgerRow{AccountID: acc.ID, Time: 1, Kind: KindDeposit, Amount: 0}); err == nil {
-		t.Fatal("zero amount accepted")
-	}
+	t.Fatalf("счёта ICU нет: %+v", accs)
+	return Account{}
+}
 
-	all, err := s.GetAllAccounts()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got *Account
-	for i := range all {
-		if all[i].ID == acc.ID {
-			got = &all[i]
-		}
-	}
-	if got == nil || !got.Manual || got.BankKey != "icu" || !near(got.Balance, 70) || got.IBAN != icuIban {
-		t.Fatalf("manual account in list: %+v", got)
-	}
-	// кеш можно стирать — ручной счёт и журнал остаются
-	if err := s.WipeCache(); err != nil {
-		t.Fatal(err)
-	}
-	all, _ = s.GetAllAccounts()
-	if len(all) != 1 || !near(all[0].Balance, 70) {
-		t.Fatalf("after wipe: %+v", all)
-	}
-	// удаление записи и счёта
-	if err := s.DeleteLedgerRow(w.ID); err != nil {
-		t.Fatal(err)
-	}
-	all, _ = s.GetAllAccounts()
-	if !near(all[0].Balance, 100) {
-		t.Fatalf("after delete row: %+v", all[0])
-	}
-	if err := s.DeleteManualAccount(acc.ID); err != nil {
-		t.Fatal(err)
-	}
-	if all, _ = s.GetAllAccounts(); len(all) != 0 {
-		t.Fatalf("account not deleted: %+v", all)
-	}
-	if rows, _ := s.loadLedger(""); len(rows) != 0 {
-		t.Fatalf("ledger not deleted: %+v", rows)
+func TestICUAccountIDFromContract(t *testing.T) {
+	if got := ICUAccountID("БО-261021-0058"); got != "icu_2610210058" {
+		t.Fatal(got)
 	}
 }
 
-// Без связи алиас → IBAN ICU переводы остаются обычными расходами; со связью — внутренние.
-func TestICURecognitionOnlyViaAliasLink(t *testing.T) {
+// Счёт и журнал — кеш: сброс кеша стирает их, «Загрузить» восстанавливает; core.db не трогается.
+func TestICUIsCacheAndWipeClearsIt(t *testing.T) {
 	s, _, _ := newS(t)
-	acc := seedICU(t, s)
-
-	txs, err := s.GetAllTransactions(1000)
-	if err != nil {
+	seedReport(t, s)
+	if _, err := s.SaveBond(bond081); err != nil {
 		t.Fatal(err)
 	}
-	for _, x := range txs {
-		if x.Internal || x.LinkedAccountID != "" {
-			t.Fatalf("no link yet, but %s is internal", x.ID)
-		}
+	if err := s.LinkAccount("", icuFile, icuIban, ""); err != nil {
+		t.Fatal(err)
 	}
+	a := icuAccount(t, s)
+	if a.BankKey != "icu" || !a.HasDetail || a.OpenedAt != ts(2026, 10, 21, 12) {
+		t.Fatalf("счёт: %+v", a)
+	}
+	if err := s.WipeCache(); err != nil {
+		t.Fatal(err)
+	}
+	if accs, _ := s.GetAllAccounts(); len(accs) != 0 {
+		t.Fatalf("после сброса кеша счетов быть не должно: %+v", accs)
+	}
+	if rows, _ := s.loadLedger(""); len(rows) != 0 {
+		t.Fatalf("журнал — кеш, должен стереться: %+v", rows)
+	}
+	if b, _ := s.ListBonds(); len(b) != 1 {
+		t.Fatal("справочник облигаций — core, сброс кеша его не трогает")
+	}
+	// привязка алиаса в core пережила сброс: после «Загрузить» IBAN вернётся сам
+	seedReport(t, s)
+	if got := icuAccount(t, s).IBAN; got != icuIban {
+		t.Fatalf("IBAN после повторной загрузки: %q", got)
+	}
+}
 
-	linkICU(t, s)
+func TestICUFlowsAreIdempotent(t *testing.T) {
+	s, _, _ := newS(t)
+	seedReport(t, s)
+	seedReport(t, s) // тот же (или перекрывающийся) отчёт повторно
+	if rows, _ := s.loadLedger(icuAccID); len(rows) != 6 {
+		t.Fatalf("записей %d, ждали 6", len(rows))
+	}
+}
+
+// IBAN в отчёте нет: счёт получает его только из алиаса с именем файла — пути core.db, как у любого счёта.
+func TestICUIBANComesOnlyFromFileAlias(t *testing.T) {
+	s, _, _ := newS(t)
+	seedReport(t, s)
+	if got := icuAccount(t, s).IBAN; got != "" {
+		t.Fatalf("до привязки IBAN быть не должно: %q", got)
+	}
+	// алиас контрагента из выписки Райфа — другое имя: счётом не становится
+	if err := s.LinkAccount("", icuAlias, icuIban, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := icuAccount(t, s).IBAN; got != "" {
+		t.Fatalf("чужой алиас не даёт счёту IBAN: %q", got)
+	}
+	// IBAN не банка ICU к алиасу файла — тоже не счёт ICU
+	if err := s.LinkAccount("", icuFile, "UA583003350000000026001234567", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := icuAccount(t, s).IBAN; got != "" {
+		t.Fatalf("IBAN чужого банка: %q", got)
+	}
+	// второй алиас на тот же IBAN: файл становится «вторым алиасом» счёта, первый (контрагент) остаётся
+	if err := s.LinkAccount("", icuFile, icuIban, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := icuAccount(t, s).IBAN; got != icuIban {
+		t.Fatalf("IBAN: %q", got)
+	}
+}
+
+func TestICUTransferRecognitionViaAliasLinks(t *testing.T) {
+	s, _, _ := newS(t)
+	seedReport(t, s)
+	seedRaifTransfers(t, s)
+
+	txs, _ := s.GetAllTransactions(1000)
+	if x, _ := txByID(txs, "x1"); x.Internal {
+		t.Fatal("без привязок перевод — обычный расход")
+	}
+	// привязали IBAN к алиасу файла и к алиасу контрагента
+	if err := s.LinkAccount("", icuFile, icuIban, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.LinkAccount("", icuAlias, icuIban, ""); err != nil {
+		t.Fatal(err)
+	}
 	txs, _ = s.GetAllTransactions(1000)
 	for _, id := range []string{"x1", "x2", "x3"} {
-		x, ok := txByID(txs, id)
-		if !ok || !x.Internal || x.LinkedAccountID != acc.ID {
-			t.Fatalf("%s must be recognized: %+v", id, x)
+		if x, _ := txByID(txs, id); !x.Internal || x.LinkedAccountID != icuAccID {
+			t.Fatalf("%s: перевод на брокерский счёт должен быть внутренним: %+v", id, x)
 		}
 	}
 	if x, _ := txByID(txs, "x4"); x.Internal {
-		t.Fatal("unrelated shop payment became internal")
+		t.Fatal("магазин — не перевод на счёт")
 	}
-
-	// снять связь — снова обычные расходы
-	if err := s.UnlinkAccount(icuAlias, icuIban); err != nil {
-		t.Fatal(err)
+	// записи журнала — операции счёта; покупки облигаций в поток не идут
+	var deposits int
+	for _, x := range txs {
+		if x.AccountID != icuAccID {
+			continue
+		}
+		if !x.Internal || strings.Contains(x.Description, "ЗМФ") {
+			t.Fatalf("операция журнала: %+v", x)
+		}
+		deposits++
 	}
-	txs, _ = s.GetAllTransactions(1000)
-	if x, _ := txByID(txs, "x1"); x.Internal {
-		t.Fatal("unlinked alias still recognized")
-	}
-}
-
-// IBAN контрагента, равный IBAN счёта, тоже явная связь (без алиаса).
-func TestICURecognitionByCounterIBAN(t *testing.T) {
-	s, _, _ := newS(t)
-	acc := seedICU(t, s)
-	if err := s.SaveTransactions("raif_"+ibRaif, []mono.StatementItemDTO{
-		{ID: "y1", Time: ts(2026, 11, 7, 12), Amount: -1000, CounterName: "Інше імʼя", CounterIban: icuIban, CurrencyCode: 980},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	txs, _ := s.GetAllTransactions(1000)
-	if x, _ := txByID(txs, "y1"); !x.Internal || x.LinkedAccountID != acc.ID {
-		t.Fatalf("counter IBAN match: %+v", x)
+	if deposits != 3 {
+		t.Fatalf("пополнений в потоке %d, ждали 3", deposits)
 	}
 }
 
-func TestICUGhostsAcceptAndCandle(t *testing.T) {
+func TestICUBalanceFromReportAndBonds(t *testing.T) {
 	s, _, _ := newS(t)
-	acc := seedICU(t, s)
-	linkICU(t, s)
-
-	ov, err := s.ICUOverview(acc.ID)
+	seedReport(t, s)
+	// справочника нет: позиции по себестоимости, ничего не теряется
+	a := icuAccount(t, s)
+	if a.Balance != 5152.14 {
+		t.Fatalf("баланс без условий облигаций: %v", a.Balance)
+	}
+	ov, err := s.ICUOverview(icuAccID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ov.Rows) != 0 || len(ov.Ghosts) != 3 {
-		t.Fatalf("expected 3 ghosts, got rows=%d ghosts=%d", len(ov.Rows), len(ov.Ghosts))
+	if len(ov.Positions) != 2 || !ov.Positions[0].NoTerms || ov.Cash != 0 {
+		t.Fatalf("overview: cash=%v pos=%+v", ov.Cash, ov.Positions)
 	}
-	// сторона ICU: −2071.12 на карте = +2071.12 на ICU, новые сверху
-	if !near(ov.Ghosts[0].Amount, 2071.12) || ov.Ghosts[0].TxID != "x3" {
-		t.Fatalf("ghost order/amount: %+v", ov.Ghosts)
+	// заданы условия — баланс считается как «номинал + накопленный купон»
+	if _, err := s.SaveBond(Bond{ISIN: "UA4000239081", Maturity: "2030-02-20", CouponRate: 16.44}); err != nil {
+		t.Fatal(err)
 	}
-
-	// принять один, потом все
-	if n, err := s.AcceptGhosts(acc.ID, []string{"x1"}, false); err != nil || n != 1 {
-		t.Fatalf("accept one: %d %v", n, err)
+	if _, err := s.SaveBond(Bond{ISIN: "UA4000239131", Maturity: "2029-03-21", CouponRate: 16}); err != nil {
+		t.Fatal(err)
 	}
-	ov, _ = s.ICUOverview(acc.ID)
-	if len(ov.Rows) != 1 || ov.Rows[0].Status != StatusGreen || ov.Rows[0].PairTxID != "x1" || len(ov.Ghosts) != 2 {
-		t.Fatalf("after one: %+v", ov)
-	}
-	if n, _ := s.AcceptGhosts(acc.ID, nil, true); n != 2 {
-		t.Fatalf("accept all: %d", n)
-	}
-	ov, _ = s.ICUOverview(acc.ID)
-	if len(ov.Ghosts) != 0 || len(ov.Rows) != 3 || !near(ov.Balance, 5152.14) {
-		t.Fatalf("after all: ghosts=%d rows=%d balance=%v", len(ov.Ghosts), len(ov.Rows), ov.Balance)
-	}
-	for _, r := range ov.Rows {
-		if r.Status != StatusGreen || r.Kind != KindDeposit {
-			t.Fatalf("row must be green deposit: %+v", r)
+	ov, _ = s.ICUOverview(icuAccID)
+	for _, p := range ov.Positions {
+		if p.NoTerms || p.Maturity == "" {
+			t.Fatalf("условия заданы, а позиция без них: %+v", p)
 		}
 	}
-
-	// свеча: в день перевода обе стороны суммарно дают 0, значит красной свечи нет
-	txs, _ := s.GetAllTransactions(1000)
-	day := time.Unix(ts(2026, 10, 23, 12), 0).Format("2006-01-02")
-	var sum float64
-	var internal int
-	for _, x := range txs {
-		if len(x.Time) >= 10 && x.Time[:10] == day {
-			sum += x.Amount
-			if x.Internal {
-				internal++
-			}
-		}
+	if a = icuAccount(t, s); a.Balance != ov.Balance {
+		t.Fatalf("баланс счёта %v, overview %v", a.Balance, ov.Balance)
 	}
-	if !near(sum, 0) || internal != 2 {
-		t.Fatalf("day net must be 0 with both sides internal: sum=%v internal=%d", sum, internal)
-	}
-	// записи журнала — операции счёта ICU
-	if x, ok := txByID(txs, "ledger_1"); !ok || x.AccountID != acc.ID || !x.Internal || !near(x.Amount, 2048.58) {
-		t.Fatalf("ledger tx: %+v", x)
+	if _, err := s.ICUOverview("icu_nope"); err == nil {
+		t.Fatal("чужой id — ошибка")
 	}
 }
 
-func TestICUReconcileColors(t *testing.T) {
+// покупка в день пополнения стоит над пополнением (сверху то, что произошло позже в логике дня)
+func TestICUJournalOrderWithinDay(t *testing.T) {
 	s, _, _ := newS(t)
-	acc := seedICU(t, s)
-	linkICU(t, s)
+	seedReport(t, s)
+	ov, err := s.ICUOverview(icuAccID)
+	if err != nil || len(ov.Rows) != 6 {
+		t.Fatalf("%v %+v", err, ov.Rows)
+	}
+	if ov.Rows[0].Kind != KindBuy || ov.Rows[0].Time != ts(2026, 11, 6, 12) {
+		t.Fatalf("сверху последняя покупка: %+v", ov.Rows[0])
+	}
+	// 30.10: покупка выше пополнения
+	var order []string
+	for _, r := range ov.Rows {
+		if dayNum(r.Time) == dayNum(ts(2026, 10, 30, 12)) {
+			order = append(order, r.Kind)
+		}
+	}
+	if strings.Join(order, ",") != "buy,deposit" {
+		t.Fatalf("порядок внутри дня: %v", order)
+	}
+}
 
-	add := func(kind string, amount float64, t0 int64, src string) LedgerRow {
-		r, err := s.SaveLedgerRow(LedgerRow{AccountID: acc.ID, Time: t0, Kind: kind, Amount: amount, SrcTxID: src})
-		if err != nil {
+func TestBondReferenceValidationAndGuard(t *testing.T) {
+	s, _, _ := newS(t)
+	if bb, err := s.SaveBond(Bond{ISIN: "ua4000239131", Maturity: "2029-03-21", CouponRate: 16}); err != nil || bb.ISIN != "UA4000239131" || bb.Name != "ОВДП 21.03.2029" || bb.Nominal != 1000 {
+		t.Fatalf("имя и номинал по умолчанию: %+v %v", bb, err)
+	}
+	if _, err := s.SaveBond(Bond{ISIN: "X", Maturity: "bad", CouponRate: 1}); err == nil {
+		t.Fatal("кривая дата погашения должна отклоняться")
+	}
+	if _, err := s.SaveBond(Bond{ISIN: "X", Maturity: "2029-03-21"}); err == nil {
+		t.Fatal("ставка обязательна")
+	}
+	seedReport(t, s)
+	if err := s.DeleteBond("UA4000239131"); err == nil {
+		t.Fatal("облигацию с записями в журнале удалять нельзя")
+	}
+	if _, err := s.SaveBond(Bond{ISIN: "UA0000000001", Maturity: "2029-03-21", CouponRate: 16}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteBond("UA0000000001"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Старый ручной слой не удаляется (core.db — данные пользователя): условия облигаций переезжают в справочник,
+// таблицы переименовываются в *_legacy, повторный запуск безопасен.
+func TestLegacyICUTablesAreKeptAndBondsCopied(t *testing.T) {
+	s, _, _ := newS(t)
+	for _, q := range []string{
+		`CREATE TABLE manual_accounts (id TEXT PRIMARY KEY, name TEXT)`,
+		`INSERT INTO manual_accounts VALUES ('icu_x','ICU Trader')`,
+		`CREATE TABLE icu_ledger (id INTEGER PRIMARY KEY, account_id TEXT, amount REAL)`,
+		`INSERT INTO icu_ledger VALUES (1,'icu_x',100)`,
+		`CREATE TABLE icu_bonds (account_id TEXT NOT NULL, isin TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', maturity TEXT NOT NULL, coupon_rate REAL NOT NULL, nominal REAL NOT NULL DEFAULT 1000, PRIMARY KEY (account_id, isin))`,
+		`INSERT INTO icu_bonds VALUES ('icu_x','UA4000239081','ОВДП 20.02.2030','2030-02-20',16.44,1000)`,
+	} {
+		if _, err := s.coreDB.Exec(q); err != nil {
 			t.Fatal(err)
 		}
-		return r
 	}
-	// зелёная: сумма до копейки, дата на день раньше
-	green := add(KindDeposit, 2048.58, ts(2026, 10, 22, 20), "")
-	// красная: опечатка в сумме (1032.44 → 1032.64), дата та же
-	red := add(KindDeposit, 1032.64, ts(2026, 10, 30, 12), "")
-	// оранжевая: в кеше такого нет
-	orange := add(KindDeposit, 777, ts(2026, 9, 1, 12), "")
-	// поправка без сверки
-	adj := add(KindAdjust, -1, ts(2026, 11, 1, 12), "")
-
-	ov, err := s.ICUOverview(acc.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	st := map[int64]LedgerView{}
-	for _, r := range ov.Rows {
-		st[r.ID] = r
-	}
-	if g := st[green.ID]; g.Status != StatusGreen || g.PairTxID != "x1" {
-		t.Fatalf("green: %+v", g)
-	}
-	if r := st[red.ID]; r.Status != StatusRed || r.Mismatch == nil || r.Mismatch.TxID != "x2" || !near(r.Mismatch.Amount, 1032.44) {
-		t.Fatalf("red: %+v", r)
-	}
-	if o := st[orange.ID]; o.Status != StatusOrange {
-		t.Fatalf("orange: %+v", o)
-	}
-	if a := st[adj.ID]; a.Status != "" {
-		t.Fatalf("adjust must have no status: %+v", a)
-	}
-	// x1 и x2 заняты парами, x3 — призрак
-	if len(ov.Ghosts) != 1 || ov.Ghosts[0].TxID != "x3" {
-		t.Fatalf("ghosts: %+v", ov.Ghosts)
-	}
-
-	// исправили сумму — стало зелёным и призрака нет
-	red.Amount = 1032.44
-	if _, err := s.SaveLedgerRow(red); err != nil {
-		t.Fatal(err)
-	}
-	ov, _ = s.ICUOverview(acc.ID)
-	for _, r := range ov.Rows {
-		if r.ID == red.ID && r.Status != StatusGreen {
-			t.Fatalf("fixed row must be green: %+v", r)
+	for i := 0; i < 2; i++ { // повторный запуск безопасен
+		if err := s.initICU(); err != nil {
+			t.Fatal(err)
 		}
 	}
-}
-
-// Запись, принятая из операции кеша, после очистки кеша оранжевая, а после повторной загрузки снова зелёная.
-func TestICUWipeCacheKeepsLedger(t *testing.T) {
-	s, _, _ := newS(t)
-	acc := seedICU(t, s)
-	linkICU(t, s)
-	if n, err := s.AcceptGhosts(acc.ID, nil, true); err != nil || n != 3 {
-		t.Fatalf("accept: %d %v", n, err)
+	bonds, _ := s.ListBonds()
+	if len(bonds) != 1 || bonds[0].ISIN != "UA4000239081" || bonds[0].CouponRate != 16.44 {
+		t.Fatalf("справочник: %+v", bonds)
 	}
-	if err := s.WipeCache(); err != nil {
-		t.Fatal(err)
-	}
-	ov, _ := s.ICUOverview(acc.ID)
-	if len(ov.Rows) != 3 || len(ov.Ghosts) != 0 || !near(ov.Balance, 5152.14) {
-		t.Fatalf("after wipe: %+v", ov)
-	}
-	for _, r := range ov.Rows {
-		if r.Status != StatusOrange {
-			t.Fatalf("after wipe row must be orange: %+v", r)
+	for _, tb := range legacyICUCore {
+		if tableExists(s.coreDB, tb) || !tableExists(s.coreDB, tb+"_legacy") {
+			t.Fatalf("%s должна быть переименована в %s_legacy", tb, tb)
 		}
 	}
-	// повторная загрузка выписки
-	if err := s.SaveImportedAccount(mono.AccountDTO{ID: "raif_" + ibRaif, IBAN: ibRaif, Type: "raif"}, "Петро Іваненко.csv"); err != nil {
-		t.Fatal(err)
-	}
-	seedICUTransfers(t, s)
-	ov, _ = s.ICUOverview(acc.ID)
-	for _, r := range ov.Rows {
-		if r.Status != StatusGreen {
-			t.Fatalf("after reload row must be green: %+v", r)
-		}
-	}
-	if len(ov.Ghosts) != 0 {
-		t.Fatalf("no ghosts expected: %+v", ov.Ghosts)
-	}
-}
-
-// Входящий перевод от алиаса ICU (вывод денег) — зеркало с минусом на стороне ICU.
-func TestICUWithdrawGhost(t *testing.T) {
-	s, _, _ := newS(t)
-	acc := seedICU(t, s)
-	linkICU(t, s)
-	if err := s.SaveTransactions("raif_"+ibRaif, []mono.StatementItemDTO{
-		{ID: "w1", Time: ts(2026, 11, 8, 12), Amount: 50000, CounterName: icuAlias, CurrencyCode: 980},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	ov, _ := s.ICUOverview(acc.ID)
-	var w *Ghost
-	for i := range ov.Ghosts {
-		if ov.Ghosts[i].TxID == "w1" {
-			w = &ov.Ghosts[i]
-		}
-	}
-	if w == nil || !near(w.Amount, -500) {
-		t.Fatalf("withdraw ghost: %+v", ov.Ghosts)
-	}
-	if _, err := s.AcceptGhosts(acc.ID, []string{"w1"}, false); err != nil {
-		t.Fatal(err)
-	}
-	ov, _ = s.ICUOverview(acc.ID)
-	if ov.Rows[0].Kind != KindWithdraw || !near(ov.Rows[0].Amount, -500) || ov.Rows[0].Status != StatusGreen {
-		t.Fatalf("accepted withdraw: %+v", ov.Rows[0])
+	var amount float64
+	if err := s.coreDB.QueryRow(`SELECT amount FROM icu_ledger_legacy WHERE id=1`).Scan(&amount); err != nil || amount != 100 {
+		t.Fatalf("данные старого журнала должны сохраниться: %v %v", amount, err)
 	}
 }
