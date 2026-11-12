@@ -16,6 +16,8 @@ export const COLUMNS = [
   { key: 'coupon_rate', label: 'Ставка', num: true },
   { key: 'yield', label: 'Доходность', num: true },
   { key: 'real', label: 'Реальная', num: true, signed: true }, // доходность минус инфляция; бывает отрицательной и нулевой, это не «пусто»
+  { key: 'usd', label: 'В $', num: true, signed: true }, // доходность в долларах: доллар как есть, гривна и евро через курс
+  { key: 'realUsd', label: 'Реальная $', num: true, signed: true }, // то же с поправкой на инфляцию США
   { key: 'last_auction', label: 'Аукцион', num: false },
   { key: 'nominal', label: 'Номинал', num: true },
   { key: 'future', label: 'Через 10 л.', num: true },

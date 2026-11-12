@@ -3,16 +3,19 @@ import { computed } from 'vue'
 import { portfolioStats } from '../utils/capital.js'
 import { currentInflation, signedPct, plainPct } from '../utils/macro.js'
 import { money } from '../utils/formatters.js'
+import { bondDollarYield } from '../utils/dollar.js'
 import { formatDateLong } from '../utils/formatters.js'
 
 // Портфель ОВДП: средняя ставка и срок по стоимости позиций, реальная доходность (ставка с поправкой на инфляцию г/г), ближайшая выплата.
 const props = defineProps({
   positions: { type: Array, default: () => [] },
   macro: { type: Object, default: () => ({}) }, // макро-ряды: инфляция для реальной доходности
-  today: { type: String, required: true }
+  today: { type: String, required: true },
+  assume: { type: Object, default: null } // допущения для долларовой доходности (dollarAssumptions)
 })
 const inflation = computed(() => currentInflation(props.macro))
 const st = computed(() => portfolioStats(props.positions, props.today, inflation.value))
+const usdy = computed(() => (st.value && props.assume ? bondDollarYield({ rate: st.value.rate, currency: 'UAH', ...props.assume }) : { usd: null, realUsd: null }))
 const yearsText = (y) => `${String(y).replace('.', ',')} г.`
 </script>
 
@@ -29,6 +32,14 @@ const yearsText = (y) => `${String(y).replace('.', ',')} г.`
         <div :title="st.real === null ? 'Нет данных об инфляции: нажми «Обновить» на экране «Инфляция»' : `(1 + ставка) / (1 + инфляция) − 1, инфляция г/г ${plainPct(inflation)}`">
           <div class="text-slate-500">Реальная доходность</div>
           <div class="text-lg font-bold tabular-nums" :class="st.real === null ? 'text-slate-600' : st.real >= 0 ? 'text-emerald-400' : 'text-rose-400'">{{ signedPct(st.real) }}</div>
+        </div>
+        <div v-if="usdy.usd !== null" :title="`(1 + ставка) / (1 + рост доллара) − 1; доллар дорожал на ${plainPct(assume.devUsd)} в год за ${assume.years} лет`">
+          <div class="text-slate-500">Доходность в $</div>
+          <div class="text-lg font-bold tabular-nums" :class="usdy.usd >= 0 ? 'text-emerald-400' : 'text-rose-400'">{{ signedPct(usdy.usd) }}</div>
+        </div>
+        <div v-if="usdy.realUsd !== null" :title="`Доходность в $ с поправкой на инфляцию США ${plainPct(assume.usInflation)} г/г`">
+          <div class="text-slate-500">Реальная в $</div>
+          <div class="text-lg font-bold tabular-nums" :class="usdy.realUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'">{{ signedPct(usdy.realUsd) }}</div>
         </div>
         <div title="Средний срок до погашения, взвешенный по стоимости">
           <div class="text-slate-500">Срок до погашения</div>

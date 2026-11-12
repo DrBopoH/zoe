@@ -1,37 +1,69 @@
 import { realRate } from './macro.js'
+import { toUsd } from './dollar.js'
 
 // Структура капитала и портфель ОВДП для Сметы. Чистые функции — без интерфейса.
-// Капитал — гривневые счета (как плитка «Капитал» и график): валютные в него не входят.
+// Капитал в долларовом эквиваленте (когда известен курс), иначе — только гривневые счета.
 
 // Слои капитала, от «живых» денег к вложенным; цвета — как у остальных блоков (зелёный, голубой, янтарный, фиолетовый)
 export const LAYERS = [
   { key: 'cards', label: 'Карты и счета', color: '#34d399', hint: 'Деньги на картах и счетах банков' },
   { key: 'broker', label: 'Деньги на брокерском', color: '#38bdf8', hint: 'Свободные деньги на брокерском счёте ICU: ещё не вложены в облигации' },
   { key: 'bonds', label: 'ОВДП', color: '#fbbf24', hint: 'Стоимость облигаций на брокерском счёте (с накопленным купоном)' },
-  { key: 'crypto', label: 'Крипто', color: '#a78bfa', hint: 'Оценка кошельков Binance в гривне' }
+  { key: 'crypto', label: 'Крипто', color: '#a78bfa', hint: 'Оценка кошельков Binance' }
 ]
 
 const r2 = (v) => Math.round(v * 100) / 100 + 0
 
 /**
  * Из чего состоит капитал: сумма по слоям и доля каждого. accounts — список счетов (с `portfolio` у брокерского и Binance).
- * Возвращает { total, parts: [{ key, label, color, hint, value, pct }] } — только слои с ненулевой суммой; pct — от итога (null при нулевом итоге).
+ * Без rates — как раньше: только гривневые счета, в гривне. С rates ({ usdUah, eurUah }) — всё в долларовом эквиваленте:
+ * доллар как есть, гривна и евро по курсу НБУ, Binance по курсу его же последней разведки (usdt_uah). Счета в других валютах пропускаются (skipped).
+ * Возвращает { unit, total, totalUah, parts: [{ key, label, color, hint, value, pct }], currencies: [{ key, label, value, pct }], skipped } —
+ * только ненулевые; pct — от итога (null при нулевом итоге); totalUah — приблизительный гривневый эквивалент (null без курса).
  */
-export function capitalStructure(accounts) {
+export function capitalStructure(accounts, rates = null) {
+  const usd = !!(rates && rates.usdUah)
   const sum = { cards: 0, broker: 0, bonds: 0, crypto: 0 }
+  const cur = { UAH: 0, USD: 0, EUR: 0 }
+  let skipped = 0
+  const conv = (code, v) => {
+    if (!usd) return code === 980 ? v : null
+    return toUsd(code, v, rates)
+  }
+  const put = (layer, code, v) => {
+    if (v === null) { skipped++; return }
+    sum[layer] += v
+    const k = code === 840 ? 'USD' : code === 978 ? 'EUR' : 'UAH'
+    cur[k] += v
+  }
   for (const a of accounts || []) {
-    if (a.currency_code !== 980) continue
     const bal = Number(a.balance) || 0
-    if (a.bank_key === 'binance') sum.crypto += bal
-    else if (a.bank_key === 'icu') {
+    const code = a.currency_code
+    if (!usd && code !== 980) continue
+    if (a.bank_key === 'binance') {
+      const rate = a.portfolio && a.portfolio.usdt_uah > 0 ? a.portfolio.usdt_uah : null // баланс Binance хранится в гривне, по сути это доллары
+      const v = usd ? (rate ? bal / rate : toUsd(980, bal, rates)) : bal
+      if (v === null) { skipped++; continue }
+      sum.crypto += v
+      cur[usd ? 'USD' : 'UAH'] += v
+    } else if (a.bank_key === 'icu') {
       const p = a.portfolio
-      if (p && p.kind === 'bonds') { sum.broker += Number(p.cash) || 0; sum.bonds += Number(p.invested) || 0 } else sum.broker += bal
-    } else sum.cards += bal
+      if (p && p.kind === 'bonds') { put('broker', code, conv(code, Number(p.cash) || 0)); put('bonds', code, conv(code, Number(p.invested) || 0)) } else put('broker', code, conv(code, bal))
+    } else put('cards', code, conv(code, bal))
   }
   const total = r2(Object.values(sum).reduce((s, v) => s + v, 0))
-  const parts = LAYERS.map((l) => ({ ...l, value: r2(sum[l.key]), pct: total > 0 ? Math.round((sum[l.key] / total) * 1000) / 10 : null })).filter((p) => p.value !== 0)
-  return { total, parts }
+  const share = (v) => (total > 0 ? Math.round((v / total) * 1000) / 10 : null)
+  const parts = LAYERS.map((l) => ({ ...l, value: r2(sum[l.key]), pct: share(sum[l.key]) })).filter((p) => p.value !== 0)
+  const currencies = usd ? CURRENCIES.map((c) => ({ ...c, value: r2(cur[c.key]), pct: share(cur[c.key]) })).filter((c) => c.value !== 0) : []
+  return { unit: usd ? '$' : '₴', total, totalUah: usd ? r2(total * rates.usdUah) : total, parts, currencies, skipped }
 }
+
+// Валюты, в которых «исходно» лежат деньги (слоёный пирог: чем ближе к жизни, тем «живее» валюта)
+export const CURRENCIES = [
+  { key: 'UAH', label: 'Гривна', color: '#34d399' },
+  { key: 'USD', label: 'Доллар', color: '#38bdf8' },
+  { key: 'EUR', label: 'Евро', color: '#fbbf24' }
+]
 
 const DAY = 86400000
 const yearsTo = (iso, todayIso) => Math.max(0, (Date.parse(`${iso}T00:00:00Z`) - Date.parse(`${todayIso}T00:00:00Z`)) / (365.25 * DAY))

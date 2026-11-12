@@ -6,6 +6,9 @@ import SyncButton from '../components/SyncButton.vue'
 import CapitalStructure from '../components/CapitalStructure.vue'
 import BondPortfolio from '../components/BondPortfolio.vue'
 import { useMacro } from '../composables/useMacro.js'
+import { FX_IDS } from '../utils/macro.js'
+import { fxRates, dollarAssumptions } from '../utils/dollar.js'
+import { capitalStructure } from '../utils/capital.js'
 import { toLocalDateStr } from '../utils/formatters.js'
 import { useCapitalChart } from '../composables/useCapitalChart.js'
 
@@ -24,10 +27,17 @@ const { uahAccounts, uahTransactions, chartTransactions, chartTotalUAH, binanceI
 
 // Инфляция для реальной доходности портфеля (ряды НБУ из кеша)
 const macro = useMacro()
-onMounted(() => macro.load())
+// Курсы НБУ (доллар, евро) — капитал в долларовом эквиваленте; без них всё остаётся в гривне
+const fx = useMacro([...FX_IDS, 'us_cpi_yoy'])
+onMounted(() => { macro.load(); fx.load() })
+const rates = computed(() => { const r = fxRates(fx.series.value); return r.usdUah ? r : null })
+const assume = computed(() => dollarAssumptions(fx.series.value, toLocalDateStr(new Date())))
 const today = computed(() => toLocalDateStr(new Date()))
 
 const totalValueUAH = computed(() => uahAccounts.value.reduce((sum, a) => sum + a.balance, 0))
+// Капитал: с курсом — в долларах (валютные счета как есть, гривна и Binance по курсу), рядом приблизительный гривневый эквивалент
+const cap = computed(() => capitalStructure(props.accounts, rates.value))
+const unit = computed(() => (rates.value ? '$' : '₴'))
 
 const currentMonthTransactions = computed(() => {
   return uahTransactions.value.filter(t => {
@@ -59,14 +69,15 @@ const monthlyDelta = computed(() => {
     <section class="flex flex-wrap items-start justify-between gap-4">
       <div class="bg-slate-900/60 border border-slate-800 p-5 rounded space-y-2 w-full sm:w-64">
         <span class="text-[10px] text-slate-500 uppercase tracking-wider block">Капитал</span>
-        <div class="text-2xl font-bold text-white">{{ money(totalValueUAH) }}<sub class="font-bold ml-1" style="font-size:11px;vertical-align:baseline;position:relative;top:0.35em" :class="monthlyDelta >= 0 ? 'text-emerald-400' : 'text-rose-400'" title="За месяц">{{ signed(monthlyDelta) }}</sub></div>
+        <div class="text-2xl font-bold text-white">{{ rates ? money(cap.total, '$') : money(totalValueUAH) }}<sub class="font-bold ml-1" style="font-size:11px;vertical-align:baseline;position:relative;top:0.35em" :class="monthlyDelta >= 0 ? 'text-emerald-400' : 'text-rose-400'" title="За месяц">{{ signed(rates ? monthlyDelta / rates.usdUah : monthlyDelta) }}</sub></div>
+        <div v-if="rates" class="text-xs text-slate-500 tabular-nums" :title="`Приблизительно, по курсу НБУ ${rates.usdUah} ₴ за доллар`">(≈ {{ money(cap.totalUah) }})</div>
       </div>
       <SyncButton />
     </section>
 
     <div class="grid gap-4 md:grid-cols-2">
-      <CapitalStructure :accounts="accounts" />
-      <BondPortfolio :positions="positions" :macro="macro.series.value" :today="today" />
+      <CapitalStructure :accounts="accounts" :rates="rates" />
+      <BondPortfolio :positions="positions" :macro="macro.series.value" :today="today" :assume="assume" />
     </div>
 
     <CandleChart :transactions="chartTransactions" :binance-ids="binanceIdList" :total-value-u-a-h="chartTotalUAH" :events="payEvents" />
