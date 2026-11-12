@@ -26,9 +26,12 @@ const macro = useMacro()
 const fx = useMacro(FX_IDS)
 const us = useMacro(US_IDS)
 const heavy = { fx, fed: us }
-onMounted(() => { macro.load(); heavy[section.value]?.load() })
-watch(() => props.dataVersion, () => { macro.load(); heavy[section.value]?.load() })
-watch(section, (s) => { const h = heavy[s]; if (h && !Object.keys(h.series.value).length) h.load() })
+// Таблицы облигаций считают доходность в долларах: нужны курсы и инфляция США (тяжёлые ряды, поэтому только на этих экранах)
+const dollar = computed(() => ({ ...fx.series.value, ...us.series.value }))
+const loadBond = () => { if (!bondSection.value) return; for (const h of [fx, us]) if (!Object.keys(h.series.value).length) h.load() }
+onMounted(() => { macro.load(); heavy[section.value]?.load(); loadBond() })
+watch(() => props.dataVersion, () => { macro.load(); heavy[section.value]?.load(); if (bondSection.value) { fx.load(); us.load() } })
+watch(section, (s) => { const h = heavy[s]; if (h && !Object.keys(h.series.value).length) h.load(); loadBond() })
 const today = computed(() => toLocalDateStr(new Date()))
 const bondSection = computed(() => (isBondSection(section.value) ? section.value : null))
 </script>
@@ -37,7 +40,7 @@ const bondSection = computed(() => (isBondSection(section.value) ? section.value
   <div class="relative space-y-4">
     <SectionRail v-model="section" :sections="MARKET_TREE" label="Разделы рынка" groups-key="economic_market_groups" />
     <KeepAlive>
-      <BondsView v-if="bondSection" key="bonds" :section="bondSection" :accounts="accounts" :data-version="dataVersion" :running="running" :macro="macro.series.value" @go="section = $event" />
+      <BondsView v-if="bondSection" key="bonds" :section="bondSection" :accounts="accounts" :data-version="dataVersion" :running="running" :macro="macro.series.value" :dollar="dollar" @go="section = $event" />
     </KeepAlive>
     <MacroRatesView v-if="section === 'rates'" :series="macro.series.value" :today="today" :running="running" />
     <MacroInflationView v-else-if="section === 'inflation'" :series="macro.series.value" :today="today" :running="running" />

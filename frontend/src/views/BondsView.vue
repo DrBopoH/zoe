@@ -6,6 +6,7 @@ import { storageGet, storageSet } from '../utils/storage.js'
 import IcuIntake from '../components/IcuIntake.vue'
 import { useMarketRefresh } from '../composables/useMarketRefresh.js'
 import { useIcuList } from '../composables/useIcuList.js'
+import { bondDollarYield, dollarAssumptions } from '../utils/dollar.js'
 import { currentInflation, realRate, signedPct, plainPct, macroSummary } from '../utils/macro.js'
 import { apiGetJson, apiSend, apiJson } from '../utils/api.js'
 import { toLocalDateStr } from '../utils/formatters.js'
@@ -18,6 +19,7 @@ const props = defineProps({
   dataVersion: { default: null },
   running: { type: Boolean, default: false },
   section: { type: String, default: 'nbu' }, // nbu | ust: какой реестр показывать (раздел выбирает оболочка вкладки)
+  dollar: { type: Object, default: () => ({}) }, // курсы НБУ и инфляция США (для колонок «В $» и «Реальная $»)
   macro: { type: Object, default: () => ({}) } // макро-ряды НБУ (для колонки «Реальная» и полоски со ставкой)
 })
 const emit = defineEmits(['go'])
@@ -92,13 +94,17 @@ const strip = computed(() => {
   const m = macroSummary(props.macro, today.value)
   return m.cpi === null ? null : { policy: m.policy, cpi: m.cpi, real: m.realPolicy, month: m.cpiMonth ? `${m.cpiMonth.slice(5, 7)}.${m.cpiMonth.slice(0, 4)}` : '' }
 })
-const columns = computed(() => COLUMNS.filter((c) => c.key !== 'real' || (section.value === 'nbu' && inflation.value !== null)))
+const assume = computed(() => dollarAssumptions(props.dollar, today.value))
+const hasUsd = computed(() => assume.value.devUsd !== null || (list.value || []).some((b) => b.currency === 'USD'))
+const hasAuction = computed(() => (list.value || []).some((b) => b.last_auction)) // колонка «Аукцион» пустая у бумаг без аукционов — место важнее
+const columns = computed(() => COLUMNS.filter((c) => (c.key !== 'real' || (section.value === 'nbu' && inflation.value !== null)) && ((c.key !== 'usd' && c.key !== 'realUsd') || hasUsd.value) && (c.key !== 'last_auction' || hasAuction.value)))
 
+const dy = (rate, currency) => bondDollarYield({ rate, currency, ...assume.value })
 const found = computed(() => filterBonds(pool.value, { q: q.value, currency: currency.value, hideMatured: hideMatured.value, today: today.value }))
 const rows = computed(() => sortBonds(
   found.value.map((b) => {
     const sc = scores.value.get(b.id)
-    return { ...b, score: sc?.score ?? 0, future: sc ? sc.multipleH * amountN.value : 0, real: sc && b.currency === 'UAH' ? realRate(sc.rate, inflation.value) : null }
+    return { ...b, score: sc?.score ?? 0, future: sc ? sc.multipleH * amountN.value : 0, real: sc && b.currency === 'UAH' ? realRate(sc.rate, inflation.value) : null, ...(sc ? dy(sc.rate, b.currency) : { usd: null, realUsd: null }) }
   }),
   sort.value.key, sort.value.dir
 ).map((b) => {
@@ -109,7 +115,9 @@ const rows = computed(() => sortBonds(
   c.score = sc ? `${Math.round(sc.score)} %` : '—'
   c.future = sc ? moneyText(b.future, b.currency) : '—'
   c.real = signedPct(b.real)
-  return { id: b.id, c, sc, real: b.real, ysrc: own ? own.source : '', color: sc ? scoreColor(sc.score) : null, held: holdings.value.get(String(b.id).toUpperCase()) || 0 }
+  c.usd = signedPct(b.usd)
+  c.realUsd = signedPct(b.realUsd)
+  return { id: b.id, c, sc, real: b.real, usd: b.usd, realUsd: b.realUsd, ysrc: own ? own.source : '', color: sc ? scoreColor(sc.score) : null, held: holdings.value.get(String(b.id).toUpperCase()) || 0 }
 }))
 
 // Графики: бумаги одной валюты (при «ВСЕ» — самой многочисленной среди найденных). Лучшие 5 по коэффициенту — с точками.
@@ -158,6 +166,8 @@ const chartMatured = computed(() => filterBonds(pool.value, { q: q.value, curren
   .map((b) => ({ id: b.id, rate: rateOf(b), startT: yearsFromToday(b.issued), endT: yearsFromToday(b.maturity) })))
 const chartNote = computed(() => (!currency.value && currencies.value.length > 1 && chartCurrency.value ? `График: ${chartCurrency.value}. Выбери валюту, чтобы сменить.` : ''))
 
+const usdTitle = (_, r) => (r.usd === null ? 'Нет данных для пересчёта в доллары (курсы НБУ: нажми «Обновить» на экране «Курсы»)' : 'Доходность в долларах: доллар — как есть; гривна — с поправкой на рост доллара, евро — на рост евро к доллару (среднее за 5 лет)')
+const realUsdTitle = computed(() => `Доходность в долларах за вычетом инфляции США ${plainPct(assume.value.usInflation)} г/г${assume.value.devUsd !== null ? `; доллар дорожал на ${plainPct(assume.value.devUsd)} в год` : ''}`)
 const YSRC_TITLE = {
   price: 'Доходность к погашению по цене в ICU (с накопленным купоном)',
   ytm: 'YTM, показанный в ICU',
@@ -201,7 +211,7 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
         </label>
         <button type="button" class="text-[10px] text-slate-500 hover:text-emerald-400 underline cursor-pointer" @click="icuOpen = !icuOpen">{{ icu.isins.value.length ? 'список ICU' : 'добавить список ICU' }}</button>
       </template>
-      <label class="flex items-center gap-2 text-slate-400" title="Сумма вложения: по ней считается столбец «Через 10 л.» и графики">
+      <label class="flex items-center gap-2 text-slate-400" title="Сумма вложения: по ней считается столбец «10 л.» и графики">
         вложение
         <input v-model.number="amount" type="number" min="1" step="1000" class="ui-input !bg-slate-900 !w-28 text-right" />
       </label>
@@ -232,7 +242,7 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
             <th
               v-for="col in columns"
               :key="col.key"
-              class="px-3 py-3 font-bold cursor-pointer hover:text-slate-300 whitespace-nowrap"
+              class="px-2 py-3 font-bold cursor-pointer hover:text-slate-300 whitespace-nowrap"
               :class="col.num ? 'text-right' : 'text-left'"
               @click="sort = nextSort(sort, col.key)"
             >{{ col.key === 'id' ? source.idLabel : col.label }}<span v-if="sort.key === col.key" class="text-emerald-400 ml-1">{{ sort.dir === 'asc' ? '↑' : '↓' }}</span></th>
@@ -240,7 +250,7 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
         </thead>
         <tbody>
           <tr v-for="r in rows" :key="r.id" class="border-b border-slate-800/60 hover:bg-slate-800/40">
-            <td v-for="col in columns" :key="col.key" class="px-3 py-2 whitespace-nowrap" :class="[col.num ? 'text-right tabular-nums' : 'text-left', col.key === 'id' ? 'text-slate-300' : 'text-slate-200']">
+            <td v-for="col in columns" :key="col.key" class="px-2 py-2 whitespace-nowrap" :class="[col.num ? 'text-right tabular-nums' : 'text-left', col.key === 'id' ? 'text-slate-300' : 'text-slate-200']">
               <template v-if="col.key === 'name'">
                 <span class="inline-flex items-center gap-2">
                   <span
@@ -254,6 +264,8 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
                 </span>
               </template>
               <span v-else-if="col.key === 'real'" :class="r.real === null ? 'text-slate-600' : r.real >= 0 ? 'text-emerald-400' : 'text-rose-400'" :title="r.real === null ? 'Реальная доходность считается для бумаг в гривне с известной ставкой' : `Доходность ${r.sc ? plainPct(r.sc.rate) : ''} с поправкой на инфляцию ${plainPct(inflation)} г/г`">{{ r.c.real }}</span>
+              <span v-else-if="col.key === 'usd'" :class="r.usd === null ? 'text-slate-600' : 'text-slate-200'" :title="usdTitle(null, r)">{{ r.c.usd }}</span>
+              <span v-else-if="col.key === 'realUsd'" :class="r.realUsd === null ? 'text-slate-600' : r.realUsd >= 0 ? 'text-emerald-400' : 'text-rose-400'" :title="realUsdTitle">{{ r.c.realUsd }}</span>
               <span v-else-if="col.key === 'yield' && r.ysrc" :title="YSRC_TITLE[r.ysrc]">{{ r.c[col.key] }}</span>
               <template v-else>{{ r.c[col.key] }}</template>
             </td>
