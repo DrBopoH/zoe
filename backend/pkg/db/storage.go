@@ -149,6 +149,7 @@ func (s *Storage) initCache() error {
 		coverageSchema,
 		binanceCacheSchema,
 		icuCacheSchema,
+		marketCacheSchema,
 	}
 	for _, q := range stmts {
 		if _, err := s.cacheDB.Exec(q); err != nil {
@@ -410,7 +411,7 @@ func (s *Storage) WipeCache() error {
 	if _, err := s.cacheDB.Exec(`DELETE FROM transactions`); err != nil {
 		return err
 	}
-	for _, t := range []string{"sync_coverage", "binance_minutes", "binance_state", "binance_ledger", "icu_flows", "accounts"} {
+	for _, t := range []string{"sync_coverage", "binance_minutes", "binance_state", "binance_ledger", "icu_flows", "market_bonds", "accounts"} {
 		if _, err := s.cacheDB.Exec(`DELETE FROM ` + t); err != nil {
 			return err
 		}

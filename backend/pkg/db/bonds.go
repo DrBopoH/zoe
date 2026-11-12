@@ -336,7 +336,7 @@ func (s *Storage) accountState(accountID string) (AccountState, error) {
 	if err != nil {
 		return AccountState{}, err
 	}
-	bonds, err := s.ListBonds()
+	bonds, err := s.bondTerms()
 	if err != nil {
 		return AccountState{}, err
 	}
