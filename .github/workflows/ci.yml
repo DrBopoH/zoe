@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [dev, build, main]
+  push:
+    branches: [dev, build, main]
+
+# новая отправка в ту же ветку/PR отменяет устаревший прогон
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: gofmt
+        # пока предупреждение; когда дерево отформатировано (gofmt -w backend), убрать continue-on-error
+        continue-on-error: true
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then echo "не отформатировано:"; echo "$out"; exit 1; fi
+      - name: vet
+        run: go vet ./...
+      - name: test
+        run: go test ./... -count=1
+      - name: build
+        run: go build -o /dev/null .
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: build
+        run: bun run build
+
+  hygiene:
+    name: hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: запрещённые файлы (базы, ключи, архивы, .env)
+        run: |
+          bad=$(git ls-files | grep -iE '\.(db|sqlite|sqlite3|pem|key|p12|zip)$|(^|/)\.env($|\.)|^\.commits/|^\.claude$' || true)
+          if [ -n "$bad" ]; then echo "в репо не должно быть:"; echo "$bad"; exit 1; fi
+      - name: секреты и персональные данные
+        run: |
+          # ключи/токены
+          if git grep -InE 'AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{30,}|-----BEGIN [A-Z ]*PRIVATE KEY-----' -- . ':!.github'; then
+            echo "найден секрет"; exit 1
+          fi
+          # полные номера карт 16 цифр (маски с * допустимы); тестовые заглушки добавляй в allowlist ниже
+          allow='4149490000001111|4149490000002222|4149495555550172|7778000000209689|0000000000000000001'
+          hits=$(git grep -IhoE '\b[0-9]{16}\b' -- 'backend' 'frontend/src' | grep -vE "^($allow)$" | sort -u || true)
+          if [ -n "$hits" ]; then echo "похоже на номер карты:"; echo "$hits"; exit 1; fi
