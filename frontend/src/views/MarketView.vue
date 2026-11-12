@@ -2,10 +2,12 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import SectionRail from '../components/SectionRail.vue'
 import UiButton from '../components/ui/UiButton.vue'
+import GrowthChart from '../components/GrowthChart.vue'
+import { storageGet, storageSet } from '../utils/storage.js'
 import { useSection } from '../composables/useSection.js'
 import { apiGetJson, apiSend } from '../utils/api.js'
 import { toLocalDateStr } from '../utils/formatters.js'
-import { SOURCES, MARKET_SECTIONS, COLUMNS, filterBonds, sortBonds, currenciesOf, bondCells, nextSort, scoreBonds, scoreColor, HORIZON_YEARS } from '../utils/marketTable.js'
+import { SOURCES, MARKET_SECTIONS, COLUMNS, filterBonds, sortBonds, currenciesOf, bondCells, nextSort, scoreBonds, scoreColor, HORIZON_YEARS, moneyText } from '../utils/marketTable.js'
 
 // dataVersion растёт при любой записи в кеш (в том числе после опроса рынка) — по нему перечитываем список.
 // running — идёт ли сейчас опрос рынка (из /sync/status → market.running).
@@ -45,16 +47,43 @@ const list = computed(() => lists.value[section.value])
 const currencies = computed(() => currenciesOf(list.value))
 // Коэффициент и места считаются по всему списку источника, а не по найденному: поиск не меняет цвета и места
 const scores = computed(() => scoreBonds(list.value, today.value))
+// Сумма вложения для расчёта «через 10 лет» и графиков; помнится в браузере
+const amount = ref(Math.max(1, Number(storageGet('zoe.market.amount', '10000')) || 10000))
+watch(amount, (v) => { if (v > 0) storageSet('zoe.market.amount', String(v)) })
+const amountN = computed(() => (Number(amount.value) > 0 ? Number(amount.value) : 1))
+
+const found = computed(() => filterBonds(list.value, { q: q.value, currency: currency.value, hideMatured: hideMatured.value, today: today.value }))
 const rows = computed(() => sortBonds(
-  filterBonds(list.value, { q: q.value, currency: currency.value, hideMatured: hideMatured.value, today: today.value })
-    .map((b) => ({ ...b, score: scores.value.get(b.id)?.score ?? 0 })),
+  found.value.map((b) => {
+    const sc = scores.value.get(b.id)
+    return { ...b, score: sc?.score ?? 0, future: sc ? sc.multipleH * amountN.value : 0 }
+  }),
   sort.value.key, sort.value.dir
 ).map((b) => {
   const sc = scores.value.get(b.id) || null
   const c = bondCells(b)
   c.score = sc ? `${Math.round(sc.score)} %` : '—'
+  c.future = sc ? moneyText(b.future, b.currency) : '—'
   return { id: b.id, c, sc, color: sc ? scoreColor(sc.score) : null }
 }))
+
+// Графики: бумаги одной валюты (при «ВСЕ» — самой многочисленной среди найденных). Лучшие 5 по коэффициенту — с точками.
+const CHART_LIMIT = 150
+const chartCurrency = computed(() => {
+  if (currency.value) return currency.value
+  const n = {}
+  for (const b of found.value) if (scores.value.has(b.id)) n[b.currency] = (n[b.currency] || 0) + 1
+  return Object.keys(n).sort((a, b) => n[b] - n[a])[0] || ''
+})
+const chartItems = computed(() => {
+  const all = found.value
+    .filter((b) => b.currency === chartCurrency.value && scores.value.has(b.id))
+    .map((b) => ({ id: b.id, name: b.name || b.id, sc: scores.value.get(b.id) }))
+    .sort((a, b) => b.sc.score - a.sc.score || a.id.localeCompare(b.id))
+    .slice(0, CHART_LIMIT)
+  return all.map((i, n) => ({ ...i, top: n < 5, place: n + 1, color: scoreColor(i.sc.score).text }))
+})
+const chartNote = computed(() => (!currency.value && currencies.value.length > 1 && chartCurrency.value ? `График: ${chartCurrency.value}. Выбери валюту, чтобы сменить.` : ''))
 
 const TIER_CLASS = {
   top1: 'text-amber-300 border-amber-400/70 bg-amber-400/15',
@@ -63,7 +92,7 @@ const TIER_CLASS = {
   top100: 'text-slate-300 border-slate-500/60 bg-slate-500/10'
 }
 const f1 = (x) => String(Math.round(x * 10) / 10).replace('.', ',')
-const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Рост капитала ≈ ${f1(sc.growth)} % годовых за ${HORIZON_YEARS} лет: ставка ${f1(sc.rate)} % на ${f1(sc.years)} г., дальше под ${f1(sc.base)} % (осторожная база ${sc.currency}: нижняя четверть ставок). Место ${sc.rank} среди ${sc.currency}`
+const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Рост капитала ≈ ${f1(sc.growth)} % годовых за ${HORIZON_YEARS} лет: ставка ${f1(sc.rate)} % на ${f1(sc.years)} г., дальше под ${f1(sc.base)} % (осторожная база ${sc.currency}: нижняя четверть ставок). Место ${sc.rank} среди ${sc.currency}. Вложение ${moneyText(amountN.value, sc.currency)}: к погашению ${moneyText(amountN.value * sc.multipleT, sc.currency)}, за ${HORIZON_YEARS} лет ${moneyText(amountN.value * sc.multipleH, sc.currency)}`
 </script>
 
 <template>
@@ -86,12 +115,19 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
       <label class="flex items-center gap-2 text-slate-400 cursor-pointer">
         <input v-model="hideMatured" type="checkbox" class="accent-emerald-500" />скрыть погашенные
       </label>
+      <label class="flex items-center gap-2 text-slate-400" title="Сумма вложения: по ней считается столбец «Через 10 л.» и графики">
+        вложение
+        <input v-model.number="amount" type="number" min="1" step="1000" class="ui-input !bg-slate-900 !w-28 text-right" />
+      </label>
       <span class="text-slate-500">Бумаг: {{ rows.length }}<template v-if="list && rows.length !== list.length"> из {{ list.length }}</template></span>
       <UiButton variant="secondary" size="sm" class="ml-auto" :disabled="running" @click="refresh">
         <template v-if="running">ОБНОВЛЯЮ...</template>
         <template v-else>ОБНОВИТЬ</template>
       </UiButton>
     </section>
+
+    <GrowthChart v-if="list && chartItems.length" :items="chartItems" :amount="amountN" :currency="chartCurrency" />
+    <div v-if="chartNote" class="text-[11px] text-slate-500 -mt-2">{{ chartNote }}</div>
 
     <div v-if="startError || loadError" class="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-3 rounded text-xs">{{ startError || loadError }}</div>
 

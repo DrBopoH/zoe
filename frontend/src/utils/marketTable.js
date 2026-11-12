@@ -17,6 +17,7 @@ export const COLUMNS = [
   { key: 'yield', label: 'Доходность', num: true },
   { key: 'last_auction', label: 'Аукцион', num: false },
   { key: 'nominal', label: 'Номинал', num: true },
+  { key: 'future', label: 'Через 10 л.', num: true },
   { key: 'score', label: 'Коэфф.', num: true }
 ]
 
@@ -135,7 +136,10 @@ export function scoreBonds(list, today) {
     scored.forEach((s, i) => {
       const rank = i + 1
       const tier = TIERS.find((t) => rank <= t.max) || null
-      out.set(s.id, { ...s, rank, tier: tier ? tier.key : '', tierLabel: tier ? tier.label : '' })
+      // во сколько раз вырастет вложение: к погашению (ставка бумаги) и за весь горизонт (с перекладыванием остатка)
+      const multipleT = Math.pow(1 + s.rate / 100, s.years)
+      const multipleH = Math.pow(1 + s.growth / 100, HORIZON_YEARS)
+      out.set(s.id, { ...s, rank, multipleT, multipleH, tier: tier ? tier.key : '', tierLabel: tier ? tier.label : '' })
     })
   }
   return out
@@ -146,3 +150,6 @@ export function scoreColor(score) {
   const h = Math.round(Math.min(100, Math.max(0, score)) * 1.2)
   return { border: `hsl(${h} 70% 45% / 0.6)`, bg: `hsl(${h} 70% 40% / 0.12)`, text: `hsl(${h} 75% 65%)` }
 }
+
+// Сумма с символом валюты: ₴ 12 345
+export const moneyText = (v, currency) => `${curSym(currency)}\u00A0${new Intl.NumberFormat('ru-RU').format(Math.round(v))}`
