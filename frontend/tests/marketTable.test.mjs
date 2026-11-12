@@ -122,3 +122,19 @@ test('пустой список и мусор не падают', () => {
   assert.equal(scoreBonds(null, T).size, 0)
   assert.equal(scoreBonds([{ id: 'Z', currency: 'UAH', maturity: '2026-01-01', coupon_rate: 5 }], T).get('Z').years, 0) // погашение сегодня: срока нет
 })
+
+import { parseIsins, restrictTo } from '../src/utils/marketTable.js'
+
+test('ISIN из вставленного текста: без повторов, регистр не важен, мусор игнорируется', () => {
+  const t = 'ОВДП 26.04.2028\nUA4000239040 Погашення\nua4000239008, UA4000239040 UA12 UA40002390401'
+  assert.deepEqual(parseIsins(t), ['UA4000239040', 'UA4000239008', 'UA4000239040'.replace('239040', '239040')].slice(0, 2))
+  assert.deepEqual(parseIsins(''), [])
+  assert.deepEqual(parseIsins(null), [])
+})
+
+test('только из набора; пустой набор не фильтрует', () => {
+  const l = [{ id: 'UA4000A00000' }, { id: 'ua4000b00000' }, { id: 'UA4000C00000' }]
+  assert.equal(restrictTo(l, new Set(['UA4000A00000', 'UA4000B00000'])).length, 2)
+  assert.equal(restrictTo(l, new Set()).length, 3)
+  assert.equal(restrictTo(undefined, new Set(['X'])), undefined)
+})

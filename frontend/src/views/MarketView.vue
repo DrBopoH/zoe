@@ -7,7 +7,7 @@ import { storageGet, storageSet } from '../utils/storage.js'
 import { useSection } from '../composables/useSection.js'
 import { apiGetJson, apiSend } from '../utils/api.js'
 import { toLocalDateStr } from '../utils/formatters.js'
-import { SOURCES, MARKET_SECTIONS, COLUMNS, filterBonds, sortBonds, currenciesOf, bondCells, nextSort, scoreBonds, scoreColor, HORIZON_YEARS, moneyText, isMatured, rateOf } from '../utils/marketTable.js'
+import { SOURCES, MARKET_SECTIONS, COLUMNS, filterBonds, sortBonds, currenciesOf, bondCells, nextSort, parseIsins, restrictTo, scoreBonds, scoreColor, HORIZON_YEARS, moneyText, isMatured, rateOf } from '../utils/marketTable.js'
 
 // dataVersion растёт при любой записи в кеш (в том числе после опроса рынка) — по нему перечитываем список.
 // running — идёт ли сейчас опрос рынка (из /sync/status → market.running).
@@ -46,13 +46,29 @@ const today = computed(() => toLocalDateStr(new Date()))
 const list = computed(() => lists.value[section.value])
 const currencies = computed(() => currenciesOf(list.value))
 // Коэффициент и места считаются по всему списку источника, а не по найденному: поиск не меняет цвета и места
-const scores = computed(() => scoreBonds(list.value, today.value))
+// «Только ICU»: свой список ISIN (вставляется из брокера, помнится в браузере); места и «Топ 1» считаются среди этих бумаг.
+const icuIds = ref(parseIsins(storageGet('zoe.market.icu', '')))
+const onlyIcu = ref(storageGet('zoe.market.onlyIcu', '0') === '1')
+const icuOpen = ref(false)
+const icuText = ref('')
+const icuSet = computed(() => new Set(icuIds.value))
+const icuActive = computed(() => section.value === 'nbu' && onlyIcu.value && icuSet.value.size > 0)
+watch(onlyIcu, (v) => storageSet('zoe.market.onlyIcu', v ? '1' : '0'))
+const saveIcu = () => {
+  icuIds.value = parseIsins(icuText.value)
+  storageSet('zoe.market.icu', icuIds.value.join(' '))
+  if (!icuIds.value.length) onlyIcu.value = false
+  icuOpen.value = false
+}
+const openIcu = () => { icuText.value = icuIds.value.join('\n'); icuOpen.value = !icuOpen.value }
+const pool = computed(() => (icuActive.value ? restrictTo(list.value, icuSet.value) : list.value))
+const scores = computed(() => scoreBonds(pool.value, today.value))
 // Сумма вложения для расчёта «через 10 лет» и графиков; помнится в браузере
 const amount = ref(Math.max(1, Number(storageGet('zoe.market.amount', '10000')) || 10000))
 watch(amount, (v) => { if (v > 0) storageSet('zoe.market.amount', String(v)) })
 const amountN = computed(() => (Number(amount.value) > 0 ? Number(amount.value) : 1))
 
-const found = computed(() => filterBonds(list.value, { q: q.value, currency: currency.value, hideMatured: hideMatured.value, today: today.value }))
+const found = computed(() => filterBonds(pool.value, { q: q.value, currency: currency.value, hideMatured: hideMatured.value, today: today.value }))
 const rows = computed(() => sortBonds(
   found.value.map((b) => {
     const sc = scores.value.get(b.id)
@@ -106,7 +122,7 @@ const chartItems = computed(() => {
 const showMatured = ref(false)
 const MATURED_LIMIT = 100
 const yearsFromToday = (iso) => (Date.parse(`${iso}T00:00:00Z`) - Date.parse(`${today.value}T00:00:00Z`)) / (365.25 * 86400000)
-const chartMatured = computed(() => filterBonds(list.value, { q: q.value, currency: chartCurrency.value || currency.value, hideMatured: false, today: today.value })
+const chartMatured = computed(() => filterBonds(pool.value, { q: q.value, currency: chartCurrency.value || currency.value, hideMatured: false, today: today.value })
   .filter((b) => b.currency === chartCurrency.value && isMatured(b, today.value) && b.issued && rateOf(b) > 0 && b.issued < b.maturity)
   .sort((a, b) => b.maturity.localeCompare(a.maturity))
   .slice(0, MATURED_LIMIT)
@@ -146,6 +162,12 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
       <label class="flex items-center gap-2 text-slate-400 cursor-pointer" title="На графике: уже погашенные бумаги серым пунктиром от выпуска до погашения (нужна дата выпуска)">
         <input v-model="showMatured" type="checkbox" class="accent-emerald-500" />сгоревшие на графике
       </label>
+      <template v-if="section === 'nbu'">
+        <label class="flex items-center gap-2 cursor-pointer" :class="icuIds.length ? 'text-slate-400' : 'text-slate-600 cursor-not-allowed'" title="Места, Топ 1 и график считаются только среди бумаг из твоего списка ICU. Снять галочку — снова весь реестр НБУ">
+          <input v-model="onlyIcu" type="checkbox" class="accent-emerald-500" :disabled="!icuIds.length" />только ICU<span v-if="icuIds.length" class="text-slate-600">({{ icuIds.length }})</span>
+        </label>
+        <button type="button" class="text-[10px] text-slate-500 hover:text-emerald-400 underline cursor-pointer" @click="openIcu">{{ icuIds.length ? 'список ICU' : 'добавить список ICU' }}</button>
+      </template>
       <label class="flex items-center gap-2 text-slate-400" title="Сумма вложения: по ней считается столбец «Через 10 л.» и графики">
         вложение
         <input v-model.number="amount" type="number" min="1" step="1000" class="ui-input !bg-slate-900 !w-28 text-right" />
@@ -155,6 +177,16 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
         <template v-if="running">ОБНОВЛЯЮ...</template>
         <template v-else>ОБНОВИТЬ</template>
       </UiButton>
+    </section>
+
+    <section v-if="icuOpen && section === 'nbu'" class="bg-slate-900/60 border border-slate-800 rounded p-3 space-y-2 text-xs">
+      <div class="text-slate-400">Вставь текст из ICU (экран «Купити» → ОВДП): ISIN вытащатся сами, остальное игнорируется. Список только в этом браузере; обновляй, когда набор бумаг в ICU меняется.</div>
+      <textarea v-model="icuText" rows="4" class="ui-input !bg-slate-900 w-full font-mono" placeholder="UA4000239040&#10;UA4000239008&#10;…"></textarea>
+      <div class="flex items-center gap-3">
+        <UiButton variant="secondary" size="sm" @click="saveIcu">СОХРАНИТЬ</UiButton>
+        <span class="text-slate-500">найдено ISIN: {{ parseIsins(icuText).length }}</span>
+        <button type="button" class="text-slate-500 hover:text-slate-300 underline cursor-pointer" @click="icuOpen = false">закрыть</button>
+      </div>
     </section>
 
     <GrowthChart v-if="list && (chartItems.length || chartMatured.length)" :items="chartItems" :matured="showMatured ? chartMatured : NONE" :amount="amountN" :currency="chartCurrency" :today="today" :spreads="spreads" />

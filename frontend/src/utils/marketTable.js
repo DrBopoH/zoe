@@ -24,6 +24,11 @@ export const COLUMNS = [
 const isEmpty = (v) => v === '' || v === null || v === undefined || (typeof v === 'number' && !(v > 0))
 
 // Что значит «погашена»: дата погашения раньше сегодняшней. Без даты бумага считается действующей.
+// Список доступных в брокере (ICU) бумаг: из вставленного текста берём ISIN (UA + 10 цифр), без повторов
+export const parseIsins = (text) => [...new Set(String(text || '').toUpperCase().match(/UA\d{10}/g) || [])]
+// Оставить только бумаги из набора ISIN; пустой набор не фильтрует (иначе «только ICU» без списка обнулил бы таблицу)
+export const restrictTo = (list, ids) => (!list || !ids || !ids.size ? list : list.filter((b) => ids.has(String(b.id).toUpperCase())))
+
 export const isMatured = (b, today) => !!b.maturity && b.maturity < today
 
 export function filterBonds(list, { q = '', currency = '', hideMatured = true, today = '' } = {}) {
