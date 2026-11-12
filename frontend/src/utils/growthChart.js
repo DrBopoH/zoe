@@ -3,11 +3,13 @@
 // Бумага держит свою ставку до погашения (сложный процент); если до конца горизонта остаётся время, дальше пунктир: деньги
 // лежат под базовой ставкой группы. «Сгоревшие» (уже погашенные) бумаги — серым пунктиром с даты выпуска до погашения.
 import { HORIZON_YEARS } from './marketTable.js'
+import { zoomWindow, panWindow, panY, zoomY } from './chartView.js'
 
 export const YEAR_DAYS = 365.25
 export const MIN_SPAN = 0.25 // дальше приближать смысла нет: четверть года
 export const MAX_SPAN = 60
 const MAX_FUTURE = 30 // дальше 30 лет от сегодня линии не строим
+export const GROWTH_PAD = { l: 92, r: 22, t: 14, b: 26 } // поля графика (px во viewBox): по ним мышь переводится в данные
 const DEFAULT_RIGHT = 15 // окно по умолчанию не шире 15 лет вперёд: самая долгая бумага иначе сплющит остальные, дальше — колесом
 
 // Во сколько раз вырастет вложение к моменту t (лет от сегодня)
@@ -76,17 +78,11 @@ export function autoView(items, matured = []) {
   return { x0: left, x1: right + (right - left) * 0.02 }
 }
 
-/** Окно после приближения: factor < 1 — приблизить, > 1 — отдалить; якорь anchor (лет) остаётся на месте. */
-export function zoomView(view, factor, anchor) {
-  let span = (view.x1 - view.x0) * factor
-  span = Math.min(MAX_SPAN, Math.max(MIN_SPAN, span))
-  const ratio = (anchor - view.x0) / (view.x1 - view.x0)
-  const x0 = anchor - ratio * span
-  return { x0, x1: x0 + span }
-}
+/** Окно после приближения: factor < 1 — приблизить, > 1 — отдалить; якорь anchor (лет) остаётся на месте. Общая математика — utils/chartView.js. */
+export const zoomView = (view, factor, anchor) => zoomWindow(view, factor, anchor, { minSpan: MIN_SPAN, maxSpan: MAX_SPAN })
 
 /** Сдвиг окна на dt лет. */
-export const panView = (view, dt) => ({ x0: view.x0 + dt, x1: view.x1 + dt })
+export const panView = panWindow
 
 const MAX_PAST = 40 // бумаги старше 40 лет не рисуем: окно не должно уезжать в прошлый век из-за одной кривой даты
 
@@ -131,7 +127,7 @@ export function yRanges({ items, matured = [], amount = 1, view }) {
  * (годы от сегодня, отрицательные). view: { x0, x1 } или null (авто). yRange: { lo, hi } или null (авто, под лучшие бумаги в окне).
  * Остальные линии могут уходить за край — их обрезает рамка графика.
  */
-export function buildGrowthChart({ items, matured = [], amount = 1, view = null, yRange = null, today, width = 1000, height = 300, pad = { l: 92, r: 22, t: 14, b: 26 } }) {
+export function buildGrowthChart({ items, matured = [], amount = 1, view = null, yRange = null, today, width = 1000, height = 300, pad = GROWTH_PAD }) {
   const list = Array.isArray(items) ? items : []
   const old = cleanMatured(matured)
   const v = view || autoView(list, old)
@@ -184,19 +180,5 @@ export function buildGrowthChart({ items, matured = [], amount = 1, view = null,
   }
 }
 
-/** Ручной сдвиг по вертикали: на dv суммы, не дальше крайностей по данным. */
-export function panY(range, dv, ext) {
-  const span = range.hi - range.lo
-  let lo = range.lo + dv
-  lo = Math.max(ext.lo, Math.min(lo, ext.hi - span))
-  return { lo, hi: lo + span }
-}
-
-/** Ручное приближение по вертикали: factor < 1 приближает, якорь (сумма) остаётся на месте; размах от 2 % до 120 % крайностей. */
-export function zoomY(range, factor, anchor, ext) {
-  const full = ext.hi - ext.lo
-  const span = Math.min(full * 1.2, Math.max(full * 0.02, (range.hi - range.lo) * factor))
-  const ratio = (anchor - range.lo) / (range.hi - range.lo)
-  const lo = anchor - ratio * span
-  return { lo, hi: lo + span }
-}
+// ручной сдвиг и масштаб суммы по вертикали — общие (utils/chartView.js), здесь реэкспорт для старых импортов
+export { panY, zoomY }

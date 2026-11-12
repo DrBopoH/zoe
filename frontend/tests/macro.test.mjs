@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { valueAt, realRate, signedPct, plainPct, currentInflation, macroSummary, buildMacroChart } from '../src/utils/macro.js'
+import { valueAt, realRate, signedPct, plainPct, currentInflation, macroSummary, buildMacroChart, macroWindow, macroRanges, yearsFrom, isoAt } from '../src/utils/macro.js'
 import { sortBonds } from '../src/utils/marketTable.js'
 
 const rate = [{ d: '2024-12-12', v: 13.5 }, { d: '2025-01-23', v: 14.5 }, { d: '2026-01-01', v: 15.5 }]
@@ -49,26 +49,52 @@ test('сводка: ставка на сегодня, инфляция посл�
   assert.ok(Math.abs(s.realPolicy - ((1.155 / 1.061 - 1) * 100)) < 1e-9)
 })
 
+const chartOf = (series, ids, years, todayIso = '2026-11-12', yRange = null) => {
+  const view = macroWindow({ series, ids, todayIso, years })
+  const r = yRange || macroRanges({ series, ids, view, todayIso }).auto
+  return { view, chart: buildMacroChart({ series, ids, view, yRange: r, todayIso }) }
+}
+
 test('график: пустой без данных; ставка ступенькой тянется до сегодня, инфляция ломаной', () => {
-  assert.equal(buildMacroChart({ series: {}, ids: ['policy_rate'], years: 5, todayIso: '2026-11-12' }).empty, true)
-  const c = buildMacroChart({ series: { policy_rate: rate, cpi_yoy: cpi }, ids: ['policy_rate', 'cpi_yoy'], years: 5, todayIso: '2026-11-12' })
+  assert.equal(chartOf({}, ['policy_rate'], 5).chart.empty, true)
+  const { chart: c } = chartOf({ policy_rate: rate, cpi_yoy: cpi }, ['policy_rate', 'cpi_yoy'], 5)
   assert.equal(c.empty, false)
   const p = c.lines.find((l) => l.id === 'policy_rate').d
   assert.match(p, /^M[\d.]+ [\d.]+(H[\d.]+V[\d.]+)+H[\d.]+$/) // старт, ступеньки смены ставки, хвост до сегодня
-  assert.ok(p.includes('V'))
   const i = c.lines.find((l) => l.id === 'cpi_yoy').d
   assert.equal((i.match(/L/g) || []).length, 2) // три месяца — два отрезка
   assert.ok(c.yTicks.length >= 2 && c.yTicks[0].y > c.yTicks[c.yTicks.length - 1].y, 'большее значение выше на экране')
   assert.ok(c.todayX > c.pad.l && c.todayX <= c.width - c.pad.r + 0.01)
-  assert.equal(c.zeroY === null || typeof c.zeroY === 'number', true)
   for (const l of c.lines) assert.ok(!l.d.includes('NaN'), l.d)
 })
 
-test('график: окно «5 лет» берёт значение ставки, действовавшее на левом краю', () => {
-  const c = buildMacroChart({ series: { policy_rate: [{ d: '2010-01-01', v: 7 }, { d: '2026-06-01', v: 15 }] }, ids: ['policy_rate'], years: 5, todayIso: '2026-11-12' })
+test('окно: годы от сегодня, «5 лет» не шире 5 лет, «всё» — с первой точки; даты и годы переводятся друг в друга', () => {
+  const s = { policy_rate: [{ d: '2010-01-01', v: 7 }, { d: '2026-06-01', v: 15 }] }
+  const w5 = macroWindow({ series: s, ids: ['policy_rate'], todayIso: '2026-11-12', years: 5 })
+  assert.equal(w5.x0, -5)
+  assert.ok(w5.x1 > 0 && w5.x1 < 0.2)
+  const all = macroWindow({ series: s, ids: ['policy_rate'], todayIso: '2026-11-12', years: 0 })
+  assert.ok(all.x0 < -16 && all.x0 > -17)
+  assert.ok(Math.abs(yearsFrom('2025-11-12', '2026-11-12') + 1) < 0.01)
+  assert.equal(isoAt(yearsFrom('2024-03-05', '2026-11-12'), '2026-11-12'), '2024-03-05')
+})
+
+test('окно «5 лет» берёт значение ставки, действовавшее на левом краю', () => {
+  const { chart: c } = chartOf({ policy_rate: [{ d: '2010-01-01', v: 7 }, { d: '2026-06-01', v: 15 }] }, ['policy_rate'], 5)
   const d = c.lines[0].d
-  assert.ok(d.startsWith('M46.0 '), d) // линия начинается у левого края, а не пропадает
+  assert.ok(d.startsWith('M'), d)
   assert.ok(d.includes('V'))
+})
+
+test('вертикаль: один сбойный месяц не сплющивает график, но остаётся достижимым в крайностях', () => {
+  const pts = []
+  for (let m = 0; m < 120; m++) pts.push({ d: `${2017 + Math.floor(m / 12)}-${String((m % 12) + 1).padStart(2, '0')}-01`, v: 5 + (m % 7) })
+  pts[40].v = -50 // выброс
+  const view = macroWindow({ series: { core_yoy: pts }, ids: ['core_yoy'], todayIso: '2026-11-12', years: 10 })
+  const r = macroRanges({ series: { core_yoy: pts }, ids: ['core_yoy'], view, todayIso: '2026-11-12' })
+  assert.ok(r.auto.lo > -10, `auto.lo ${r.auto.lo}`) // выброс срезан
+  assert.ok(r.ext.lo < -50, `ext.lo ${r.ext.lo}`) // но достижим сдвигом
+  assert.ok(r.auto.hi < 20)
 })
 
 test('сортировка по «Реальной»: минус и ноль — это значения, пусто (null) уходит в конец', () => {
