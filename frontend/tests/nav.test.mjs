@@ -18,3 +18,7 @@ test('мусор и пустое → Смета и «История»', () => {
   assert.deepEqual(resolveNav('x', 'y'), { tab: 'dashboard', section: 'history' })
   assert.equal(resolveNav('data', 'zzz').section, 'history')
 })
+
+test('вкладка «Рынок» сохраняется как есть', () => {
+  assert.deepEqual(resolveNav('market', 'persons'), { tab: 'market', section: 'persons' })
+})

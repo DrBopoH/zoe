@@ -1,7 +1,7 @@
 // Навигация: верхние вкладки и разделы внутри «Учет». Старые сохранённые значения (до переезда
 // «Операционной» и «Лиц» в «Учет») переводятся в новые, чтобы после обновления человек попал туда же.
 
-export const TOP_TABS = ['dashboard', 'data']
+export const TOP_TABS = ['dashboard', 'market', 'data']
 export const DATA_SECTIONS = ['history', 'persons']
 
 const LEGACY = {

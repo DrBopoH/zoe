@@ -7,6 +7,7 @@ import ToastStack from './components/ToastStack.vue'
 import { pushToast } from './composables/useToasts.js'
 import { useWheelScroll } from './composables/useWheelScroll.js'
 import SmetaView from './views/SmetaView.vue'
+import MarketView from './views/MarketView.vue'
 import DataView from './views/DataView.vue'
 import { cleanPersonName, isP2PTransaction } from './utils/formatters.js'
 import { apiGetJson, apiSend } from './utils/api.js'
@@ -197,6 +198,7 @@ onUnmounted(() => {
       </div>
 
       <KeepAlive><SmetaView v-if="activeTab === 'dashboard'" :accounts="accounts" :transactions="transactions" /></KeepAlive>
+      <KeepAlive><MarketView v-if="activeTab === 'market'" :data-version="dataVersion" :running="!!market?.running" /></KeepAlive>
       <KeepAlive><DataView v-if="activeTab === 'data'" :accounts="accounts" :transactions="transactions" :users="users" :data-version="dataVersion" :persons-count="personsCount" @refresh="fetchData" /></KeepAlive>
     </div>
   </div>
