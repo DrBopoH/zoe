@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { apiUpload } from '../utils/api.js'
-import { formatRuDate } from '../utils/formatters.js'
+import { formatRuDate, fmtN, formatPeriod as period } from '../utils/formatters.js'
 import UiModal from './ui/UiModal.vue'
 import UiButton from './ui/UiButton.vue'
 import UiIconButton from './ui/UiIconButton.vue'
@@ -114,8 +114,6 @@ const submitLabel = computed(() => {
   if (uploading.value) return 'Загрузка...'
   return props.mode === 'update' || updateExisting.value ? 'Обновить' : 'Добавить'
 })
-const period = (a, b) => (a ? `${formatRuDate(a)} — ${formatRuDate(b)}` : '—')
-const fmtN = (n) => new Intl.NumberFormat('ru-RU').format(n || 0)
 </script>
 
 <template>
