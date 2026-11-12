@@ -50,30 +50,54 @@ test('валюты списка и переключение сортировки
   assert.deepEqual(nextSort({ key: 'id', dir: 'desc' }, 'yield'), { key: 'yield', dir: 'asc' })
 })
 
-import { scoreBonds, scoreColor, rateOf } from '../src/utils/marketTable.js'
+import { scoreBonds, scoreColor, rateOf, growthOf, quantile } from '../src/utils/marketTable.js'
 
 const T = '2026-01-01'
 const S = [
-  { id: 'A', currency: 'UAH', maturity: '2027-01-01', coupon_rate: 10, yield: 0 }, // 365 дн., ставка 10
-  { id: 'B', currency: 'UAH', maturity: '2026-07-02', coupon_rate: 5, yield: 20 },  // ~182 дн., ставка 20 (аукцион главнее купона)
-  { id: 'C', currency: 'UAH', maturity: '2025-12-01', coupon_rate: 30, yield: 0 },  // погашена — не оценивается
-  { id: 'D', currency: 'UAH', maturity: '2027-01-01', coupon_rate: 0, yield: 0 },    // нет ставки
-  { id: 'E', currency: 'UAH', maturity: '', coupon_rate: 9, yield: 0 },              // нет даты
-  { id: 'U', currency: 'USD', maturity: '2026-07-02', coupon_rate: 4, yield: 0 }     // другая группа: сама себе 100 % по ставке
+  { id: 'A', currency: 'UAH', maturity: '2036-01-01', coupon_rate: 20, yield: 0 }, // высокая ставка на весь горизонт
+  { id: 'B', currency: 'UAH', maturity: '2026-07-02', coupon_rate: 5, yield: 20 }, // доходность аукциона главнее купона
+  { id: 'C', currency: 'UAH', maturity: '2025-12-01', coupon_rate: 30, yield: 0 }, // погашена — не оценивается
+  { id: 'D', currency: 'UAH', maturity: '2027-01-01', coupon_rate: 0, yield: 0 },   // нет ставки
+  { id: 'E', currency: 'UAH', maturity: '', coupon_rate: 9, yield: 0 },             // нет даты
+  { id: 'L', currency: 'UAH', maturity: '2036-01-01', coupon_rate: 6, yield: 0 },   // низкая ставка, запертая надолго
+  { id: 'M1', currency: 'UAH', maturity: '2027-01-01', coupon_rate: 10, yield: 0 },
+  { id: 'M2', currency: 'UAH', maturity: '2027-01-01', coupon_rate: 10, yield: 0 }
 ]
 
 test('ставка бумаги: аукционная доходность главнее купона', () => {
-  assert.equal(rateOf(S[1]), 20); assert.equal(rateOf(S[0]), 10); assert.equal(rateOf(S[3]), 0)
+  assert.equal(rateOf(S[1]), 20); assert.equal(rateOf(S[0]), 20 / 20 * 20); assert.equal(rateOf(S[3]), 0)
 })
 
-test('коэффициент: срок и ставка относительно лучшей бумаги валюты, среднее из двух', () => {
+test('рост за горизонт: на весь срок — сама ставка, на короткий — между ставкой и базой', () => {
+  assert.equal(growthOf(15, 10, 8), 15)
+  assert.equal(growthOf(15, 12, 8), 15)
+  assert.ok(Math.abs(growthOf(15, 0, 8) - 8) < 1e-9)
+  const g = growthOf(15, 1, 8)
+  assert.ok(g > 8 && g < 15)
+  assert.ok(growthOf(15, 5, 8) > growthOf(15, 1, 8)) // дольше держим высокую — больше рост
+  assert.ok(growthOf(5, 5, 8) < 8)                   // низкую ставку надолго запирать невыгодно
+})
+
+test('квантиль с интерполяцией', () => {
+  assert.equal(quantile([6, 10, 10, 20, 20], 0.25), 10)
+  assert.equal(quantile([10, 20], 0.25), 12.5)
+  assert.equal(quantile([7], 0.25), 7)
+  assert.equal(quantile([3, 1, 2], 0), 1)
+})
+
+test('коэффициент: запертая высокая ставка лучше всех, запертая низкая хуже всех', () => {
   const m = scoreBonds(S, T)
   assert.equal(m.has('C') || m.has('D') || m.has('E'), false)
-  const a = m.get('A'), b = m.get('B')
-  assert.equal(a.term, 100); assert.equal(a.rate, 50); assert.equal(a.score, 75)
-  assert.equal(Math.round(b.term), 50); assert.equal(b.rate, 100); assert.equal(Math.round(b.score), 75)
-  assert.equal(m.get('U').rate, 100) // доллар меряется только с долларами
-  assert.equal(m.get('U').term, 100)
+  assert.equal(m.get('A').score, 100); assert.equal(m.get('A').rank, 1)
+  assert.equal(m.get('L').score, 0)
+  const b = m.get('B') // ставка 20 всего на полгода: чуть лучше базы, но сильно хуже запертой 20 %
+  assert.ok(b.score > 0 && b.score < 100)
+  assert.equal(m.get('A').base, 10) // нижняя четверть ставок 6, 10, 10, 20, 20 → 10
+})
+
+test('группа из одной бумаги: 100 %, разные валюты считаются раздельно', () => {
+  const m = scoreBonds([{ id: 'U', currency: 'USD', maturity: '2030-01-01', coupon_rate: 4 }, { id: 'H', currency: 'UAH', maturity: '2030-01-01', coupon_rate: 15 }], T)
+  assert.equal(m.get('U').score, 100); assert.equal(m.get('H').score, 100)
 })
 
 test('места и значки внутри валюты: 1, до 10, до 25, до 100, дальше без значка', () => {
@@ -96,5 +120,5 @@ test('цвет: красный → жёлтый → зелёный, значен
 
 test('пустой список и мусор не падают', () => {
   assert.equal(scoreBonds(null, T).size, 0)
-  assert.equal(scoreBonds([{ id: 'Z', currency: 'UAH', maturity: '2026-01-01', coupon_rate: 5 }], T).get('Z').term, 0) // погашение сегодня: срока нет
+  assert.equal(scoreBonds([{ id: 'Z', currency: 'UAH', maturity: '2026-01-01', coupon_rate: 5 }], T).get('Z').years, 0) // погашение сегодня: срока нет
 })

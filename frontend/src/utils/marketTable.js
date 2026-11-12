@@ -70,13 +70,21 @@ export function bondCells(b) {
 // Следующее направление сортировки при клике по заголовку: новый столбец — по возрастанию, тот же — наоборот
 export const nextSort = (cur, key) => (cur.key === key ? { key, dir: cur.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' })
 
-// ── Коэффициент бумаги: чем выше, тем она «выгоднее» на глаз. Два процента, среднее из них.
-//  срок   — сколько осталось до погашения от сегодня относительно самой длинной бумаги группы (она = 100 %);
-//  ставка — доходность относительно самой высокой в группе (она = 100 %, ноль = 0 %): аукционная доходность,
-//           а если её нет — купонная ставка.
-// Группа = одна валюта среди действующих бумаг: ставки в гривне, долларе и евро несравнимы, а 4 % по доллару
-// нельзя мерить 19 % по гривне. Погашенные, бумаги без даты погашения и без ставки не оцениваются.
+// ── Коэффициент бумаги для долгосрочного накопления: чем выше, тем лучше бумага растит капитал за длинный горизонт.
+// Модель: берём горизонт HORIZON_YEARS (10 лет). Бумага держит свою ставку r до погашения (купоны вкладываются под неё же),
+// остаток горизонта деньги вкладываются под «базовую» ставку b — нижнюю четверть (25-й перцентиль) ставок действующих бумаг
+// той же валюты: осторожное допущение «ставки со временем снизятся», а не «останутся как сейчас». Среднегодовой рост за горизонт:
+//     g = ((1 + r)^T · (1 + b)^(H − T))^(1/H) − 1,  T = срок до погашения в годах (при T ≥ H просто g = r).
+// Отсюда смысл: высокая ставка на ДОЛГИЙ срок = запертая выгода, лучшая; высокая на короткий — выгода кончится и придётся
+// перекладываться (риск реинвестирования), чуть выше базовой; низкая на долгий срок — наоборот, ты запираешь плохую ставку
+// и проигрываешь рынку. Коэффициент = место g между худшей (0 %) и лучшей (100 %) бумагой группы.
+// Группа = одна валюта среди действующих бумаг: ставки в гривне, долларе и евро несравнимы. Ставка бумаги — аукционная
+// доходность, а если её нет, то купонная. Погашенные, без даты погашения и без ставки не оцениваются.
 // Считается по всему списку источника, а не по отфильтрованному: поиск не должен менять цвета и места.
+// Упрощения: проценты годовые сложные (на деле купоны раз в полгода), налоги и инфляцию не учитывает; индексируемые
+// на инфляцию ОВДП с низкой номинальной ставкой выглядят хуже, чем они есть на деле.
+export const HORIZON_YEARS = 10
+
 export const TIERS = [
   { key: 'top1', max: 1, label: 'Топ 1' },
   { key: 'top10', max: 10, label: 'Топ 10' },
@@ -88,6 +96,23 @@ export const rateOf = (b) => (b.yield > 0 ? b.yield : b.coupon_rate > 0 ? b.coup
 
 const dayNum = (iso) => Date.parse(`${iso}T00:00:00Z`) / 86400000
 
+export const REINVEST_QUANTILE = 0.25
+
+// Квантиль с линейной интерполяцией между соседними значениями
+export const quantile = (xs, q) => {
+  const v = [...xs].sort((x, y) => x - y)
+  const pos = (v.length - 1) * q
+  const i = Math.floor(pos)
+  return i + 1 < v.length ? v[i] + (v[i + 1] - v[i]) * (pos - i) : v[i]
+}
+
+// Среднегодовой рост за горизонт: ставка r (в %) держится years лет, остаток — под базовую base (в %)
+export function growthOf(r, years, base, horizon = HORIZON_YEARS) {
+  if (years >= horizon) return r
+  const held = Math.log1p(r / 100) * years + Math.log1p(base / 100) * (horizon - years)
+  return (Math.expm1(held / horizon)) * 100
+}
+
 export function scoreBonds(list, today) {
   const t0 = dayNum(today)
   const groups = new Map()
@@ -95,19 +120,17 @@ export function scoreBonds(list, today) {
     if (!b.maturity || isMatured(b, today)) continue
     const rate = rateOf(b)
     if (!(rate > 0)) continue
-    const left = Math.max(0, dayNum(b.maturity) - t0)
+    const years = Math.max(0, dayNum(b.maturity) - t0) / 365.25
     if (!groups.has(b.currency)) groups.set(b.currency, [])
-    groups.get(b.currency).push({ id: b.id, currency: b.currency, left, rate })
+    groups.get(b.currency).push({ id: b.id, currency: b.currency, years, rate })
   }
   const out = new Map()
   for (const [currency, items] of groups) {
-    const maxLeft = Math.max(...items.map((i) => i.left))
-    const maxRate = Math.max(...items.map((i) => i.rate))
-    const scored = items.map((i) => {
-      const term = maxLeft > 0 ? (i.left / maxLeft) * 100 : 0
-      const rate = (i.rate / maxRate) * 100
-      return { id: i.id, currency, term, rate, score: (term + rate) / 2 }
-    })
+    const base = quantile(items.map((i) => i.rate), REINVEST_QUANTILE)
+    const grown = items.map((i) => ({ ...i, base, growth: growthOf(i.rate, i.years, base) }))
+    const lo = Math.min(...grown.map((i) => i.growth))
+    const hi = Math.max(...grown.map((i) => i.growth))
+    const scored = grown.map((i) => ({ ...i, score: hi > lo ? ((i.growth - lo) / (hi - lo)) * 100 : 100 }))
     scored.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
     scored.forEach((s, i) => {
       const rank = i + 1

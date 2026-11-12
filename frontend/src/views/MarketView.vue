@@ -5,7 +5,7 @@ import UiButton from '../components/ui/UiButton.vue'
 import { useSection } from '../composables/useSection.js'
 import { apiGetJson, apiSend } from '../utils/api.js'
 import { toLocalDateStr } from '../utils/formatters.js'
-import { SOURCES, MARKET_SECTIONS, COLUMNS, filterBonds, sortBonds, currenciesOf, bondCells, nextSort, scoreBonds, scoreColor } from '../utils/marketTable.js'
+import { SOURCES, MARKET_SECTIONS, COLUMNS, filterBonds, sortBonds, currenciesOf, bondCells, nextSort, scoreBonds, scoreColor, HORIZON_YEARS } from '../utils/marketTable.js'
 
 // dataVersion растёт при любой записи в кеш (в том числе после опроса рынка) — по нему перечитываем список.
 // running — идёт ли сейчас опрос рынка (из /sync/status → market.running).
@@ -62,16 +62,8 @@ const TIER_CLASS = {
   top25: 'text-sky-300 border-sky-400/60 bg-sky-400/10',
   top100: 'text-slate-300 border-slate-500/60 bg-slate-500/10'
 }
-const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %: срок ${Math.round(sc.term)} % · ставка ${Math.round(sc.rate)} %. Место ${sc.rank} среди ${sc.currency}`
-
-const refresh = async () => {
-  startError.value = ''
-  try {
-    await apiSend('POST', `/market/sync?source=${section.value}`)
-  } catch (e) {
-    startError.value = String(e.message || e)
-  }
-}
+const f1 = (x) => String(Math.round(x * 10) / 10).replace('.', ',')
+const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Рост капитала ≈ ${f1(sc.growth)} % годовых за ${HORIZON_YEARS} лет: ставка ${f1(sc.rate)} % на ${f1(sc.years)} г., дальше под ${f1(sc.base)} % (осторожная база ${sc.currency}: нижняя четверть ставок). Место ${sc.rank} среди ${sc.currency}`
 </script>
 
 <template>
