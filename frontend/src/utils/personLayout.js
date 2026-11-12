@@ -73,6 +73,7 @@ export const detectBankKey = (ibanStr, cacheAcc, pans = []) => {
   if (mfo === '300335' || mfo === '380805') return 'raif'
   if (mfo === '305299') return 'privat'
   if (mfo === '322001') return 'mono'
+  if (mfo === '935871') return 'novapay' // NovaPay: UA12 935871…
 
   const allIds = [norm, ...pans.map(normId)].filter(Boolean)
   for (const id of allIds) {
@@ -116,7 +117,7 @@ export const plainNameFromDescription = (t) => {
 // Единое «имя контрагента» операции: counter_name → контакт после префикса → имя-описание P2P
 // Контрагент без имени, известный только по карте («отримувач -, 487407****44, банк отримувача JSC UNIVERSAL BANK»):
 // имя-алиас «487407****44 · Monobank». Зеркало pseudoCounterName в Go (util.go).
-const BANK_LABEL = { mono: 'Monobank', privat: 'PrivatBank', raif: 'Raiffeisen' }
+const BANK_LABEL = { mono: 'Monobank', privat: 'PrivatBank', raif: 'Raiffeisen', novapay: 'NovaPay' }
 export const pseudoCounterName = (t) => {
   const c = String(t?.counter_iban || '').trim()
   if (!c || !isPanLike(c)) return ''
@@ -397,7 +398,7 @@ export const buildAliasGraph = ({ accounts = [], transactions = [], users = [], 
 
 // ───────────────────────── раскладка карточки лица ─────────────────────────
 
-const BANK_ORDER = ['mono', 'raif', 'privat', 'other']
+const BANK_ORDER = ['mono', 'raif', 'privat', 'novapay', 'other']
 const byName = (a, b) => String(a).localeCompare(String(b), 'ru')
 
 export const buildPersonLayout = (user, graph) => {

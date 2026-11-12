@@ -15,6 +15,7 @@ import (
 	"economic/pkg/db"
 	"economic/pkg/icu"
 	"economic/pkg/mono"
+	"economic/pkg/novapay"
 	"economic/pkg/privat"
 	"economic/pkg/raif"
 	"economic/pkg/source"
@@ -22,7 +23,7 @@ import (
 
 func store() source.Store { return source.Store{Dir: sourcesDir()} }
 
-// parseSource разбирает выписку (PDF Привата / CSV Райфа / выписка Binance / брокерский отчёт ICU) в единый файл-источник.
+// parseSource разбирает выписку (PDF Привата / CSV Райфа / CSV NovaPay / выписка Binance / брокерский отчёт ICU) в единый файл-источник.
 // Ничего никуда не пишет.
 func parseSource(filename string, raw []byte) (*source.File, error) {
 	switch {
@@ -57,6 +58,12 @@ func parseSource(filename string, raw []byte) (*source.File, error) {
 		}
 		targetIBAN, targetCard, bankType, balance, transactions = parsed.IBAN, parsed.CardNumber, "privat", parsed.Balance, parsed.Transactions
 		origin = source.OriginPDF
+	} else if novapay.IsStatement(raw) {
+		parsed, err := novapay.ParseCSV(raw)
+		if err != nil {
+			return nil, &importError{http.StatusBadRequest, fmt.Sprintf("Failed to parse NovaPay CSV: %v", err)}
+		}
+		targetIBAN, targetCard, bankType, balance, transactions = parsed.IBAN, parsed.CardNumber, novapay.BankType, parsed.Balance, parsed.Transactions
 	} else {
 		parsed, err := raif.ParseCSV(bytes.NewReader(raw))
 		if err != nil {

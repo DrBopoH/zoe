@@ -28,7 +28,8 @@ const BANKS = {
   322001: { key: 'mono', letter: 'M', name: 'monobank' },
   305299: { key: 'privat', letter: 'П', name: 'ПриватБанк' },
   300335: { key: 'raif', letter: 'R', name: 'Райффайзен' },
-  380946: { key: 'icu', letter: 'I', name: 'ICU' }
+  380946: { key: 'icu', letter: 'I', name: 'ICU' },
+  935871: { key: 'novapay', letter: 'N', name: 'NovaPay' }
 }
 
 // логотипы, которых нет в public/banks: один раз не нашли — больше не запрашиваем (общее на все компоненты)

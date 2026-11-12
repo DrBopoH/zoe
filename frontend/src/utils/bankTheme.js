@@ -49,6 +49,13 @@ const THEMES = {
     tag: 'HOT',
     tagStyle: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/40'
   },
+  novapay: {
+    tile: 'bg-gradient-to-br from-rose-600/35 via-rose-950/40 to-slate-950 border-rose-500/60 text-rose-100',
+    panel: 'bg-gradient-to-br from-rose-600/35 via-rose-950/30 to-slate-950 border-rose-500/60 text-rose-100',
+    color: '#fb7185', // фирменный цвет: маркеры на графике и т.п.
+    tag: 'NOVA',
+    tagStyle: 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+  },
   other: {
     tile: 'bg-gradient-to-br from-slate-800 to-slate-950 border-slate-700 text-slate-300',
     panel: 'bg-slate-900/60 border-slate-800 text-slate-200',
@@ -63,6 +70,7 @@ export const bankTheme = (bankKey, type = '') => {
   const t = String(type || '').toLowerCase()
   if (bankKey === 'raif') return THEMES.raif
   if (bankKey === 'privat') return THEMES.privat
+  if (bankKey === 'novapay') return THEMES.novapay
   if (bankKey === 'icu') return THEMES.icu
   if (bankKey === 'binance') return THEMES.binance
   if (bankKey === 'mono') {
