@@ -8,7 +8,8 @@ import { useCapitalChart } from '../composables/useCapitalChart.js'
 
 const props = defineProps({
   accounts: { type: Array, default: () => [] },
-  transactions: { type: Array, default: () => [] }
+  transactions: { type: Array, default: () => [] },
+  users: { type: Array, default: () => [] }
 })
 
 const preparedAccounts = computed(() => props.accounts.map(prepareAccount))
@@ -77,6 +78,7 @@ const allScope = computed(() => !selectedAccounts.value.length && !!range.value)
     />
 
     <AccountHistoryTable
+      :users="users"
       :transactions="transactions"
       :memo="bondOps"
       :selected="tableAccounts"

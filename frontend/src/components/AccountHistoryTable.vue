@@ -5,6 +5,7 @@ import { counterpartyName, isPersonTransaction } from '../utils/personLayout.js'
 import UiButton from './ui/UiButton.vue'
 import { effectiveTimes, isDateOnly } from '../utils/historyOrder.js'
 import { tagsFor, cleanTitle } from '../utils/txTags.js'
+import { usersById, personOf, swapAlias } from '../utils/personName.js'
 
 const props = defineProps({
   transactions: { type: Array, default: () => [] },
@@ -15,7 +16,9 @@ const props = defineProps({
   // выбрана свеча графика: показываем только операции её корзины времени { from, to (мс), title }
   range: { type: Object, default: null },
   // «все счета» (карты не выбраны, фильтр только по свече): без плашек карт и без кнопки снятия выбора
-  allScope: { type: Boolean, default: false }
+  allScope: { type: Boolean, default: false },
+  // лица (id, name, avatar_url): алиас контрагента в строке подменяется на привязанное Лицо
+  users: { type: Array, default: () => [] }
 })
 const emit = defineEmits(['clear', 'clear-range'])
 
@@ -78,23 +81,51 @@ const timeStr = (iso) => {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-const title = (t) => (t.counter_name || '').trim() || (t.description || '').trim() || '—'
+const people = computed(() => usersById(props.users))
+const person = (t) => personOf(t, people.value)
+
+const rawTitle = (t) => (t.counter_name || '').trim() || (t.description || '').trim() || '—'
+const title = (t) => swapAlias(rawTitle(t), t, person(t))
 const subtitle = (t) => {
   const d = (t.description || '').trim()
-  return d && d !== title(t) ? d : ''
+  return d && d !== rawTitle(t) ? swapAlias(d, t, person(t)) : ''
 }
-const who = (t) => (isPersonTransaction(t) ? counterpartyName(t) : '')
-const counterAcct = (t) => (t.counter_iban ? formatMaskedIBAN(t.counter_iban) : '')
+// контрагент: Лицо (аватар + имя), иначе сырое имя
+const who = (t) => (person(t) ? person(t).name : isPersonTransaction(t) ? counterpartyName(t) : '')
+// счёт/карта контрагента, с которой пришёл или на которую ушёл платёж (маска). Источники по порядку:
+//   1. точный: counter_iban, который отдал банк, либо номер карты в самом имени/описании («Грошові перекази: 4874 07** **** 8644»);
+//   2. по алиасу: счета и карты сырого алиаса, который подменило Лицо (alias_accts с бэкенда). Один номер — пунктирная рамка;
+//      несколько — первый (подтверждённый кешем идёт раньше) и «+N» с подсказкой, где перечислены все.
+// Банки отдают карту контрагента не всегда, поэтому по алиасу номер косвенный — он помечен пунктиром.
+const CARD_IN_TEXT = /(\d{4})[\d\s]*[*•xX][*•xX\s]*(\d{4})/
+const maskId = (v) => (String(v).includes('*') ? String(v) : formatMaskedIBAN(v))
+const counterAcct = (t) => {
+  const v = (t.counter_iban || '').trim()
+  if (v) return { text: maskId(v), exact: true }
+  const m = CARD_IN_TEXT.exec(t.counter_name || '') || CARD_IN_TEXT.exec(t.description || '')
+  if (m) return { text: `${m[1]}****${m[2]}`, exact: true }
+  const list = t.alias_accts || []
+  if (!list.length) return null
+  const all = list.map((a) => maskId(a.id))
+  return {
+    text: all[0],
+    exact: false,
+    more: all.length - 1,
+    tip: all.length > 1
+      ? `Номер не указан в операции. Счета и карты алиаса:\n${list.map((a, i) => `${all[i]}${a.confirmed ? ' ✓' : ''}`).join('\n')}`
+      : 'Номер не указан в операции, взят из привязки алиаса'
+  }
+}
 
 const details = (t) => {
   const acc = byId.value.get(t.account_id)
   const list = [
     ['Время', new Date(t.time).toLocaleString('uk-UA')],
     ['Счёт', acc ? acc.fullLabel : t.account_id],
-    ['Описание', t.description],
+    ['Описание', swapAlias(t.description, t, person(t))],
     ['Комментарий', t.comment],
-    ['Контрагент', t.counter_name],
-    ['Счёт контрагента', t.counter_iban],
+    ['Контрагент', person(t) ? person(t).name : t.counter_name],
+    ['Счёт контрагента', t.counter_iban || (counterAcct(t) ? counterAcct(t).text + (counterAcct(t).more ? ` (+${counterAcct(t).more})` : '') : '')],
     ['MCC', t.mcc || ''],
     ['Сумма операции', t.operation_amount && t.operation_amount !== t.amount ? money(t.operation_amount, t) : ''],
     ['Комиссия', t.commission ? fmtMoney(t.commission, cur(t)) : ''],
@@ -167,8 +198,16 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
               </td>
               <td class="p-3 whitespace-nowrap">
                 <template v-if="who(t) || counterAcct(t)">
-                  <div v-if="who(t)" class="text-slate-300">{{ who(t) }}</div>
-                  <div v-if="counterAcct(t)" class="text-[10px] text-slate-500">{{ counterAcct(t) }}</div>
+                  <div class="flex items-center gap-1.5">
+                    <template v-if="who(t)">
+                      <span v-if="person(t)" class="w-5 h-5 rounded-full bg-slate-800 border border-slate-700 overflow-hidden shrink-0 flex items-center justify-center text-[9px] font-bold text-slate-400">
+                        <img v-if="person(t).avatar_url" :src="person(t).avatar_url" class="w-full h-full object-cover" draggable="false" />
+                        <span v-else>{{ person(t).name.charAt(0).toUpperCase() }}</span>
+                      </span>
+                      <span class="text-slate-300">{{ who(t) }}</span>
+                    </template>
+                    <span v-if="counterAcct(t)" class="text-[9px] px-1.5 py-0.5 rounded border text-slate-400 font-normal" :class="counterAcct(t).exact ? 'border-slate-700' : 'border-dashed border-slate-600'" :title="counterAcct(t).exact ? 'Счёт или карта контрагента' : counterAcct(t).tip">{{ counterAcct(t).text }}<template v-if="counterAcct(t).more"> <span class="text-slate-500">+{{ counterAcct(t).more }}</span></template></span>
+                  </div>
                 </template>
                 <span v-else class="text-slate-600">—</span>
               </td>

@@ -242,6 +242,9 @@ func (s *Storage) GetTransactions(limit int) ([]Transaction, error) {
 		t.IsHold = hold != 0
 		t.Time = time.Unix(ts, 0).Format(time.RFC3339)
 		t.ResolvedUserID = res.resolve(t.CounterIBAN, t.CounterName, t.Description)
+		if t.CounterIBAN == "" {
+			t.AliasAccts = res.aliasAccts(t.CounterIBAN, t.CounterName, t.Description)
+		}
 		list = append(list, t)
 	}
 	return list, rows.Err()

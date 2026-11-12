@@ -103,3 +103,33 @@ func TestTransactionDetails(t *testing.T) {
 		t.Fatalf("%+v", x)
 	}
 }
+
+// Чип «чей счёт»: у операции без номера отдаём счета/карты её сырого алиаса — подтверждённые кешем первыми.
+func TestAliasAcctsForTx(t *testing.T) {
+	s, _, _ := newS(t)
+	if err := s.SaveAccounts([]mono.AccountDTO{{ID: "m1", Type: "black", IBAN: "UA213223130000000000000006001", MaskedPan: []string{"537541******1234"}}}, "Док"); err != nil {
+		t.Fatal(err)
+	}
+	s.SaveTransactions("m1", []mono.StatementItemDTO{
+		{ID: "a", Time: 10, Amount: -100, CounterName: "Іван Петренко"},
+		{ID: "b", Time: 20, Amount: -50, CounterName: "Іван Петренко", CounterIban: "444111******9999"},
+	})
+	k := aliasKey("Іван Петренко")
+	if _, err := s.coreDB.Exec(`INSERT INTO alias_accounts(alias_key, alias, account_identifier, parent_identifier) VALUES(?,?,?,?),(?,?,?,?)`,
+		k, "Іван Петренко", "516875******1111", "", k, "Іван Петренко", "516875******2222", ""); err != nil {
+		t.Fatal(err)
+	}
+	txs, _ := s.GetTransactions(10)
+	for _, x := range txs {
+		switch x.ID {
+		case "a":
+			if len(x.AliasAccts) != 3 || !x.AliasAccts[0].Confirmed || x.AliasAccts[0].ID != "444111******9999" || x.AliasAccts[1].Confirmed {
+				t.Fatalf("alias accts: %+v", x.AliasAccts)
+			}
+		case "b":
+			if len(x.AliasAccts) != 0 {
+				t.Fatalf("tx with its own counter_iban must not carry alias accts: %+v", x.AliasAccts)
+			}
+		}
+	}
+}

@@ -29,6 +29,7 @@ useWheelScroll() // колесо над слайдерами и горизонт
 
 const accounts = ref([])
 const transactions = ref([])
+const users = ref([]) // лица: имя и аватар подменяют алиас контрагента в истории
 const isSyncing = ref(false)
 
 // Версия данных на бэкенде: растёт при любой записи (синк, импорт, правки лиц).
@@ -104,10 +105,12 @@ const fetchStatus = async () => {
 
 const loadData = async () => {
   try {
-    const [accRes, txRes] = await Promise.all([
+    const [accRes, txRes, userRes] = await Promise.all([
       fetch(`${API_BASE}/accounts`),
-      fetch(`${API_BASE}/transactions`)
+      fetch(`${API_BASE}/transactions`),
+      fetch(`${API_BASE}/users`)
     ])
+    if (userRes.ok) users.value = (await userRes.json()) || []
     if (accRes.ok) accounts.value = (await accRes.json()) || []
     if (txRes.ok) transactions.value = (await txRes.json()) || []
     errorMsg.value = ''
@@ -172,7 +175,7 @@ onUnmounted(() => {
       </div>
 
       <SmetaView v-if="activeTab === 'dashboard'" :accounts="accounts" :transactions="transactions" />
-      <OperationalView v-if="activeTab === 'accounts'" :accounts="accounts" :transactions="transactions" />
+      <OperationalView v-if="activeTab === 'accounts'" :accounts="accounts" :transactions="transactions" :users="users" />
       <PersonsView v-if="activeTab === 'entities'" :transactions="transactions" :accounts="accounts" :data-version="dataVersion" @refresh="fetchData" />
     </div>
   </div>

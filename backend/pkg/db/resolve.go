@@ -156,15 +156,22 @@ func (s *Storage) loadCacheIndex() (*cacheIndex, error) {
 // ───────────── резолв операций → лицо (на чтении, кеш не пишем) ─────────────
 
 type resolver struct {
-	byID    map[string]string // idKey → user_id
-	byLoose map[string]string // looseKey (BIN6+2) → user_id, только однозначные
-	byAlias map[string]string // alias_key → user_id
+	byID    map[string]string      // idKey → user_id
+	byLoose map[string]string      // looseKey (BIN6+2) → user_id, только однозначные
+	byAlias map[string]string      // alias_key → user_id
+	accts   map[string][]AliasAcct // alias_key → счета/карты алиаса (core.db + то, что подтвердил кеш)
+}
+
+// AliasAcct — счёт или карта, привязанные к сырому алиасу контрагента. Confirmed: кеш подтверждает связь прямо сейчас.
+type AliasAcct struct {
+	ID        string `json:"id"`
+	Confirmed bool   `json:"confirmed,omitempty"`
 }
 
 func (s *Storage) buildResolver() *resolver {
 	idx, _ := s.loadCacheIndex()
 	global := s.globalPans(idx)
-	r := &resolver{byID: map[string]string{}, byLoose: map[string]string{}, byAlias: map[string]string{}}
+	r := &resolver{byID: map[string]string{}, byLoose: map[string]string{}, byAlias: map[string]string{}, accts: s.aliasAccts(idx)}
 	looseOwner := map[string]string{}
 	looseAmbiguous := map[string]bool{}
 	rows, err := s.coreDB.Query(`
@@ -230,4 +237,67 @@ func txAliasKey(counterIBAN, counterName, description string) string {
 		key = aliasKey(pseudoCounterName(counterIBAN, description))
 	}
 	return key
+}
+
+// aliasAccts собирает по каждому алиасу его счета и карты: сначала то, что привязано в core.db, затем то, что знает кеш.
+// «Листья»: IBAN, у которого в списке есть своя карта, не дублируем (для чипа нужна именно карта).
+func (s *Storage) aliasAccts(idx *cacheIndex) map[string][]AliasAcct {
+	raw := map[string][]cacheLink{}
+	add := func(k string, l cacheLink) {
+		if k == "" || l.ID == "" {
+			return
+		}
+		for _, ex := range raw[k] {
+			if sameID(ex.ID, l.ID) {
+				return
+			}
+		}
+		raw[k] = append(raw[k], l)
+	}
+	if rows, err := s.coreDB.Query(`SELECT alias_key, account_identifier, COALESCE(parent_identifier,'') FROM alias_accounts ORDER BY alias_key, account_identifier`); err == nil {
+		for rows.Next() {
+			var k, id, parent string
+			if rows.Scan(&k, &id, &parent) == nil {
+				add(k, cacheLink{id, parent})
+			}
+		}
+		rows.Close()
+	}
+	if idx != nil {
+		for k, links := range idx.byAlias {
+			for _, l := range links {
+				add(k, l)
+			}
+		}
+	}
+	out := make(map[string][]AliasAcct, len(raw))
+	for k, links := range raw {
+		hasChild := map[string]bool{}
+		for _, l := range links {
+			if l.Parent != "" {
+				hasChild[normID(l.Parent)] = true
+			}
+		}
+		var confirmed, rest []AliasAcct
+		for _, l := range links {
+			if isIBANLike(l.ID) && hasChild[normID(l.ID)] {
+				continue
+			}
+			a := AliasAcct{ID: l.ID, Confirmed: idx.confirms(k, l.ID)}
+			if a.Confirmed {
+				confirmed = append(confirmed, a)
+			} else {
+				rest = append(rest, a)
+			}
+		}
+		if list := append(confirmed, rest...); len(list) > 0 {
+			out[k] = list
+		}
+	}
+	return out
+}
+
+// aliasAccts — счета и карты сырого алиаса операции (того, что подменяется Лицом).
+func (r *resolver) aliasAccts(counterIBAN, counterName, description string) []AliasAcct {
+	return r.accts[txAliasKey(counterIBAN, counterName, description)]
 }

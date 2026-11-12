@@ -107,6 +107,8 @@ type Transaction struct {
 	IsHold          bool    `json:"is_hold"`
 
 	ResolvedUserID string `json:"resolved_user_id,omitempty"` // считается на чтении, в кеш не пишется
+	// Счета и карты сырого алиаса контрагента (на чтении): чип «чей счёт», когда банк не отдал номер в самой операции.
+	AliasAccts []AliasAcct `json:"alias_accts,omitempty"`
 
 	// Перемещение между своими счетами (на брокерский счёт и записи его журнала): не доход и не расход.
 	Internal        bool   `json:"internal,omitempty"`

@@ -335,3 +335,35 @@ func TestImportRules(t *testing.T) {
 		t.Fatalf("%d %s", c, b)
 	}
 }
+
+// После сброса имя счёта остаётся именем файла от человека, а не служебным именем снимка API.
+func TestAccountNameSurvivesReset(t *testing.T) {
+	t.Setenv("ECONOMIC_SOURCES_DIR", t.TempDir())
+	e := newEnv(t)
+	id := upload(t, e.s, "Крипто Петро.csv", csvCard1)["account_id"].(string)
+	entries, _ := store().List()
+	var base *source.File
+	for _, en := range entries {
+		if en.File.AccountID == id {
+			base = en.File
+		}
+	}
+	if base == nil {
+		t.Fatal("no source")
+	}
+	api := &source.File{Name: "Binance", Origin: source.OriginAPI, Kind: source.KindSeries, AccountID: id, Card: base.Card, From: base.From, To: base.To + 1}
+	if _, _, err := store().Put(api); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{})
+	e.s.HandleResetSources(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/x", bytes.NewReader(body)))
+	rec := httptest.NewRecorder()
+	e.s.HandleSources(rec, httptest.NewRequest(http.MethodGet, "/api/sources", nil))
+	var out struct{ Accounts []invAccount }
+	json.Unmarshal(rec.Body.Bytes(), &out)
+	for _, a := range out.Accounts {
+		if a.ID == id && a.Name != base.Name {
+			t.Fatalf("name after reset = %q, want %q", a.Name, base.Name)
+		}
+	}
+}

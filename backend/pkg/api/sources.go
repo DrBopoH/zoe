@@ -208,6 +208,14 @@ type invAccount struct {
 	Cells    string    `json:"cells"` // 0 — данных нет, 1 — покрыто, операции есть, 2 — покрыто, операций не было
 }
 
+// nameRank: файл от человека (имя = псевдоним владельца) важнее служебного снимка API и ряда минут.
+func nameRank(f *source.File) int {
+	if f.Origin == source.OriginAPI || f.Kind == source.KindSeries {
+		return 0
+	}
+	return 1
+}
+
 // coverCells раскрашивает ось: нет заливки / зелёный / косые полосы — как таймлайн синхронизации.
 func coverCells(spans []db.Span, txs []int64, lo, hi int64) string {
 	if hi <= lo {
@@ -271,6 +279,7 @@ func (s *Server) HandleSources(w http.ResponseWriter, r *http.Request) {
 	order := []string{}
 	spans := map[string][]db.Span{}
 	times := map[string][]int64{}
+	nameRanks := map[string]int{}
 	get := func(id string) *invAccount {
 		if a, ok := byID[id]; ok {
 			return a
@@ -283,8 +292,9 @@ func (s *Server) HandleSources(w http.ResponseWriter, r *http.Request) {
 	for _, e := range entries {
 		f := e.File
 		a := get(f.AccountID)
-		if a.Name == "" {
-			a.Name = f.Name
+		// имя счёта — имя файла, который дал человек (csv/pdf/отчёт); у снимка API и ряда минут имя служебное («Binance»), оно лишь запасное
+		if rank := nameRank(f); a.Name == "" || rank > nameRanks[f.AccountID] {
+			a.Name, nameRanks[f.AccountID] = f.Name, rank
 		}
 		a.Type = f.Kind
 		if f.Account != nil {
