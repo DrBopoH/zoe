@@ -16,7 +16,8 @@ export const COLUMNS = [
   { key: 'coupon_rate', label: 'Ставка', num: true },
   { key: 'yield', label: 'Доходность', num: true },
   { key: 'last_auction', label: 'Аукцион', num: false },
-  { key: 'nominal', label: 'Номинал', num: true }
+  { key: 'nominal', label: 'Номинал', num: true },
+  { key: 'score', label: 'Коэфф.', num: true }
 ]
 
 const isEmpty = (v) => v === '' || v === null || v === undefined || (typeof v === 'number' && !(v > 0))
@@ -68,3 +69,57 @@ export function bondCells(b) {
 
 // Следующее направление сортировки при клике по заголовку: новый столбец — по возрастанию, тот же — наоборот
 export const nextSort = (cur, key) => (cur.key === key ? { key, dir: cur.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' })
+
+// ── Коэффициент бумаги: чем выше, тем она «выгоднее» на глаз. Два процента, среднее из них.
+//  срок   — сколько осталось до погашения от сегодня относительно самой длинной бумаги группы (она = 100 %);
+//  ставка — доходность относительно самой высокой в группе (она = 100 %, ноль = 0 %): аукционная доходность,
+//           а если её нет — купонная ставка.
+// Группа = одна валюта среди действующих бумаг: ставки в гривне, долларе и евро несравнимы, а 4 % по доллару
+// нельзя мерить 19 % по гривне. Погашенные, бумаги без даты погашения и без ставки не оцениваются.
+// Считается по всему списку источника, а не по отфильтрованному: поиск не должен менять цвета и места.
+export const TIERS = [
+  { key: 'top1', max: 1, label: 'Топ 1' },
+  { key: 'top10', max: 10, label: 'Топ 10' },
+  { key: 'top25', max: 25, label: 'Топ 25' },
+  { key: 'top100', max: 100, label: 'Топ 100' }
+]
+
+export const rateOf = (b) => (b.yield > 0 ? b.yield : b.coupon_rate > 0 ? b.coupon_rate : 0)
+
+const dayNum = (iso) => Date.parse(`${iso}T00:00:00Z`) / 86400000
+
+export function scoreBonds(list, today) {
+  const t0 = dayNum(today)
+  const groups = new Map()
+  for (const b of Array.isArray(list) ? list : []) {
+    if (!b.maturity || isMatured(b, today)) continue
+    const rate = rateOf(b)
+    if (!(rate > 0)) continue
+    const left = Math.max(0, dayNum(b.maturity) - t0)
+    if (!groups.has(b.currency)) groups.set(b.currency, [])
+    groups.get(b.currency).push({ id: b.id, currency: b.currency, left, rate })
+  }
+  const out = new Map()
+  for (const [currency, items] of groups) {
+    const maxLeft = Math.max(...items.map((i) => i.left))
+    const maxRate = Math.max(...items.map((i) => i.rate))
+    const scored = items.map((i) => {
+      const term = maxLeft > 0 ? (i.left / maxLeft) * 100 : 0
+      const rate = (i.rate / maxRate) * 100
+      return { id: i.id, currency, term, rate, score: (term + rate) / 2 }
+    })
+    scored.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+    scored.forEach((s, i) => {
+      const rank = i + 1
+      const tier = TIERS.find((t) => rank <= t.max) || null
+      out.set(s.id, { ...s, rank, tier: tier ? tier.key : '', tierLabel: tier ? tier.label : '' })
+    })
+  }
+  return out
+}
+
+// Цвет от красного (0 %) через жёлтый (50 %) к зелёному (100 %): тон 0°…120° в HSL
+export function scoreColor(score) {
+  const h = Math.round(Math.min(100, Math.max(0, score)) * 1.2)
+  return { border: `hsl(${h} 70% 45% / 0.6)`, bg: `hsl(${h} 70% 40% / 0.12)`, text: `hsl(${h} 75% 65%)` }
+}

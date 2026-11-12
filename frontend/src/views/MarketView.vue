@@ -5,7 +5,7 @@ import UiButton from '../components/ui/UiButton.vue'
 import { useSection } from '../composables/useSection.js'
 import { apiGetJson, apiSend } from '../utils/api.js'
 import { toLocalDateStr } from '../utils/formatters.js'
-import { SOURCES, MARKET_SECTIONS, COLUMNS, filterBonds, sortBonds, currenciesOf, bondCells, nextSort } from '../utils/marketTable.js'
+import { SOURCES, MARKET_SECTIONS, COLUMNS, filterBonds, sortBonds, currenciesOf, bondCells, nextSort, scoreBonds, scoreColor } from '../utils/marketTable.js'
 
 // dataVersion растёт при любой записи в кеш (в том числе после опроса рынка) — по нему перечитываем список.
 // running — идёт ли сейчас опрос рынка (из /sync/status → market.running).
@@ -43,10 +43,26 @@ watch(section, () => { currency.value = '' }) // у другого источн�
 const today = computed(() => toLocalDateStr(new Date()))
 const list = computed(() => lists.value[section.value])
 const currencies = computed(() => currenciesOf(list.value))
+// Коэффициент и места считаются по всему списку источника, а не по найденному: поиск не меняет цвета и места
+const scores = computed(() => scoreBonds(list.value, today.value))
 const rows = computed(() => sortBonds(
-  filterBonds(list.value, { q: q.value, currency: currency.value, hideMatured: hideMatured.value, today: today.value }),
+  filterBonds(list.value, { q: q.value, currency: currency.value, hideMatured: hideMatured.value, today: today.value })
+    .map((b) => ({ ...b, score: scores.value.get(b.id)?.score ?? 0 })),
   sort.value.key, sort.value.dir
-).map((b) => ({ id: b.id, c: bondCells(b) })))
+).map((b) => {
+  const sc = scores.value.get(b.id) || null
+  const c = bondCells(b)
+  c.score = sc ? `${Math.round(sc.score)} %` : '—'
+  return { id: b.id, c, sc, color: sc ? scoreColor(sc.score) : null }
+}))
+
+const TIER_CLASS = {
+  top1: 'text-amber-300 border-amber-400/70 bg-amber-400/15',
+  top10: 'text-violet-300 border-violet-400/60 bg-violet-400/10',
+  top25: 'text-sky-300 border-sky-400/60 bg-sky-400/10',
+  top100: 'text-slate-300 border-slate-500/60 bg-slate-500/10'
+}
+const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %: срок ${Math.round(sc.term)} % · ставка ${Math.round(sc.rate)} %. Место ${sc.rank} среди ${sc.currency}`
 
 const refresh = async () => {
   startError.value = ''
@@ -102,7 +118,20 @@ const refresh = async () => {
         </thead>
         <tbody>
           <tr v-for="r in rows" :key="r.id" class="border-b border-slate-800/60 hover:bg-slate-800/40">
-            <td v-for="col in COLUMNS" :key="col.key" class="px-3 py-2 whitespace-nowrap" :class="[col.num ? 'text-right tabular-nums' : 'text-left', col.key === 'id' ? 'text-slate-300' : col.key === 'name' ? 'text-slate-400 max-w-xs truncate' : 'text-slate-200']">{{ r.c[col.key] }}</td>
+            <td v-for="col in COLUMNS" :key="col.key" class="px-3 py-2 whitespace-nowrap" :class="[col.num ? 'text-right tabular-nums' : 'text-left', col.key === 'id' ? 'text-slate-300' : 'text-slate-200']">
+              <template v-if="col.key === 'name'">
+                <span class="inline-flex items-center gap-2">
+                  <span
+                    class="px-2 py-0.5 rounded border text-[11px] font-bold"
+                    :class="r.color ? '' : 'text-slate-500 border-slate-700 bg-slate-800/40'"
+                    :style="r.color ? { color: r.color.text, borderColor: r.color.border, backgroundColor: r.color.bg } : null"
+                    :title="r.sc ? scoreTitle(r.sc) : 'Нет даты погашения или ставки: коэффициент не считается'"
+                  >{{ r.c.name }}</span>
+                  <span v-if="r.sc && r.sc.tier" class="px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wider" :class="TIER_CLASS[r.sc.tier]" :title="`${r.sc.tierLabel} среди ${r.sc.currency}`">{{ r.sc.tierLabel }}</span>
+                </span>
+              </template>
+              <template v-else>{{ r.c[col.key] }}</template>
+            </td>
           </tr>
           <tr v-if="!rows.length">
             <td :colspan="COLUMNS.length" class="px-3 py-10 text-center text-slate-600 uppercase tracking-wider">
