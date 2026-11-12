@@ -14,6 +14,10 @@
   .ui-select {
     @apply cursor-pointer;
   }
+  /* Числовое поле без родных стрелок-счётчиков браузера (белые кнопки на тёмной теме) */
+  .ui-input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
+  .ui-input[type='number']::-webkit-inner-spin-button,
+  .ui-input[type='number']::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
   .ui-input--invalid {
     @apply border-rose-500/80 focus:border-rose-400;
   }

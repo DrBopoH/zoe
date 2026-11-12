@@ -7,7 +7,7 @@ import { storageGet, storageSet } from '../utils/storage.js'
 import { useSection } from '../composables/useSection.js'
 import { apiGetJson, apiSend } from '../utils/api.js'
 import { toLocalDateStr } from '../utils/formatters.js'
-import { SOURCES, MARKET_SECTIONS, COLUMNS, filterBonds, sortBonds, currenciesOf, bondCells, nextSort, scoreBonds, scoreColor, HORIZON_YEARS, moneyText } from '../utils/marketTable.js'
+import { SOURCES, MARKET_SECTIONS, COLUMNS, filterBonds, sortBonds, currenciesOf, bondCells, nextSort, scoreBonds, scoreColor, HORIZON_YEARS, moneyText, isMatured, rateOf } from '../utils/marketTable.js'
 
 // dataVersion растёт при любой записи в кеш (в том числе после опроса рынка) — по нему перечитываем список.
 // running — идёт ли сейчас опрос рынка (из /sync/status → market.running).
@@ -83,6 +83,15 @@ const chartItems = computed(() => {
     .slice(0, CHART_LIMIT)
   return all.map((i, n) => ({ ...i, top: n < 5, place: n + 1, color: scoreColor(i.sc.score).text }))
 })
+// Сгоревшие (погашенные) бумаги для графика: серым пунктиром от выпуска до погашения; без даты выпуска или ставки нарисовать нечем
+const showMatured = ref(false)
+const MATURED_LIMIT = 100
+const yearsFromToday = (iso) => (Date.parse(`${iso}T00:00:00Z`) - Date.parse(`${today.value}T00:00:00Z`)) / (365.25 * 86400000)
+const chartMatured = computed(() => filterBonds(list.value, { q: q.value, currency: chartCurrency.value || currency.value, hideMatured: false, today: today.value })
+  .filter((b) => b.currency === chartCurrency.value && isMatured(b, today.value) && b.issued && rateOf(b) > 0 && b.issued < b.maturity)
+  .sort((a, b) => b.maturity.localeCompare(a.maturity))
+  .slice(0, MATURED_LIMIT)
+  .map((b) => ({ id: b.id, rate: rateOf(b), startT: yearsFromToday(b.issued), endT: yearsFromToday(b.maturity) })))
 const chartNote = computed(() => (!currency.value && currencies.value.length > 1 && chartCurrency.value ? `График: ${chartCurrency.value}. Выбери валюту, чтобы сменить.` : ''))
 
 const TIER_CLASS = {
@@ -115,6 +124,9 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
       <label class="flex items-center gap-2 text-slate-400 cursor-pointer">
         <input v-model="hideMatured" type="checkbox" class="accent-emerald-500" />скрыть погашенные
       </label>
+      <label class="flex items-center gap-2 text-slate-400 cursor-pointer" title="На графике: уже погашенные бумаги серым пунктиром от выпуска до погашения (нужна дата выпуска)">
+        <input v-model="showMatured" type="checkbox" class="accent-emerald-500" />сгоревшие на графике
+      </label>
       <label class="flex items-center gap-2 text-slate-400" title="Сумма вложения: по ней считается столбец «Через 10 л.» и графики">
         вложение
         <input v-model.number="amount" type="number" min="1" step="1000" class="ui-input !bg-slate-900 !w-28 text-right" />
@@ -126,7 +138,7 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
       </UiButton>
     </section>
 
-    <GrowthChart v-if="list && chartItems.length" :items="chartItems" :amount="amountN" :currency="chartCurrency" />
+    <GrowthChart v-if="list && (chartItems.length || chartMatured.length)" :items="chartItems" :matured="showMatured ? chartMatured : []" :amount="amountN" :currency="chartCurrency" :today="today" />
     <div v-if="chartNote" class="text-[11px] text-slate-500 -mt-2">{{ chartNote }}</div>
 
     <div v-if="startError || loadError" class="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-3 rounded text-xs">{{ startError || loadError }}</div>
