@@ -40,6 +40,11 @@ func TestBondScheduleDatesAndAccrued(t *testing.T) {
 	if st.Cash != 130 || st.Balance != 3232.99 {
 		t.Fatalf("свободные %v баланс %v", st.Cash, st.Balance)
 	}
+	for _, e := range st.Events {
+		if e.Qty != 3 {
+			t.Fatalf("qty выплаты: %+v", e)
+		}
+	}
 	if p.NextDate != "2027-02-24" || p.NextAmount != 246.6 {
 		t.Fatalf("следующая выплата: %v %v", p.NextDate, p.NextAmount)
 	}

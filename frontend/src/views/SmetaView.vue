@@ -1,12 +1,31 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { formatMoney } from '../utils/formatters.js'
 import CandleChart from '../components/CandleChart.vue'
+import { apiGetJson, q } from '../utils/api.js'
+import { bankTheme } from '../utils/bankTheme.js'
 
 const props = defineProps({
   accounts: { type: Array, default: () => [] },
   transactions: { type: Array, default: () => [] }
 })
+
+// Выплаты по облигациям инвестиционных счетов (купоны и погашения) — маркеры на графике и таймлайн вперёд.
+// Счета обновляются вместе с версией данных, поэтому перечитываем при каждой новой загрузке.
+const payEvents = ref([])
+watch(() => props.accounts, async (list) => {
+  const manual = (list || []).filter(a => a.manual)
+  try {
+    const all = await Promise.all(manual.map(async a => {
+      const ov = await apiGetJson(`/icu/ledger?account_id=${q(a.id)}`)
+      const color = bankTheme(a.bank_key || 'icu', a.type).color // маркеры в цвет счёта
+      return (ov.events || []).map(e => ({ ...e, color }))
+    }))
+    payEvents.value = all.flat()
+  } catch (e) {
+    console.error('ICU events error:', e)
+  }
+}, { immediate: true })
 
 const now = new Date()
 const currentYear = now.getFullYear()
@@ -67,6 +86,6 @@ const monthlyDelta = computed(() => {
       </div>
     </section>
 
-    <CandleChart :transactions="uahTransactions" :total-value-u-a-h="totalValueUAH" />
+    <CandleChart :transactions="uahTransactions" :total-value-u-a-h="totalValueUAH" :events="payEvents" />
   </main>
 </template>

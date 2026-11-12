@@ -4,10 +4,15 @@ import { toLocalDateStr, formatMoney, formatDateLong, formatShortDateName, forma
 
 const props = defineProps({
   transactions: { type: Array, default: () => [] },
-  totalValueUAH: { type: Number, default: 0 }
+  totalValueUAH: { type: Number, default: 0 },
+  // выплаты по облигациям инвестиционных счетов: { date: 'ГГГГ-ММ-ДД', kind: coupon|redemption, amount, isin, done }
+  events: { type: Array, default: () => [] }
 })
 
 const hoveredCandle = ref(null)
+const hoveredMarker = ref(null)
+const BLUE = '#93c5fd' // голубой как у бейджа покупки ОВДП
+const CLAIMED = '#64748b' // выплата уже получена — серым
 const chartContainerRef = ref(null)
 const zoomLevel = ref(1.0)
 const hasInitialScrolled = ref(false)
@@ -89,13 +94,29 @@ const dailyCandles = computed(() => {
   return result
 })
 
+// Таймлайн вперёд — до последней выплаты инвестиционного счёта (погашение). Свечей там нет, только маркеры.
+const futureDays = computed(() => {
+  const todayStr = toLocalDateStr(new Date())
+  const last = props.events.reduce((m, e) => (e.date > m ? e.date : m), todayStr)
+  const days = []
+  const curr = new Date()
+  curr.setHours(0, 0, 0, 0)
+  curr.setDate(curr.getDate() + 1)
+  while (toLocalDateStr(curr) <= last && days.length < 4000) {
+    days.push(toLocalDateStr(curr))
+    curr.setDate(curr.getDate() + 1)
+  }
+  return days
+})
+const totalDays = computed(() => (dailyCandles.value.length ? dailyCandles.value.length + futureDays.value.length : 0))
+
 // Границы зума: ниже ~7% свеча уже тоньше 2px, дальше смысла нет. Раньше пол в 8px/свечу глушил отдаление на 40%.
 const MIN_ZOOM = 0.07
 const MAX_ZOOM = 4.0
 const pxPerCandle = computed(() => Math.max(1.5, 22 * zoomLevel.value))
 
 const svgWidth = computed(() => {
-  const calculated = dailyCandles.value.length * pxPerCandle.value + paddingX * 2
+  const calculated = totalDays.value * pxPerCandle.value + paddingX * 2
   const minWidth = chartContainerRef.value ? chartContainerRef.value.clientWidth : 1000
   return Math.max(minWidth, calculated)
 })
@@ -107,7 +128,7 @@ const candleScales = computed(() => {
   const maxVal = Math.max(...dailyCandles.value.map(c => c.high))
   const range = maxVal - minVal || 1
 
-  const count = dailyCandles.value.length
+  const count = totalDays.value
   const step = (svgWidth.value - paddingX * 2) / Math.max(count, 1)
   const candleWidth = Math.max(1, Math.min(24, step * 0.65))
 
@@ -133,10 +154,45 @@ const candleScales = computed(() => {
     }
   })
 
+  // слоты будущих дней (без свечей) — для оси, сетки и маркеров
+  const futureSlots = futureDays.value.map((date, k) => ({ date, future: true, x: paddingX + (candles.length + k) * step + step / 2 }))
+  const slots = [...candles, ...futureSlots]
+
+  // Маркеры выплат лежат на «полу» таймлайна, прямо над датами; в один день сыплются столбиком вверх
+  const slotByDate = new Map(slots.map(sl => [sl.date, sl]))
+  const floorY = svgHeight - 38
+  const byDate = new Map()
+  props.events.forEach(e => {
+    if (!slotByDate.has(e.date)) return
+    if (!byDate.has(e.date)) byDate.set(e.date, [])
+    byDate.get(e.date).push(e)
+  })
+  const markers = []
+  byDate.forEach((list, date) => {
+    const slot = slotByDate.get(date)
+    // по маркеру на каждую бумагу (3 облигации — 3 иконки). Купоны и погашения — в разных колонках рядом, друг на друга не ложатся
+    const COL = 9, MAX_STACK = 6, GAP = 15
+    const kinds = ['coupon', 'redemption'].filter(k => list.some(e => e.kind === k))
+    kinds.forEach((kind, ki) => {
+      const units = []
+      list.filter(e => e.kind === kind).sort((a, b) => a.isin.localeCompare(b.isin)).forEach(e => {
+        const n = Math.max(1, Math.round(e.qty || 1))
+        for (let u = 0; u < n; u++) units.push({ ...e, amount: e.amount / n, unit: u + 1, of: n })
+      })
+      const colX = slot.x + (kinds.length === 2 ? (ki === 0 ? -COL : COL) : 0)
+      units.slice(0, MAX_STACK).forEach((e, i) => markers.push({ ...e, key: `${date}-${kind}-${e.isin}-${e.unit}`, x: colX, y: floorY - i * GAP }))
+      // больше 6 — правее верхней иконки подпись xN в цвет иконок
+      if (units.length > MAX_STACK) {
+        const top = units[0]
+        markers.push({ more: true, key: `${date}-${kind}-more`, x: colX + 10, y: floorY - (MAX_STACK - 1) * GAP + 3, n: units.length, done: top.done, color: top.color })
+      }
+    })
+  })
+
   const monthBoundaries = []
   let lastMonth = null
 
-  candles.forEach((c) => {
+  slots.forEach((c) => {
     const currentMonthKey = c.date.substring(0, 7)
     if (lastMonth && currentMonthKey !== lastMonth) {
       monthBoundaries.push(c)
@@ -149,10 +205,10 @@ const candleScales = computed(() => {
 
   const ticks = []
   for (let i = 0; i < count; i += candleStep) {
-    ticks.push(candles[i])
+    ticks.push(slots[i])
   }
 
-  const lastCandle = candles[count - 1]
+  const lastCandle = slots[count - 1]
   if (ticks.length > 0 && ticks[ticks.length - 1].date !== lastCandle.date) {
     const distToLast = lastCandle.x - ticks[ticks.length - 1].x
     if (distToLast < targetDistance * 0.6) {
@@ -162,7 +218,7 @@ const candleScales = computed(() => {
     }
   }
 
-  return { min: minVal, max: maxVal, candles, ticks, monthBoundaries, step }
+  return { min: minVal, max: maxVal, candles, slots, markers, ticks, monthBoundaries, step }
 })
 
 // Колесо — масштаб (якорь — свеча под курсором, как на биржах); горизонтальное колесо / Shift+колесо — сдвиг.
@@ -259,14 +315,16 @@ const resetZoom = () => {
   scrollToEnd(true)
 }
 
+// «Свежий край» — сегодняшний день (справа от него может лежать таймлайн вперёд)
 const scrollToEnd = (force = false) => {
   if (!force && hasInitialScrolled.value) return
 
   nextTick(() => {
-    if (chartContainerRef.value) {
-      chartContainerRef.value.scrollLeft = chartContainerRef.value.scrollWidth
-      hasInitialScrolled.value = true
-    }
+    const el = chartContainerRef.value
+    if (!el) return
+    const todaySlot = candleScales.value.candles[candleScales.value.candles.length - 1]
+    el.scrollLeft = futureDays.value.length && todaySlot ? Math.max(0, todaySlot.x - el.clientWidth * 0.7) : el.scrollWidth
+    hasInitialScrolled.value = true
   })
 }
 
@@ -276,6 +334,14 @@ onMounted(() => {
 
 // Данные приходят после монтирования: когда свечи впервые появились — встаём на свежий край
 let scrolledWithData = false
+// Выплаты приходят позже свечей и растягивают ось вперёд — встаём на сегодня ещё раз (один раз)
+let scrolledWithFuture = false
+watch(() => futureDays.value.length, (n) => {
+  if (n > 0 && !scrolledWithFuture) {
+    scrolledWithFuture = true
+    scrollToEnd(true)
+  }
+})
 watch(() => dailyCandles.value.length, (n) => {
   if (n > 0 && !scrolledWithData) {
     scrolledWithData = true
@@ -299,7 +365,15 @@ watch(() => dailyCandles.value.length, (n) => {
         </button>
       </div>
 
-      <div v-if="hoveredCandle" class="flex items-center gap-4 text-[11px] font-mono">
+      <div v-if="hoveredMarker" class="flex items-center gap-4 text-[11px] font-mono">
+        <span class="text-slate-200 font-bold">{{ formatDateLong(hoveredMarker.date) }}</span>
+        <span :style="{ color: hoveredMarker.color || '#fbbf24' }">{{ hoveredMarker.kind === 'coupon' ? 'Купон' : 'Погашение' }}</span>
+        <span class="text-slate-400">{{ hoveredMarker.isin }}</span>
+        <strong class="text-emerald-400">+{{ formatMoney(hoveredMarker.amount) }} ₴</strong>
+        <span class="text-slate-500">за 1 шт. ({{ hoveredMarker.unit }} из {{ hoveredMarker.of }})</span>
+        <span class="text-slate-500">{{ hoveredMarker.done ? 'получено' : 'по графику' }}</span>
+      </div>
+      <div v-else-if="hoveredCandle" class="flex items-center gap-4 text-[11px] font-mono">
         <span class="text-slate-200 font-bold">{{ formatDateLong(hoveredCandle.date) }}</span>
         <span class="text-slate-500">Откр: <strong class="text-slate-200">{{ formatMoney(hoveredCandle.open) }}</strong></span>
         <span class="text-slate-500">Пик: <strong class="text-emerald-400">{{ formatMoney(hoveredCandle.high) }}</strong></span>
@@ -364,6 +438,11 @@ watch(() => dailyCandles.value.length, (n) => {
           </text>
         </g>
 
+        <!-- сегодня: справа начинается таймлайн вперёд -->
+        <g v-if="futureDays.length && candleScales.candles.length">
+          <line :x1="candleScales.candles[candleScales.candles.length - 1].x + candleScales.step / 2" y1="10" :x2="candleScales.candles[candleScales.candles.length - 1].x + candleScales.step / 2" :y2="svgHeight - 25" stroke="#38bdf8" stroke-opacity="0.35" stroke-dasharray="1 3" />
+        </g>
+
         <line
           v-if="hoveredCandle"
           :x1="hoveredCandle.x"
@@ -408,6 +487,28 @@ watch(() => dailyCandles.value.length, (n) => {
             class="transition-opacity"
             :class="hoveredCandle && hoveredCandle.date === c.date ? 'opacity-100' : 'opacity-90'"
           />
+        </g>
+
+        <!-- выплаты: купон — листочек с треугольником на грани, погашение — «бумага»; серые — уже получены -->
+        <g
+          v-for="mk in candleScales.markers"
+          :key="mk.key"
+          :transform="`translate(${mk.x} ${mk.y})`"
+          @mouseenter="!isDragging && !mk.more && (hoveredMarker = mk)"
+          @mouseleave="hoveredMarker = null"
+        >
+          <text v-if="mk.more" x="0" y="0" fill-opacity="0.95" :fill="mk.done ? CLAIMED : (mk.color || BLUE)" font-size="9" font-weight="bold" font-family="monospace">x{{ mk.n }}</text>
+          <g v-else-if="mk.kind === 'coupon'" transform="scale(1.25)" :stroke="mk.done ? CLAIMED : (mk.color || BLUE)" :fill="mk.done ? CLAIMED : (mk.color || BLUE)" stroke-width="1" stroke-linejoin="round" stroke-linecap="round">
+            <path d="M-4.5 4.5 C-6 -2 -1 -5.5 5 -5.5 C5 0 2 5.5 -4.5 4.5 Z" fill-opacity="0.3" />
+            <path d="M-4.5 4.5 L3 -3" fill="none" />
+            <path d="M-4.5 4.5 L-6.5 6.5" fill="none" />
+            <path d="M5 -5.5 L8 -8 L8 -3 Z" />
+          </g>
+          <g v-else transform="scale(1.25)" :stroke="mk.done ? CLAIMED : (mk.color || BLUE)" fill="none" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round">
+            <path d="M-4 -6 H1.5 L4.5 -3 V6 H-4 Z" fill="#0f172a" />
+            <path d="M1.5 -6 V-3 H4.5" />
+            <path d="M-2 0 H2.2 M-2 2.5 H2.2" />
+          </g>
         </g>
 
         <g>

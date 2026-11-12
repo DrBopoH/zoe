@@ -58,6 +58,7 @@ type PayEvent struct {
 	ISIN   string  `json:"isin"`
 	Name   string  `json:"name"`
 	Amount float64 `json:"amount"`
+	Qty    float64 `json:"qty"` // сколько бумаг получает выплату (на график — по маркеру на штуку)
 	Done   bool    `json:"done"`
 }
 
@@ -162,11 +163,11 @@ func ComputeState(rows []LedgerRow, bonds []Bond, now time.Time) AccountState {
 				}
 				amt := q * b.coupon()
 				st.Cash += amt
-				st.Events = append(st.Events, PayEvent{Date: dayString(d), Kind: "coupon", ISIN: b.ISIN, Name: b.Name, Amount: round2(amt), Done: true})
+				st.Events = append(st.Events, PayEvent{Date: dayString(d), Kind: "coupon", ISIN: b.ISIN, Name: b.Name, Amount: round2(amt), Qty: q, Done: true})
 				if isRedemption {
 					red := q * b.Nominal
 					st.Cash += red
-					st.Events = append(st.Events, PayEvent{Date: dayString(d), Kind: "redemption", ISIN: b.ISIN, Name: b.Name, Amount: round2(red), Done: true})
+					st.Events = append(st.Events, PayEvent{Date: dayString(d), Kind: "redemption", ISIN: b.ISIN, Name: b.Name, Amount: round2(red), Qty: q, Done: true})
 				}
 				continue
 			}
@@ -174,9 +175,9 @@ func ComputeState(rows []LedgerRow, bonds []Bond, now time.Time) AccountState {
 				nextDay = d
 			}
 			if held > 0 {
-				st.Events = append(st.Events, PayEvent{Date: dayString(d), Kind: "coupon", ISIN: b.ISIN, Name: b.Name, Amount: round2(held * b.coupon())})
+				st.Events = append(st.Events, PayEvent{Date: dayString(d), Kind: "coupon", ISIN: b.ISIN, Name: b.Name, Amount: round2(held * b.coupon()), Qty: held})
 				if isRedemption {
-					st.Events = append(st.Events, PayEvent{Date: dayString(d), Kind: "redemption", ISIN: b.ISIN, Name: b.Name, Amount: round2(held * b.Nominal)})
+					st.Events = append(st.Events, PayEvent{Date: dayString(d), Kind: "redemption", ISIN: b.ISIN, Name: b.Name, Amount: round2(held * b.Nominal), Qty: held})
 				}
 			}
 		}
