@@ -20,7 +20,7 @@ export function multipleAt(sc, t, reinvest) {
 
 const decimalsOf = (step) => Math.max(0, -Math.floor(Math.log10(step) + 1e-9))
 
-// Круглые деления шкалы: 1, 2, 5 × 10^n, не больше max штук. Значения округлены без хвоста плавающей точки (1.4, а не 1.4000000000000001)
+// Круглые деления шкалы: 1, 2, 5 × 10^n, не больше max штук. Значения округлены без хвоста плавающей точки (1.4, а не 1.4 с хвостом из нулей и единицы)
 export function niceTicks(lo, hi, max = 6) {
   const span = hi - lo
   if (!(span > 0)) return [lo]
