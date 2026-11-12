@@ -70,7 +70,7 @@ func TestNBURegistryFiltersOVDPAndParsesFields(t *testing.T) {
 
 func TestSyncNBUMergesRegistryAndLatestAuction(t *testing.T) {
 	srv := newNBU(t)
-	got, res := testClient(srv.URL, "").SyncNBU(context.Background())
+	got, res := testClient(srv.URL, "").SyncNBU(context.Background(), nil)
 	if res.Error != "" {
 		t.Fatal(res.Error)
 	}
@@ -91,13 +91,31 @@ func TestSyncNBUMergesRegistryAndLatestAuction(t *testing.T) {
 	}
 }
 
+func TestSyncNBUReportsGrowingProgress(t *testing.T) {
+	srv := newNBU(t)
+	var pcts []int
+	var notes []string
+	testClient(srv.URL, "").SyncNBU(context.Background(), func(p int, n string) { pcts, notes = append(pcts, p), append(notes, n) })
+	if len(pcts) < 3 || pcts[0] != 0 || notes[0] != "реестр" {
+		t.Fatalf("первым — реестр: %v %v", pcts, notes)
+	}
+	for i := 1; i < len(pcts); i++ {
+		if pcts[i] < pcts[i-1] || pcts[i] > 100 {
+			t.Fatalf("процент должен расти и не выходить за 100: %v", pcts)
+		}
+	}
+	if !strings.HasPrefix(notes[len(notes)-1], "аукционы: ") {
+		t.Fatalf("последняя заметка — день аукциона: %v", notes)
+	}
+}
+
 func TestSyncNBUOneHalfFailsKeepsOther(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/depo_securities", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(nbuRegistry)) })
 	mux.HandleFunc("/NBU_ovdp", func(w http.ResponseWriter, r *http.Request) { http.Error(w, "boom", 500) })
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
-	got, res := testClient(srv.URL, "").SyncNBU(context.Background())
+	got, res := testClient(srv.URL, "").SyncNBU(context.Background(), nil)
 	if len(got) != 3 || !strings.Contains(res.Error, "HTTP 500") {
 		t.Fatalf("реестр должен остаться, ошибка аукционов — в Result: %d %q", len(got), res.Error)
 	}
@@ -148,7 +166,7 @@ func TestBadResponses(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, _, err := c.NBUAuctions(ctx); err == nil {
+	if _, _, err := c.NBUAuctions(ctx, nil); err == nil {
 		t.Fatal("отменённый контекст должен остановить обход")
 	}
 }

@@ -13,6 +13,7 @@ import { cleanPersonName, isP2PTransaction } from './utils/formatters.js'
 import { apiGetJson, apiSend } from './utils/api.js'
 import { storageGet, storageSet } from './utils/storage.js'
 import { marketNotice } from './utils/marketNotice.js'
+import { marketPanelOpen } from './utils/marketPanel.js'
 import { loadMasks } from './composables/useIbanMasks.js'
 
 const STORAGE_ACTIVE_TAB = 'economic_active_tab'
@@ -65,6 +66,12 @@ const notifyMarket = (last) => {
   r.toasts.forEach(pushToast)
 }
 
+// Окно процесса рыночных данных: висит, пока идёт опрос; крестик глушит именно этот запуск (started_at)
+const market = ref(null)
+const marketDismissed = ref(null)
+const marketPanel = computed(() => (marketPanelOpen(market.value, marketDismissed.value) ? market.value : null))
+const closeMarket = () => { marketDismissed.value = market.value?.started_at ?? null }
+
 // какой запуск синка пользователь закрыл крестиком (started_at)
 const dismissedRun = ref(null)
 const panelState = computed(() => {
@@ -101,6 +108,7 @@ const fetchStatus = async () => {
     if (lastFinishedAt === null && !data.progress?.last) lastFinishedAt = 0
     notifyResult(data.progress?.last)
     if (marketSeenAt === null && !data.market?.last) marketSeenAt = 0
+    market.value = data.market || null
     notifyMarket(data.market?.last)
 
     const ver = data.stats?.data_version
@@ -164,7 +172,7 @@ onUnmounted(() => {
   <div class="min-h-screen bg-slate-950 text-slate-100 font-mono flex flex-col p-6 pt-24 sm:pt-20 select-none">
     <SideMenu @refresh="fetchData" />
     <ScrollJumpButtons />
-    <ToastStack :progress="progress" :panel-state="panelState" :lost-since="connLostSince" @close-panel="closePanel" />
+    <ToastStack :progress="progress" :panel-state="panelState" :market="marketPanel" :lost-since="connLostSince" @close-panel="closePanel" @close-market="closeMarket" />
 
     <!-- Шапка прибита к верху экрана: страница скроллится под ней -->
     <div class="app-bar">

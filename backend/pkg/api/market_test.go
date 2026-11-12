@@ -120,6 +120,9 @@ func TestFullSyncStartsMarketToo(t *testing.T) {
 	if len(last["feeds"].([]any)) != 2 || feedByID(last, "ust")["state"] != "done" || feedByID(last, "nbu")["state"] != "done" {
 		t.Fatalf("оба фида должны отработать: %+v", last)
 	}
+	if feedByID(last, "nbu")["pct"].(float64) != 100 {
+		t.Fatalf("готовый фид — 100%%: %+v", last)
+	}
 	_, body := call(t, s.HandleGetStatus, http.MethodGet, "/api/sync/status", "")
 	var st struct {
 		Market struct{ Running bool }

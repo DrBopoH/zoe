@@ -2,19 +2,22 @@
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { toasts, dismissToast } from '../composables/useToasts.js'
 import SyncPanel from './SyncPanel.vue'
+import MarketPanel from './MarketPanel.vue'
 import UiIcon from './ui/UiIcon.vue'
 
 // Стек уведомлений справа внизу. У всех — крестик.
 //   processing — главное окно, висит, пока идёт синк
 //   error      — то же окно, красное, не пропадает само
+//   market     — окно процесса рыночных данных (ОВДП, US Treasury): висит, пока идёт опрос
 //   push       — «Снято»: появляется и исчезает по таймеру
 //   lost       — нет ответа от бэкенда: синк мог продолжать работу, статус вернётся вместе со связью
 const props = defineProps({
   progress: { type: Object, default: null },
   panelState: { type: String, default: null }, // null | processing | error
+  market: { type: Object, default: null },     // состояние рыночного процесса, если окно открыто
   lostSince: { type: Number, default: null }   // ms, когда пропал ответ бэкенда
 })
-const emit = defineEmits(['close-panel'])
+const emit = defineEmits(['close-panel', 'close-market'])
 
 const now = ref(Date.now())
 let timer = 0
@@ -43,6 +46,8 @@ const lostFor = computed(() => {
         :class="lostSince && 'opacity-60'"
         @close="emit('close-panel')"
       />
+
+      <MarketPanel v-if="market" key="market" :market="market" @close="emit('close-market')" />
 
       <div v-if="showLost" key="lost" class="ui-push ui-push--warn">
         <div class="flex items-start justify-between gap-3">
