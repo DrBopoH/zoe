@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import { useMarketRefresh } from '../composables/useMarketRefresh.js'
-import { RANGES, lastPoint, valueAt, realRate, signedPct, plainPct } from '../utils/macro.js'
+import { lastPoint, valueAt, realRate, signedPct, plainPct } from '../utils/macro.js'
 
 // Экран «Ставка ФРС»: ставка ФРС, доходность 10-летних Treasury и инфляция США (FRED) — рядом с украинскими, чтобы сравнивать.
 const props = defineProps({
@@ -41,7 +41,7 @@ const uaReal = computed(() => (uaPolicy.value !== null && uaCpi.value !== null ?
     </section>
     <div v-if="startError" class="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-3 rounded text-xs">{{ startError }}</div>
 
-    <MacroPanel title="Ставка ФРС и доходность 10-летних Treasury" :series="us" :today="today" :ids="RATES" :ranges="RANGES" default-range="10" empty="Нет данных. Нажми «Обновить»: подтянутся ряды США из FRED" hint="Колесо: масштаб, перетаскивание: сдвиг, двойной клик: сброс. Ставка ФРС — эффективная по месяцам; ступенька — верхняя граница целевого коридора с 2008 года">
+    <MacroPanel title="Ставка ФРС и доходность 10-летних Treasury" :series="us" :today="today" :ids="RATES" empty="Нет данных. Нажми «Обновить»: подтянутся ряды США из FRED" hint="Колесо: масштаб, перетаскивание: сдвиг, двойной клик: сброс. Ставка ФРС — эффективная по месяцам; ступенька — верхняя граница целевого коридора с 2008 года">
       <template #summary>
         <span v-if="target !== null" class="text-slate-400" title="Верхняя граница целевого диапазона ставки ФРС">ФРС (верх коридора) <b class="text-emerald-400 tabular-nums">{{ plainPct(target) }}</b></span>
         <span v-if="effective !== null" class="text-slate-400">Эффективная <b class="text-violet-300 tabular-nums">{{ plainPct(effective) }}</b></span>
@@ -56,11 +56,11 @@ const uaReal = computed(() => (uaPolicy.value !== null && uaCpi.value !== null ?
       <div class="text-slate-600">Разница реальных ставок объясняет, почему гривневые бумаги платят больше долларовых, и сколько из этого съедает девальвация (экран «Курсы»).</div>
     </section>
 
-    <MacroPanel title="Инфляция США к тому же месяцу прошлого года" :series="us" :today="today" :ids="YOY" :ranges="RANGES" default-range="10" empty="Нет данных. Нажми «Обновить»: подтянутся ряды США из FRED">
+    <MacroPanel title="Инфляция США к тому же месяцу прошлого года" :series="us" :today="today" :ids="YOY" empty="Нет данных. Нажми «Обновить»: подтянутся ряды США из FRED">
       <template #summary>
         <span v-if="cpi" class="text-slate-400">Инфляция США г/г <b class="text-amber-300 tabular-nums">{{ plainPct(cpi.v) }}</b></span>
       </template>
     </MacroPanel>
-    <MacroPanel title="Инфляция США к предыдущему месяцу" :series="us" :today="today" :ids="MOM" :ranges="RANGES" default-range="5" empty="Нет данных. Нажми «Обновить»: подтянутся ряды США из FRED" />
+    <MacroPanel title="Инфляция США к предыдущему месяцу" :series="us" :today="today" :ids="MOM" empty="Нет данных. Нажми «Обновить»: подтянутся ряды США из FRED" />
   </div>
 </template>

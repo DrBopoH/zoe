@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import { useMarketRefresh } from '../composables/useMarketRefresh.js'
-import { RANGES, goldUsd, annualChange, realRate, valueAt, lastPoint, signedPct, plainPct, unitText } from '../utils/macro.js'
+import { goldUsd, annualChange, realRate, valueAt, lastPoint, signedPct, plainPct, unitText } from '../utils/macro.js'
 
 // Экран «Курсы»: доллар, евро и золото к гривне (официальные курсы НБУ) и золото в долларах.
 // Из них в сводке: насколько гривна дешевела в среднем за год и что это делает с доходностью гривневых бумаг в долларах.
@@ -43,7 +43,7 @@ const dateText = (iso) => (iso ? iso.split('-').reverse().join('.') : '')
     </section>
     <div v-if="startError" class="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-3 rounded text-xs">{{ startError }}</div>
 
-    <MacroPanel title="Доллар и евро к гривне" :series="all" :today="today" :ids="USD_EUR" :ranges="RANGES" default-range="10" unit="₴" empty="Нет данных. Нажми «Обновить»: подтянутся курсы НБУ">
+    <MacroPanel title="Доллар и евро к гривне" :series="all" :today="today" :ids="USD_EUR" unit="₴" empty="Нет данных. Нажми «Обновить»: подтянутся курсы НБУ">
       <template #summary>
         <span class="text-slate-400">Доллар <b class="text-emerald-400 tabular-nums">{{ unitText(usd?.v ?? null, '₴') }}</b></span>
         <span class="text-slate-400">Евро <b class="text-sky-300 tabular-nums">{{ unitText(eur?.v ?? null, '₴') }}</b></span>
@@ -57,14 +57,14 @@ const dateText = (iso) => (iso ? iso.split('-').reverse().join('.') : '')
       <div class="text-slate-600">Это не прогноз, а «если курс пойдёт так же, как шёл». Сравнивай с доходностью долларовых бумаг (US) и ОВДП в USD.</div>
     </section>
 
-    <MacroPanel title="Золото, гривен за унцию" :series="all" :today="today" :ids="GOLD_UAH" :ranges="RANGES" default-range="10" unit="₴" empty="Нет данных. Нажми «Обновить»: подтянутся курсы НБУ">
+    <MacroPanel title="Золото, гривен за унцию" :series="all" :today="today" :ids="GOLD_UAH" unit="₴" empty="Нет данных. Нажми «Обновить»: подтянутся курсы НБУ">
       <template #summary>
         <span class="text-slate-400">Унция <b class="text-amber-300 tabular-nums">{{ unitText(gold?.v ?? null, '₴') }}</b></span>
         <span v-if="gold" class="text-slate-400" title="31,1035 г в тройской унции">Грамм <b class="text-amber-300 tabular-nums">{{ unitText(gold.v / 31.1035, '₴') }}</b></span>
       </template>
     </MacroPanel>
 
-    <MacroPanel title="Золото, долларов за унцию" :series="all" :today="today" :ids="GOLD_USD" :ranges="RANGES" default-range="10" unit="$" hint="Цена в гривнах, поделённая на курс доллара: показывает, как золото росло само по себе, без влияния девальвации гривны">
+    <MacroPanel title="Золото, долларов за унцию" :series="all" :today="today" :ids="GOLD_USD" unit="$" hint="Цена в гривнах, поделённая на курс доллара: показывает, как золото росло само по себе, без влияния девальвации гривны">
       <template #summary>
         <span class="text-slate-400">Унция <b class="text-amber-300 tabular-nums">{{ unitText(goldD?.v ?? null, '$') }}</b></span>
         <span v-if="goldGrowth(5) !== null" class="text-slate-400">Рост золота в долларах: <b class="tabular-nums" :class="goldGrowth(5) >= 0 ? 'text-emerald-400' : 'text-rose-400'">{{ signedPct(goldGrowth(5)) }}</b> в год за 5 л.<template v-if="goldGrowth(10) !== null">, <b class="tabular-nums" :class="goldGrowth(10) >= 0 ? 'text-emerald-400' : 'text-rose-400'">{{ signedPct(goldGrowth(10)) }}</b> за 10 л.</template></span>
