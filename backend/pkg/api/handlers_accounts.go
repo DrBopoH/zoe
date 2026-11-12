@@ -74,6 +74,7 @@ func (s *Server) HandleGetStatus(w http.ResponseWriter, r *http.Request) {
 		"status":   statusMsg,
 		"stats":    stats,
 		"progress": s.progressSnapshot(),
+		"market":   s.marketSnapshot(),
 	})
 }
 
@@ -87,6 +88,7 @@ func (s *Server) HandleFullHistoricalSync(w http.ResponseWriter, r *http.Request
 		return
 	}
 	go s.runFullCrawler(ctx, done)
+	s.startMarket(ctx, "") // рыночные данные — свой процесс параллельно банкам, свои статус и тосты; занят — пропускаем
 
 	writeMsg(w, "started", "Полная историческая синхронизация запущена.")
 }

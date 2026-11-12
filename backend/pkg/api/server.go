@@ -26,6 +26,10 @@ type Server struct {
 	bn binanceState // Binance (read-only), см. handlers_binance.go
 	mk marketState  // облигации ОВДП и US Treasury из публичных API, см. handlers_market.go
 
+	// общий контекст рыночных данных, запущенных отдельно от «Разведать»; сброс кеша его отменяет и создаёт заново
+	marketCtx    context.Context
+	marketCancel context.CancelFunc
+
 	prog progress // структурированный прогресс синка для панели на фронте
 
 	allowedOrigins map[string]bool // CORS: кто из браузера имеет право ходить в API
@@ -94,6 +98,12 @@ func (s *Server) beginSync() (ctx context.Context, done chan struct{}, ok bool) 
 // abortSync останавливает идущий «Разведать» и ждёт, пока он отпустит кеш (не дольше нескольких секунд).
 // Остановленный обход сам ничего не пишет в кеш и не трогает состояние: оно уже сброшено здесь.
 func (s *Server) abortSync() {
+	s.cancelMarket()
+	s.abortBankSync()
+	s.waitMarket(3 * time.Second) // и рыночный опрос, запущенный вместе с «Разведать» (его контекст — банковский)
+}
+
+func (s *Server) abortBankSync() {
 	s.syncMutex.Lock()
 	cancel, done, was := s.syncCancel, s.syncDone, s.isSyncing
 	if was {
@@ -109,4 +119,15 @@ func (s *Server) abortSync() {
 	case <-time.After(3 * time.Second):
 	}
 	s.prog.reset()
+}
+
+// cancelMarket отменяет отдельно запущенный опрос рыночных данных; следующий запуск создаст контекст заново.
+func (s *Server) cancelMarket() {
+	s.syncMutex.Lock()
+	cancel := s.marketCancel
+	s.marketCtx, s.marketCancel = nil, nil
+	s.syncMutex.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
