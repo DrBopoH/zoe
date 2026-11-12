@@ -38,6 +38,8 @@ func newMarketServer(t *testing.T, usUp bool) *Server {
 			} else {
 				w.Write([]byte(`[{"exchangedate":"12.11.2026","rate_per_unit":45.3222,"units":1}]`))
 			}
+		case "/datasets/s-and-p-500/main/data/data.csv":
+			w.Write([]byte("Date,SP500\n1871-01-01,4.44\n"))
 		case "/api/v3/klines":
 			w.Write([]byte(`[[1793577600000,"100","110","90","105.5","1",1794182399999]]`))
 		case "/fng/":
@@ -59,7 +61,7 @@ func newMarketServer(t *testing.T, usUp bool) *Server {
 	t.Cleanup(func() { st.Close() })
 	s := NewServer(st, nil, nil)
 	c := market.NewClient()
-	c.NBUBase, c.USTBase, c.FREDBase, c.BinanceBase, c.FNGBase, c.AuctionDays = up.URL, up.URL, up.URL, up.URL, up.URL, 1
+	c.NBUBase, c.USTBase, c.FREDBase, c.BinanceBase, c.FNGBase, c.ShillerBase, c.AuctionDays = up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, 1
 	s.SetMarket(c)
 	return s
 }
