@@ -1,8 +1,10 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, toRef } from 'vue'
 import { prepareAccount } from '../utils/accountView.js'
 import AccountPanel from '../components/AccountPanel.vue'
 import AccountHistoryTable from '../components/AccountHistoryTable.vue'
+import CandleChart from '../components/CandleChart.vue'
+import { useCapitalChart } from '../composables/useCapitalChart.js'
 
 const props = defineProps({
   accounts: { type: Array, default: () => [] },
@@ -20,16 +22,28 @@ const toggle = (acc) => {
     : [...selectedIds.value, acc.key]
 }
 
-const selectedAccounts = computed(() =>
-  preparedAccounts.value
-    .filter(isSelected)
-    .map(a => ({
-      id: a.id,
-      label: a.pans[0] || a.displayIban,
-      fullLabel: [a.displayIban, ...a.pans].join(' · '),
-      theme: a.theme
-    }))
+const toRow = (a) => ({
+  id: a.id,
+  label: a.pans[0] || a.displayIban,
+  fullLabel: [a.displayIban, ...a.pans].join(' · '),
+  theme: a.theme
+})
+const selectedAccounts = computed(() => preparedAccounts.value.filter(isSelected).map(toRow))
+
+// График — по выбранным картам (ничего не выбрано → все счета, как в Смете). Клик по свече сужает таблицу до её корзины времени.
+const pickedIds = computed(() => selectedAccounts.value.map(a => a.id))
+const { bondOps, chartTransactions, chartTotalUAH, binanceIdList, payEvents } =
+  useCapitalChart(toRef(props, 'accounts'), toRef(props, 'transactions'), pickedIds)
+
+const chartRef = ref(null)
+const range = ref(null) // { from, to, title } выбранной свечи
+const clearRange = () => { range.value = null; chartRef.value?.clearSelection() }
+
+// Таблица: выбранные карты; если карт нет, но выбрана свеча — все счета в её интервале
+const tableAccounts = computed(() =>
+  selectedAccounts.value.length ? selectedAccounts.value : range.value ? preparedAccounts.value.map(toRow) : []
 )
+const allScope = computed(() => !selectedAccounts.value.length && !!range.value)
 </script>
 
 <template>
@@ -52,6 +66,24 @@ const selectedAccounts = computed(() =>
       />
     </div>
 
-    <AccountHistoryTable :transactions="transactions" :selected="selectedAccounts" @clear="selectedIds = []" />
+    <CandleChart
+      ref="chartRef"
+      selectable
+      :transactions="chartTransactions"
+      :binance-ids="binanceIdList"
+      :total-value-u-a-h="chartTotalUAH"
+      :events="payEvents"
+      @select="range = $event"
+    />
+
+    <AccountHistoryTable
+      :transactions="transactions"
+      :memo="bondOps"
+      :selected="tableAccounts"
+      :all-scope="allScope"
+      :range="range"
+      @clear="selectedIds = []"
+      @clear-range="clearRange"
+    />
   </main>
 </template>

@@ -3,13 +3,20 @@ import { computed, ref, watch } from 'vue'
 import { formatMoney, formatMaskedIBAN } from '../utils/formatters.js'
 import { counterpartyName, isPersonTransaction } from '../utils/personLayout.js'
 import UiButton from './ui/UiButton.vue'
+import { effectiveTimes, isDateOnly } from '../utils/historyOrder.js'
 
 const props = defineProps({
   transactions: { type: Array, default: () => [] },
+  // справочные строки (покупка/продажа/выплаты облигаций): видны в истории, но в приход/расход не входят
+  memo: { type: Array, default: () => [] },
   // выбранные счета/карты: { id, label, theme }
-  selected: { type: Array, default: () => [] }
+  selected: { type: Array, default: () => [] },
+  // выбрана свеча графика: показываем только операции её корзины времени { from, to (мс), title }
+  range: { type: Object, default: null },
+  // «все счета» (карты не выбраны, фильтр только по свече): без плашек карт и без кнопки снятия выбора
+  allScope: { type: Boolean, default: false }
 })
-const emit = defineEmits(['clear'])
+const emit = defineEmits(['clear', 'clear-range'])
 
 const PAGE = 100
 const visible = ref(PAGE)
@@ -17,15 +24,26 @@ const openId = ref(null)
 
 const byId = computed(() => new Map(props.selected.map(a => [a.id, a])))
 
+const inRange = (t) => {
+  const r = props.range
+  if (!r) return true
+  const ms = new Date(t.time).getTime()
+  return ms >= r.from && ms < r.to
+}
+
+// порядок — по логическим правилам внутри дня для записей брокера (см. utils/historyOrder.js), по всем операциям, а не только видимым
+const order = computed(() => effectiveTimes(props.transactions, props.memo))
+
 const rows = computed(() => {
   const ids = byId.value
-  return props.transactions
-    .filter(t => ids.has(t.account_id))
-    .sort((a, b) => new Date(b.time) - new Date(a.time))
+  const at = order.value
+  return [...props.transactions, ...props.memo]
+    .filter(t => ids.has(t.account_id) && inRange(t))
+    .sort((a, b) => at.get(b.id) - at.get(a.id))
 })
 
 // при смене выбора начинаем с первой страницы и закрываем раскрытую строку
-watch(() => props.selected.map(a => a.id).join('|'), () => {
+watch(() => props.selected.map(a => a.id).join('|') + '|' + (props.range ? props.range.key : ''), () => {
   visible.value = PAGE
   openId.value = null
 })
@@ -36,7 +54,7 @@ const totals = computed(() => {
   let income = 0
   let expense = 0
   for (const t of rows.value) {
-    if (t.internal) continue // перевод между своими счетами — не доход и не расход
+    if (t.internal || t.memo) continue // перевод между своими счетами — не доход и не расход
     if (t.amount >= 0) income += t.amount
     else expense += t.amount
   }
@@ -60,6 +78,12 @@ const timeStr = (iso) => {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+const MEMO_TAG = {
+  buy: ['ПОКУПКА', 'bg-sky-500/15 text-sky-300 border-sky-500/30'],
+  sell: ['ПРОДАЖА', 'bg-amber-500/15 text-amber-300 border-amber-500/30'],
+  coupon: ['КУПОН', 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'],
+  redemption: ['ПОГАШЕНИЕ', 'bg-violet-500/15 text-violet-300 border-violet-500/30']
+}
 const title = (t) => (t.counter_name || '').trim() || (t.description || '').trim() || '—'
 const subtitle = (t) => {
   const d = (t.description || '').trim()
@@ -98,7 +122,11 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
         <span v-if="selected.length" class="text-[9px] px-1.5 py-0.2 bg-emerald-500/10 border border-emerald-500/20 rounded text-emerald-400 font-mono">
           {{ rows.length }}
         </span>
-        <span v-for="a in selected" :key="a.id" class="text-[9px] px-1.5 py-0.5 rounded border font-mono normal-case" :class="a.theme.tagStyle">
+        <span v-if="range" class="text-[9px] px-1.5 py-0.5 rounded border font-mono normal-case bg-sky-500/10 border-sky-500/30 text-sky-300 cursor-pointer" title="Снять фильтр по свече" @click="emit('clear-range')">
+          {{ range.title }} ✕
+        </span>
+        <span v-if="allScope" class="text-[9px] px-1.5 py-0.5 rounded border font-mono normal-case border-slate-700 text-slate-400">все счета</span>
+        <span v-for="a in (allScope ? [] : selected)" :key="a.id" class="text-[9px] px-1.5 py-0.5 rounded border font-mono normal-case" :class="a.theme.tagStyle">
           {{ a.label }}
         </span>
       </div>
@@ -107,7 +135,7 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
         <span class="text-slate-500">Приход <span class="text-emerald-400 font-bold">{{ formatMoney(totals.income) }}</span></span>
         <span class="text-slate-500">Расход <span class="text-rose-400 font-bold">{{ formatMoney(Math.abs(totals.expense)) }}</span></span>
         <span class="text-slate-500">Итого <span class="font-bold" :class="tone(totals.net)">{{ formatMoney(totals.net) }}</span></span>
-        <UiButton variant="outline" size="sm" @click="emit('clear')">Снять выбор</UiButton>
+        <UiButton v-if="!allScope" variant="outline" size="sm" @click="emit('clear')">Снять выбор</UiButton>
       </div>
     </div>
 
@@ -130,7 +158,7 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
               @click="toggleRow(t.id)"
             >
               <td class="p-3 whitespace-nowrap text-slate-400">
-                {{ dateStr(t.time) }} <span class="text-slate-600">{{ timeStr(t.time) }}</span>
+                {{ dateStr(t.time) }} <span v-if="!isDateOnly(t)" class="text-slate-600">{{ timeStr(t.time) }}</span>
               </td>
               <td v-if="selected.length > 1" class="p-3">
                 <span class="text-[9px] px-1.5 py-0.5 rounded border" :class="byId.get(t.account_id)?.theme.tagStyle">
@@ -139,7 +167,8 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
               </td>
               <td class="p-3 max-w-[360px]">
                 <div class="font-bold text-slate-200 truncate">
-                  <span v-if="t.internal" class="mr-1.5 text-[9px] px-1.5 py-0.5 rounded border font-normal bg-blue-500/15 text-blue-300 border-blue-500/30">ИНВЕСТИЦИЯ</span>{{ title(t) }}
+                  <span v-if="t.memo" class="mr-1.5 text-[9px] px-1.5 py-0.5 rounded border font-normal" :class="MEMO_TAG[t.memo][1]">{{ MEMO_TAG[t.memo][0] }}</span>
+                  <span v-else-if="t.internal" class="mr-1.5 text-[9px] px-1.5 py-0.5 rounded border font-normal bg-blue-500/15 text-blue-300 border-blue-500/30">ИНВЕСТИЦИЯ</span>{{ title(t) }}
                 </div>
                 <div v-if="subtitle(t)" class="text-[10px] text-slate-500 truncate">{{ subtitle(t) }}</div>
               </td>
@@ -151,7 +180,7 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
                 <span v-else class="text-slate-600">—</span>
               </td>
               <td class="p-3 text-right whitespace-nowrap font-bold" :class="tone(t.amount)">
-                <span :class="t.internal && 'opacity-60'">{{ money(t.amount, t) }}</span>
+                <span :class="(t.internal || t.memo) && 'opacity-60'">{{ money(t.amount, t) }}</span>
                 <span v-if="t.is_hold" class="ml-1 text-[9px] text-amber-400 font-normal">HOLD</span>
               </td>
             </tr>
@@ -170,7 +199,7 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
 
           <tr v-if="!selected.length">
             <td colspan="5" class="p-8 text-center text-slate-600 text-xs uppercase">
-              Выберите карту — клик по плитке, можно несколько
+              Выберите карту (клик по плитке, можно несколько) или свечу на графике
             </td>
           </tr>
           <tr v-else-if="rows.length === 0">

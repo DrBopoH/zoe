@@ -9,12 +9,14 @@ const props = defineProps({
   // счета Binance: пока минутного ряда оценки нет, их операции считаются как у любого счёта; с рядом — их скачок уже в оценке
   binanceIds: { type: Array, default: () => [] },
   // выплаты по облигациям инвестиционных счетов: { date: 'ГГГГ-ММ-ДД', kind: coupon|redemption, amount, isin, done }
-  events: { type: Array, default: () => [] }
+  events: { type: Array, default: () => [] },
+  // клик по свече выбирает её (наружу — событие select, на графике подсветка); без флага график только смотрят
+  selectable: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['select'])
 const hoveredCandle = ref(null)
-const selectedKey = ref(null) // выбранная кликом свеча: под графиком (в Смете) разбор её операций по картам
+const selectedKey = ref(null) // выбранная кликом свеча (только при selectable): наружу уходят границы её корзины
 const hoveredMarker = ref(null)
 const BLUE = '#93c5fd' // голубой как у бейджа покупки ОВДП
 const CLAIMED = '#64748b' // выплата уже получена — серым
@@ -47,6 +49,7 @@ const pad2 = (n) => String(n).padStart(2, '0')
 const setTf = (id) => {
   if (id === tfId.value) return
   tfId.value = id
+  extraBack.value = 0
   try { localStorage.setItem('zoe.candle.tf', id) } catch { /* ignore */ }
   zoomLevel.value = 1.0
   hoveredCandle.value = null
@@ -58,18 +61,59 @@ const dayStartOf = (ms) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); ret
 const weekStartOf = (ms) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.getTime() }
 const alignDown = (ms, step) => { const ds = dayStartOf(ms); return ds + Math.floor((ms - ds) / step) * step }
 
-// Минутный ряд Binance (восстановленная история): первая/последняя минута, есть ли он вообще
+// ── Ряд оценки Binance. Свечи подгружаются чанками и копятся в кеше по началу корзины (мс → [o,h,l,c]) отдельно для каждого
+// таймфрейма: возврат на уже открытый ТФ и прокрутка назад не ходят в бэкенд за тем, что уже есть.
 const bnInfo = ref({ has: false, first: 0, last: 0 })
 // ряд оценки участвует в графике, только если Binance среди выбранных счетов
 const bnHas = computed(() => props.binanceIds.length > 0 && bnInfo.value.has)
-const bnData = ref(null) // свечи оценки Binance под текущие корзины: { has, last_value, candles, sig }
-let bnToken = 0
-const loadBnInfo = async () => {
-  try {
-    const res = await apiSend('POST', '/binance/candles', { starts: [], end: 0 })
-    const d = await res.json()
-    bnInfo.value = { has: !!d.has, first: d.first || 0, last: d.last || 0 }
-  } catch { bnInfo.value = { has: false, first: 0, last: 0 } }
+const ZERO = [0, 0, 0, 0]
+const bnCaches = {}
+const bnCache = () => (bnCaches[tfId.value] ||= new Map())
+let bnLastValue = 0 // последняя точка ряда: от неё график считает «остальной капитал»
+const bnVer = ref(0) // растёт при каждом пополнении кеша → пересчёт свечей
+const bnReady = ref(false) // свечи всего текущего окна уже в кеше: операции Binance-счетов не считаем второй раз
+let bnEpoch = 0 // смена ряда сбрасывает кеши; ответы запросов, ушедших до этого, выбрасываются
+const resetBn = () => {
+  bnEpoch++
+  for (const k of Object.keys(bnCaches)) delete bnCaches[k]
+  bnReady.value = false
+  bnVer.value++
+}
+
+// Окно: DST-безопасно и без Date на каждую свечу — день → его корзины арифметикой (сотни тысяч минутных свечей не тормозят).
+const buildIntradayStarts = (stepMs, minT, want) => {
+  const nowMs = Date.now()
+  const out = []
+  const d = new Date(nowMs)
+  d.setHours(0, 0, 0, 0)
+  let dayStart = d.getTime()
+  while (out.length < want) {
+    const next = new Date(dayStart)
+    next.setDate(next.getDate() + 1)
+    const k = Math.floor((Math.min(next.getTime() - 1, nowMs) - dayStart) / stepMs)
+    for (let j = k; j >= 0 && out.length < want; j--) {
+      const st = dayStart + j * stepMs
+      out.push(st)
+      if (st <= minT) return out.reverse() // корзина с самой ранней операцией — край истории
+    }
+    const prev = new Date(dayStart)
+    prev.setDate(prev.getDate() - 1)
+    prev.setHours(0, 0, 0, 0)
+    dayStart = prev.getTime()
+  }
+  return out.reverse()
+}
+const buildDailyStarts = (def, minT) => {
+  const nowMs = Date.now()
+  const out = []
+  const first = def.day ? dayStartOf(minT) : weekStartOf(minT)
+  const last = def.day ? dayStartOf(nowMs) : weekStartOf(nowMs)
+  const c = new Date(first)
+  while (c.getTime() <= last) {
+    out.push(c.getTime())
+    c.setDate(c.getDate() + (def.day ? 1 : 7))
+  }
+  return out
 }
 
 // Самая ранняя точка графика: первая операция или начало ряда Binance
@@ -87,119 +131,154 @@ const minTimeMs = computed(() => {
   return m
 })
 
-// Начала корзин (мс, по возрастанию). Границы — по местному времени, поэтому дни/недели переходят через DST ровно.
-const bucketStarts = computed(() => {
+// Внутридневное окно растёт чанками (extraBack) при прокрутке к левому краю; 1D и 1W — вся история сразу (их мало).
+const extraBack = ref(0)
+const startsFor = (extra) => {
   const minT = minTimeMs.value
   if (minT === null) return []
-  const nowMs = Date.now()
   const def = tfDef.value
-  const out = []
-  if (def.day || def.week) {
-    const first = def.day ? dayStartOf(minT) : weekStartOf(minT)
-    const last = def.day ? dayStartOf(nowMs) : weekStartOf(nowMs)
-    const c = new Date(first)
-    while (c.getTime() <= last) {
-      out.push(c.getTime())
-      c.setDate(c.getDate() + (def.day ? 1 : 7))
-    }
-    return out
-  }
-  let st = alignDown(nowMs, def.ms)
-  while (out.length < def.limit) {
-    out.push(st)
-    if (st <= minT) break
-    st = alignDown(st - 1, def.ms)
-  }
-  return out.reverse()
-})
-
-// Свечи Binance под корзины: запрос при смене таймфрейма/диапазона и при каждой новой версии данных (меняется итог капитала)
-let bnTimer = 0
-const requestBn = () => {
-  clearTimeout(bnTimer)
-  bnTimer = setTimeout(async () => {
-    const starts = bucketStarts.value
-    if (!starts.length || !bnHas.value) { bnData.value = null; return }
-    const my = ++bnToken
-    const tfAt = tfId.value
-    try {
-      const res = await apiSend('POST', '/binance/candles', { starts: starts.map(v => Math.floor(v / 1000)), end: Math.floor(Date.now() / 1000) + 60 })
-      const d = await res.json()
-      if (my === bnToken) bnData.value = d.has ? { ...d, n: starts.length, tf: tfAt } : null
-    } catch { if (my === bnToken) bnData.value = null }
-  }, 120)
+  return def.day || def.week ? buildDailyStarts(def, minT) : buildIntradayStarts(def.ms, minT, def.limit + extra)
 }
-watch([bucketStarts, () => props.totalValueUAH, bnHas], requestBn)
-watch(() => props.transactions, loadBnInfo)
-onMounted(() => { loadBnInfo() })
-onBeforeUnmount(() => clearTimeout(bnTimer))
+const bucketStarts = computed(() => startsFor(extraBack.value))
+const canLoadMore = computed(() => !isDaily.value && bucketStarts.value.length > 0 && minTimeMs.value !== null && bucketStarts.value[0] > minTimeMs.value)
 
 // Корзина i — [starts[i], starts[i+1]); операция «в будущем» (например, 12:00 сегодняшнего дня) попадает в последнюю
-const bucketOf = (starts, ms) => {
-  let lo = 0, hi = starts.length
-  while (lo < hi) { const mid = (lo + hi) >> 1; if (starts[mid] <= ms) lo = mid + 1; else hi = mid }
-  return lo - 1
+const lowerBound = (arr, v) => { let lo = 0, hi = arr.length; while (lo < hi) { const m = (lo + hi) >> 1; if (arr[m] < v) lo = m + 1; else hi = m } return lo }
+
+// Свечи Binance под корзины, которых ещё нет в кеше: непрерывными кусками, один запрос на кусок.
+const fetchBnRun = async (starts, i0, i1, epoch, tf) => {
+  const slice = starts.slice(i0, i1 + 1)
+  const end = i1 + 1 < starts.length ? starts[i1 + 1] : Date.now() + 60_000
+  const res = await apiSend('POST', '/binance/candles', { starts: slice.map(v => Math.floor(v / 1000)), end: Math.floor(end / 1000) })
+  const d = await res.json()
+  if (epoch !== bnEpoch || tf !== tfId.value) return false
+  if (!d.has) return false
+  bnLastValue = d.last_value || 0
+  const cache = bnCaches[tf] ||= new Map()
+  slice.forEach((s, k) => cache.set(s, (d.candles && d.candles[k]) || ZERO))
+  return true
+}
+let bnBusy = 0
+let bnChain = Promise.resolve() // запуски идут по очереди: второй видит кеш первого и не дублирует запрос
+const ensureBn = () => (bnChain = bnChain.then(runEnsureBn, runEnsureBn))
+const runEnsureBn = async () => {
+  const starts = bucketStarts.value
+  if (!bnHas.value || !starts.length) { bnReady.value = false; return }
+  const my = ++bnBusy
+  const epoch = bnEpoch
+  const tf = tfId.value
+  const cache = bnCache()
+  try {
+    let i = 0
+    while (i < starts.length) {
+      if (cache.has(starts[i])) { i++; continue }
+      let j = i
+      while (j + 1 < starts.length && !cache.has(starts[j + 1])) j++
+      if (!(await fetchBnRun(starts, i, j, epoch, tf))) return
+      bnVer.value++
+      i = j + 1
+    }
+    if (my === bnBusy && epoch === bnEpoch) bnReady.value = true
+  } catch { /* связь пропала — повторим при следующем обновлении данных */ }
 }
 
-const bucketCandles = computed(() => {
+// Что поменялось в ряду: другое начало/ужатие — кеши недействительны; дописан хвост — сбрасываем только корзины от старого края.
+let infoFlight = null // одновременные вызовы делят один запрос
+const loadBnInfo = () => (infoFlight ||= fetchBnInfo().finally(() => { infoFlight = null }))
+const fetchBnInfo = async () => {
+  let next
+  try {
+    const res = await apiSend('POST', '/binance/candles', { starts: [], end: 0 })
+    const d = await res.json()
+    next = { has: !!d.has, first: d.first || 0, last: d.last || 0 }
+    bnLastValue = d.last_value || 0
+  } catch { next = { has: false, first: 0, last: 0 } }
+  const prev = bnInfo.value
+  bnInfo.value = next
+  if (!next.has || next.first !== prev.first || next.last < prev.last) resetBn()
+  else if (next.last !== prev.last) {
+    const cut = prev.last * 1000
+    for (const cache of Object.values(bnCaches)) {
+      let from = -Infinity // корзина, в которую попадал старый край ряда, и всё правее
+      for (const k of cache.keys()) if (k <= cut && k > from) from = k
+      for (const k of [...cache.keys()]) if (k >= from) cache.delete(k)
+    }
+    bnReady.value = false
+    bnVer.value++
+  }
+}
+watch(() => props.transactions, async () => { await loadBnInfo(); ensureBn() })
+watch([bucketStarts, bnHas], ensureBn)
+onMounted(async () => { await loadBnInfo(); ensureBn() })
+
+// Операции (кроме Binance-счетов при готовом ряде), по времени. Типизированные массивы: пересчёт свечей без аллокаций.
+const txSorted = computed(() => {
+  const skip = bnReady.value ? new Set(props.binanceIds) : null
+  const list = []
+  for (const t of props.transactions) {
+    if (!t.time || (skip && skip.has(t.account_id))) continue
+    list.push([new Date(t.time).getTime(), t.amount])
+  }
+  list.sort((a, b) => a[0] - b[0])
+  const ms = new Float64Array(list.length)
+  const amt = new Float64Array(list.length)
+  list.forEach((x, i) => { ms[i] = x[0]; amt[i] = x[1] })
+  return { ms, amt }
+})
+
+// Все загруженные корзины в плоских массивах. Считается справа налево от итога капитала (как раньше), без объекта на свечу —
+// объекты строятся только для видимого окна.
+const series = computed(() => {
   const starts = bucketStarts.value
   const n = starts.length
-  if (n === 0) return []
+  if (n === 0) return null
+  void bnVer.value
+  const { ms, amt } = txSorted.value
+  const lo = new Int32Array(n + 1)
+  let p = 0
+  while (p < ms.length && ms[p] < starts[0]) p++
+  for (let i = 0; i < n; i++) {
+    lo[i] = p
+    const end = i + 1 < n ? starts[i + 1] : Infinity
+    while (p < ms.length && ms[p] < end) p++
+  }
+  lo[n] = p
 
-  const bn = bnData.value && bnData.value.n === n && bnData.value.tf === tfId.value && bnHas.value ? bnData.value : null
-  const skip = bn ? new Set(props.binanceIds) : null // ряд оценки есть — операции Binance не считаем второй раз
-  const groups = Array.from({ length: n }, () => [])
-  props.transactions.forEach(t => {
-    if (!t.time || (skip && skip.has(t.account_id))) return
-    const ms = new Date(t.time).getTime()
-    const i = bucketOf(starts, ms)
-    if (i >= 0) groups[i].push({ ms, amount: t.amount, id: t.id })
-  })
-  groups.forEach(g => g.sort((a, b) => a.ms - b.ms))
-
-  let cur = props.totalValueUAH - (bn ? bn.last_value : 0)
-  const result = new Array(n)
-
+  const bn = bnReady.value ? bnCache() : null
+  const O = new Float64Array(n), H = new Float64Array(n), L = new Float64Array(n), C = new Float64Array(n)
+  const BO = new Float64Array(n), BC = new Float64Array(n), IN = new Float64Array(n), OUT = new Float64Array(n)
+  let cur = props.totalValueUAH - (bn ? bnLastValue : 0)
+  let minVal = Infinity, maxVal = -Infinity
   for (let i = n - 1; i >= 0; i--) {
-    const txs = groups[i]
     const c1 = cur
-    const net = txs.reduce((sum, t) => sum + t.amount, 0)
+    let net = 0
+    for (let k = lo[i]; k < lo[i + 1]; k++) net += amt[k]
     const o1 = c1 - net
     let run = o1
     let h1 = Math.max(o1, c1)
     let l1 = Math.min(o1, c1)
-    let inflow = 0
-    let outflow = 0
-    txs.forEach(t => {
-      if (t.amount > 0) inflow += t.amount
-      else outflow += Math.abs(t.amount)
-      run += t.amount
+    let inflow = 0, outflow = 0
+    for (let k = lo[i]; k < lo[i + 1]; k++) {
+      const a = amt[k]
+      if (a > 0) inflow += a; else outflow -= a
+      run += a
       if (run > h1) h1 = run
       if (run < l1) l1 = run
-    })
+    }
     cur = o1
-
     // Binance: свеча оценки (o,h,l,c); до начала ряда — ноль. Пути двух частей внутри корзины неизвестны —
     // пик/дно берём из достижимых сочетаний крайних точек.
-    const b = (bn && bn.candles && bn.candles[i]) || [0, 0, 0, 0]
+    const b = (bn && bn.get(starts[i])) || ZERO
     const open = o1 + b[0]
     const close = c1 + b[3]
     const high = Math.max(open, close, h1 + b[0], h1 + b[3], o1 + b[1], c1 + b[1])
     const low = Math.min(open, close, l1 + b[0], l1 + b[3], o1 + b[2], c1 + b[2])
-
-    const d = new Date(starts[i])
-    result[i] = {
-      key: String(starts[i]),
-      ts: starts[i],
-      date: toLocalDateStr(d),
-      time: `${pad2(d.getHours())}:${pad2(d.getMinutes())}`,
-      open, high, low, close,
-      bnOpen: b[0], bnClose: b[3], bnSeries: !!bn, // вклад Binance в открытие/закрытие (для разбора свечи)
-      inflow, outflow,
-      isBullish: close >= open
-    }
+    O[i] = open; H[i] = high; L[i] = low; C[i] = close
+    BO[i] = b[0]; BC[i] = b[3]; IN[i] = inflow; OUT[i] = outflow
+    if (low < minVal) minVal = low
+    if (high > maxVal) maxVal = high
   }
-  return result
+  return { n, starts, O, H, L, C, BO, BC, IN, OUT, min: minVal, max: maxVal, bnSeries: !!bn }
 })
 
 // Таймлайн вперёд — до последней выплаты инвестиционного счёта (погашение). Свечей там нет, только маркеры. Только на 1D.
@@ -222,7 +301,7 @@ const slotDateOf = (dateStr) => {
   const [y, m, d] = dateStr.split('-').map(Number)
   return toLocalDateStr(new Date(weekStartOf(new Date(y, m - 1, d).getTime())))
 }
-const totalDays = computed(() => (bucketCandles.value.length ? bucketCandles.value.length + futureDays.value.length : 0))
+const totalDays = computed(() => (series.value ? series.value.n + futureDays.value.length : 0))
 
 // Границы зума: ниже ~7% свеча уже тоньше 2px, дальше смысла нет. Раньше пол в 8px/свечу глушил отдаление на 40%.
 const MIN_ZOOM = 0.07
@@ -234,65 +313,129 @@ const svgWidth = computed(() => {
   const minWidth = chartContainerRef.value ? chartContainerRef.value.clientWidth : 1000
   return Math.max(minWidth, calculated)
 })
+const stepPx = computed(() => (svgWidth.value - paddingX * 2) / Math.max(totalDays.value, 1))
 
-const candleScales = computed(() => {
-  if (bucketCandles.value.length === 0) return { min: 0, max: 0, candles: [], slots: [], markers: [], ticks: [], monthBoundaries: [], step: 0 }
+// ── Окно отрисовки. Рисуем только свечи на экране и по экрану запаса с каждой стороны: DOM не растёт с историей.
+// Окно двигается квантами (полэкрана): пока двигаешь график внутри кванта, Vue ничего не перерисовывает.
+const scrollX = ref(0)
+const viewW = ref(1000)
+const perView = computed(() => Math.max(1, Math.ceil(viewW.value / stepPx.value)))
+const quant = computed(() => Math.max(8, Math.ceil(perView.value / 2)))
+const firstVisible = computed(() => Math.floor((scrollX.value - paddingX) / stepPx.value))
+const winFrom = computed(() => Math.max(0, Math.floor((firstVisible.value - perView.value) / quant.value) * quant.value))
+const winTo = computed(() => Math.min(totalDays.value, Math.ceil((firstVisible.value + perView.value * 2) / quant.value) * quant.value))
 
-  const minVal = Math.min(...bucketCandles.value.map(c => c.low))
-  const maxVal = Math.max(...bucketCandles.value.map(c => c.high))
-  const range = maxVal - minVal || 1
 
-  const count = totalDays.value
-  const step = (svgWidth.value - paddingX * 2) / Math.max(count, 1)
-  const candleWidth = Math.max(1, Math.min(24, step * 0.65))
+// ── Вертикальная шкала по видимой части (как на биржах), а не по всей загруженной истории:
+// подгрузка чанков с другими экстремумами её не трогает. Цель — min/max свечей на экране + поля;
+// показываемый диапазон плавно (экспоненциально, по времени) догоняет цель, поэтому смена масштаба при прокрутке не дёргается.
+const yLo = ref(0), yHi = ref(1)
+const yTarget = computed(() => {
+  const S = series.value
+  if (!S || !S.n) return null
+  const a = Math.max(0, firstVisible.value)
+  const b = Math.min(S.n, firstVisible.value + perView.value + 1)
+  let lo = Infinity, hi = -Infinity
+  for (let i = a; i < b; i++) { if (S.L[i] < lo) lo = S.L[i]; if (S.H[i] > hi) hi = S.H[i] }
+  if (lo === Infinity) { lo = S.min; hi = S.max } // экран целиком в будущем/пусто — держим общий диапазон
+  const pad = (hi - lo) * 0.04 || Math.abs(hi) * 0.01 || 1
+  return [lo - pad, hi + pad]
+})
+let yRaf = 0, yLast = 0, yInit = false
+const yStep = (t) => {
+  yRaf = 0
+  const tg = yTarget.value
+  if (!tg) return
+  const dt = Math.min(100, t - yLast || 16)
+  yLast = t
+  const k = 1 - Math.exp(-dt / 110)
+  const span = tg[1] - tg[0] || 1
+  const dLo = tg[0] - yLo.value, dHi = tg[1] - yHi.value
+  if (Math.abs(dLo) < span * 0.0005 && Math.abs(dHi) < span * 0.0005) { yLo.value = tg[0]; yHi.value = tg[1]; return }
+  yLo.value += dLo * k
+  yHi.value += dHi * k
+  yRaf = requestAnimationFrame(yStep)
+}
+watch(yTarget, (tg) => {
+  if (!tg) return
+  if (!yInit) { yInit = true; yLo.value = tg[0]; yHi.value = tg[1]; return } // первый показ — без анимации
+  if (!yRaf) { yLast = performance.now(); yRaf = requestAnimationFrame(yStep) }
+}, { immediate: true })
+onBeforeUnmount(() => { if (yRaf) cancelAnimationFrame(yRaf) })
 
-  const getY = (val) => {
-    return svgHeight - paddingY - ((val - minVal) / range) * (svgHeight - paddingY * 2)
+const slotMeta = (i) => {
+  const S = series.value
+  if (i < S.n) {
+    const d = new Date(S.starts[i])
+    return { date: toLocalDateStr(d), time: `${pad2(d.getHours())}:${pad2(d.getMinutes())}`, future: false }
   }
+  return { date: futureDays.value[i - S.n], time: '', future: true }
+}
+const slotX = (i) => paddingX + i * stepPx.value + stepPx.value / 2
 
-  const candles = bucketCandles.value.map((c, i) => {
-    const x = paddingX + i * step + step / 2
-    const yOpen = getY(c.open)
-    const yClose = getY(c.close)
-    const yHigh = getY(c.high)
-    const yLow = getY(c.low)
-
-    return {
-      ...c,
-      x,
-      yHigh,
-      yLow,
-      bodyTop: Math.min(yOpen, yClose),
-      bodyHeight: Math.max(2, Math.abs(yOpen - yClose)),
-      width: candleWidth
-    }
-  })
-
-  // слоты будущих дней (без свечей) — для оси, сетки и маркеров
-  const futureSlots = futureDays.value.map((date, k) => ({ key: 'f' + date, date, future: true, x: paddingX + (candles.length + k) * step + step / 2 }))
-  const slots = [...candles, ...futureSlots]
-
-  // Маркеры выплат лежат на «полу» таймлайна, прямо над датами; в один день сыплются столбиком вверх (только на 1D)
-  // на внутридневных таймфреймах день — это много свечей: маркер ставим на первую свечу дня (в будущем слот — сам день)
-  const slotByDate = new Map()
-  slots.forEach(sl => { if (!slotByDate.has(sl.date)) slotByDate.set(sl.date, sl) })
-  const floorY = svgHeight - 38
-  const byDate = new Map()
+// Выплата → слоты: по дате; в нескольких слотах одного дня (внутридневные ТФ) маркер ставим на первом
+const eventsByDate = computed(() => {
+  const m = new Map()
   props.events.forEach(e => {
     const d = slotDateOf(e.date)
-    if (!slotByDate.has(d)) return
-    if (!byDate.has(d)) byDate.set(d, [])
-    byDate.get(d).push(e)
+    if (!m.has(d)) m.set(d, [])
+    m.get(d).push(e)
   })
+  return m
+})
+
+const candleAt = (i) => {
+  const S = series.value
+  const min = yLo.value, max = yHi.value
+  const range = max - min || 1
+  const getY = (val) => svgHeight - paddingY - ((val - min) / range) * (svgHeight - paddingY * 2)
+  const step = stepPx.value
+  const yOpen = getY(S.O[i]), yClose = getY(S.C[i])
+  const m = slotMeta(i)
+  return {
+    key: String(S.starts[i]), i, ts: S.starts[i], date: m.date, time: m.time,
+    open: S.O[i], high: S.H[i], low: S.L[i], close: S.C[i],
+    bnOpen: S.BO[i], bnClose: S.BC[i], bnSeries: S.bnSeries, // вклад Binance в открытие/закрытие (для разбора свечи)
+    inflow: S.IN[i], outflow: S.OUT[i],
+    isBullish: S.C[i] >= S.O[i],
+    x: slotX(i), yHigh: getY(S.H[i]), yLow: getY(S.L[i]),
+    bodyTop: Math.min(yOpen, yClose), bodyHeight: Math.max(2, Math.abs(yOpen - yClose)),
+    width: Math.max(1, Math.min(24, step * 0.65))
+  }
+}
+
+// Видимая часть шкалы: свечи окна, сетка, границы периодов, маркеры выплат
+const candleScales = computed(() => {
+  const S = series.value
+  const empty = { candles: [], ticks: [], monthBoundaries: [], markers: [], step: 0, count: 0 }
+  if (!S) return empty
+  const a = winFrom.value, b = winTo.value
+  const step = stepPx.value
+  const nCandles = S.n
+
+  const candles = []
+  for (let i = a; i < Math.min(b, nCandles); i++) candles.push(candleAt(i))
+
+  // маркеры выплат лежат на «полу» таймлайна, прямо над датами; в один день сыплются столбиком вверх (только на 1D)
+  const floorY = svgHeight - 38
+  const slotOfDate = new Map()
+  const slots = []
+  for (let i = a; i < b; i++) {
+    const m = slotMeta(i)
+    const sl = i < nCandles ? candles[i - a] : { key: 'f' + m.date, date: m.date, future: true, x: slotX(i) }
+    slots.push(sl)
+    if (!slotOfDate.has(m.date)) slotOfDate.set(m.date, sl)
+  }
   const markers = []
-  byDate.forEach((list, date) => {
-    const slot = slotByDate.get(date)
+  eventsByDate.value.forEach((list, date) => {
+    const slot = slotOfDate.get(date)
+    if (!slot) return
     // по маркеру на каждую бумагу (3 облигации — 3 иконки). Купоны и погашения — в разных колонках рядом, друг на друга не ложатся
     const COL = 9, MAX_STACK = 6, GAP = 15
     const kinds = ['coupon', 'redemption'].filter(k => list.some(e => e.kind === k))
     kinds.forEach((kind, ki) => {
       const units = []
-      list.filter(e => e.kind === kind).sort((a, b) => a.isin.localeCompare(b.isin)).forEach(e => {
+      list.filter(e => e.kind === kind).sort((x, y) => x.isin.localeCompare(y.isin)).forEach(e => {
         const n = Math.max(1, Math.round(e.qty || 1))
         for (let u = 0; u < n; u++) units.push({ ...e, amount: e.amount / n, unit: u + 1, of: n })
       })
@@ -306,43 +449,43 @@ const candleScales = computed(() => {
     })
   })
 
-  // границы: на дневных таймфреймах — месяцы, на внутридневных — сутки
+  // границы: на дневных таймфреймах — месяцы, на внутридневных — сутки; в будущем (слоты-дни) — месяцы
   const monthBoundaries = []
-  let lastKey = null
-  // будущая часть на внутридневных таймфреймах идёт днями — границы по месяцам, иначе линия на каждый день
-  const periodKey = (c) => (isDaily.value || c.future ? c.date.substring(0, 7) : c.date)
-  let lastMonthKey = null
-  slots.forEach((c) => {
-    const k = periodKey(c)
-    const m = c.date.substring(0, 7)
-    const changed = c.future && !isDaily.value ? m !== lastMonthKey : lastKey !== null && k !== lastKey
-    if (changed) monthBoundaries.push(c)
-    lastKey = k
-    lastMonthKey = m
-  })
-
-  const targetDistance = 80
-  const candleStep = Math.max(1, Math.round(targetDistance / Math.max(1, step)))
-
-  const ticks = []
-  for (let i = 0; i < count; i += candleStep) {
-    ticks.push(slots[i])
+  const periodKey = (m) => (isDaily.value || m.future ? m.date.substring(0, 7) : m.date)
+  let prevM = a > 0 ? slotMeta(a - 1) : null
+  for (let i = a; i < b; i++) {
+    const m = slotMeta(i)
+    const changed = m.future && !isDaily.value
+      ? (prevM ? m.date.substring(0, 7) !== prevM.date.substring(0, 7) : false)
+      : prevM !== null && periodKey(m) !== periodKey(prevM)
+    if (changed) monthBoundaries.push(slots[i - a])
+    prevM = m
   }
 
-  const lastCandle = slots[count - 1]
-  if (ticks.length > 0 && ticks[ticks.length - 1].key !== lastCandle.key) {
-    const distToLast = lastCandle.x - ticks[ticks.length - 1].x
-    if (distToLast < targetDistance * 0.6) {
-      ticks[ticks.length - 1] = lastCandle
-    } else {
-      ticks.push(lastCandle)
+  // подписи оси: каждые candleStep свечей по абсолютному индексу — не прыгают при сдвиге окна
+  const targetDistance = 80
+  const candleStep = Math.max(1, Math.round(targetDistance / Math.max(1, step)))
+  const ticks = []
+  for (let i = Math.ceil(a / candleStep) * candleStep; i < b; i += candleStep) ticks.push(slots[i - a])
+  const count = totalDays.value
+  if (b === count && count > 0) {
+    const lastSlot = slots[slots.length - 1]
+    if (ticks.length > 0 && ticks[ticks.length - 1].key !== lastSlot.key) {
+      if (lastSlot.x - ticks[ticks.length - 1].x < targetDistance * 0.6) ticks[ticks.length - 1] = lastSlot
+      else ticks.push(lastSlot)
     }
   }
 
-  return { min: minVal, max: maxVal, candles, slots, markers, ticks, monthBoundaries, step }
+  return { candles, ticks, monthBoundaries, markers, step, count }
 })
 
 // Выбор свечи: клик по ней (не перетаскивание); повторный клик снимает. Наружу — границы корзины и вклад Binance.
+const selectedIdx = computed(() => {
+  const S = series.value
+  if (!S || selectedKey.value === null) return -1
+  const i = lowerBound(S.starts, Number(selectedKey.value))
+  return i < S.n && S.starts[i] === Number(selectedKey.value) ? i : -1
+})
 const selectCandle = (c) => {
   if (!c || c.key === selectedKey.value) {
     selectedKey.value = null
@@ -350,19 +493,19 @@ const selectCandle = (c) => {
     return
   }
   selectedKey.value = c.key
-  const list = candleScales.value.candles
-  const i = list.findIndex(x => x.key === c.key)
+  const S = series.value
   emit('select', {
     key: c.key, title: hoverTitle(c),
-    from: c.ts, to: i >= 0 && i + 1 < list.length ? list[i + 1].ts : Infinity, // последняя корзина забирает и «будущие» операции
+    from: c.ts, to: c.i + 1 < S.n ? S.starts[c.i + 1] : Infinity, // последняя корзина забирает и «будущие» операции
     open: c.open, close: c.close, high: c.high, low: c.low, bnOpen: c.bnOpen, bnClose: c.bnClose, bnSeries: c.bnSeries
   })
 }
+defineExpose({ clearSelection: () => selectCandle(null) })
 const candleAtX = (x) => {
-  const { candles, step } = candleScales.value
-  if (!candles.length) return null
-  const i = Math.round((x - paddingX - step / 2) / step)
-  return i >= 0 && i < candles.length ? candles[i] : null
+  const S = series.value
+  if (!S) return null
+  const i = Math.round((x - paddingX - stepPx.value / 2) / stepPx.value)
+  return i >= 0 && i < S.n ? candleAt(i) : null
 }
 
 const tickLabel = (t) => (isDaily.value || t.future ? formatShortDateName(t.date) : t.time)
@@ -445,7 +588,7 @@ const onPointerUp = (e) => {
   if (Math.abs(e.clientX - dragStartX) < 4) { // это клик, а не перетаскивание
     const container = chartContainerRef.value
     const r = container.getBoundingClientRect()
-    selectCandle(candleAtX(e.clientX - r.left + container.scrollLeft))
+    if (props.selectable) selectCandle(candleAtX(e.clientX - r.left + container.scrollLeft))
     return
   }
   chartContainerRef.value?.releasePointerCapture?.(e.pointerId)
@@ -467,6 +610,50 @@ const onPointerUp = (e) => {
 
 onBeforeUnmount(stopInertia)
 
+// ── Подгрузка истории чанками, как на биржах: подошли к левому краю — тянем ещё окно, пока идёт запрос график живёт.
+// Запрос в бэкенд — только за новыми корзинами (старые лежат в кеше); окно расширяется после ответа и позиция сохраняется.
+const loadingMore = ref(false)
+const loadMore = async () => {
+  if (loadingMore.value || !canLoadMore.value) return
+  const el = chartContainerRef.value
+  if (!el) return
+  const def = tfDef.value
+  const tf = tfId.value
+  const epoch = bnEpoch
+  loadingMore.value = true
+  try {
+    const bigger = startsFor(extraBack.value + def.limit)
+    const added = bigger.length - bucketStarts.value.length
+    if (added <= 0) return
+    if (bnHas.value) {
+      const cache = bnCache()
+      const need = bigger.slice(0, added).filter(s => !cache.has(s))
+      if (need.length && !(await fetchBnRun(bigger, 0, added - 1, epoch, tf))) return
+    }
+    if (tf !== tfId.value || epoch !== bnEpoch) return // за время запроса сменили таймфрейм или данные
+    const before = el.scrollLeft
+    extraBack.value += def.limit
+    bnVer.value++
+    await nextTick()
+    el.scrollLeft = before + added * stepPx.value // новые свечи слева: остаёмся на тех же
+  } catch { /* связь пропала — попробуем при следующем сдвиге */ } finally {
+    loadingMore.value = false
+  }
+}
+
+let scrollRaf = 0
+const syncView = () => {
+  scrollRaf = 0
+  const el = chartContainerRef.value
+  if (!el) return
+  scrollX.value = el.scrollLeft
+  viewW.value = el.clientWidth
+  if (el.scrollLeft < el.clientWidth * 1.5) loadMore()
+}
+const onScroll = () => { if (!scrollRaf) scrollRaf = requestAnimationFrame(syncView) }
+onBeforeUnmount(() => cancelAnimationFrame(scrollRaf))
+onMounted(syncView)
+
 const resetZoom = () => {
   zoomLevel.value = 1.0
   scrollToEnd(true)
@@ -479,9 +666,10 @@ const scrollToEnd = (force = false) => {
   nextTick(() => {
     const el = chartContainerRef.value
     if (!el) return
-    const todaySlot = candleScales.value.candles[candleScales.value.candles.length - 1]
-    el.scrollLeft = futureDays.value.length && todaySlot ? Math.max(0, todaySlot.x - el.clientWidth * 0.7) : el.scrollWidth
+    const S = series.value
+    el.scrollLeft = futureDays.value.length && S ? Math.max(0, slotX(S.n - 1) - el.clientWidth * 0.7) : el.scrollWidth
     hasInitialScrolled.value = true
+    syncView()
   })
 }
 
@@ -499,7 +687,7 @@ watch(() => futureDays.value.length, (n) => {
     scrollToEnd(true)
   }
 })
-watch(() => bucketCandles.value.length, (n) => {
+watch(() => (series.value ? series.value.n : 0), (n) => {
   if (n > 0 && !scrolledWithData) {
     scrolledWithData = true
     scrollToEnd(true)
@@ -522,7 +710,7 @@ watch(() => bucketCandles.value.length, (n) => {
             @click="setTf(t.id)"
           >{{ t.id }}</button>
         </div>
-        <span class="text-[10px] text-slate-500">Свечей: {{ candleScales.candles.length }}</span>
+        <span class="text-[10px] text-slate-500">Свечей: {{ series ? series.n : 0 }}<template v-if="loadingMore"> · грузим…</template></span>
         <button 
           @click="resetZoom" 
           class="text-[10px] text-slate-400 hover:text-emerald-400 underline transition-colors"
@@ -557,11 +745,12 @@ watch(() => bucketCandles.value.length, (n) => {
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
       @pointercancel="onPointerUp"
+      @scroll.passive="onScroll"
       class="chart-pan w-full overflow-x-auto"
       :class="isDragging ? 'cursor-grabbing' : 'cursor-grab'"
     >
       <svg
-        v-if="candleScales.candles.length > 0"
+        v-if="series"
         :width="svgWidth"
         :height="svgHeight"
         class="select-none block"
@@ -605,14 +794,13 @@ watch(() => bucketCandles.value.length, (n) => {
         </g>
 
         <!-- сегодня: справа начинается таймлайн вперёд -->
-        <g v-if="futureDays.length && candleScales.candles.length">
-          <line :x1="candleScales.candles[candleScales.candles.length - 1].x + candleScales.step / 2" y1="10" :x2="candleScales.candles[candleScales.candles.length - 1].x + candleScales.step / 2" :y2="svgHeight - 25" stroke="#38bdf8" stroke-opacity="0.35" stroke-dasharray="1 3" />
+        <g v-if="futureDays.length && series">
+          <line :x1="slotX(series.n - 1) + candleScales.step / 2" y1="10" :x2="slotX(series.n - 1) + candleScales.step / 2" :y2="svgHeight - 25" stroke="#38bdf8" stroke-opacity="0.35" stroke-dasharray="1 3" />
         </g>
 
         <rect
-          v-for="c in candleScales.candles.filter(x => x.key === selectedKey)"
-          :key="'sel-' + c.key"
-          :x="c.x - candleScales.step / 2"
+          v-if="selectedIdx >= 0"
+          :x="slotX(selectedIdx) - candleScales.step / 2"
           y="8"
           :width="candleScales.step"
           :height="svgHeight - 30"
