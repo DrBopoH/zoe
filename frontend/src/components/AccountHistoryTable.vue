@@ -7,6 +7,7 @@ import UiButton from './ui/UiButton.vue'
 import { effectiveTimes, isDateOnly } from '../utils/historyOrder.js'
 import { tagsFor, cleanTitle } from '../utils/txTags.js'
 import { usersById, personOf, swapAlias } from '../utils/personName.js'
+import { candleMove } from '../utils/candleMath.js'
 
 const props = defineProps({
   transactions: { type: Array, default: () => [] },
@@ -70,6 +71,16 @@ const totals = computed(() => {
   const r = (v) => Math.round(v * 100) / 100 + 0 // копейки без хвоста float и без «−0,00»
   return { income: r(income), expense: r(expense), net: r(income + expense) }
 })
+
+// Выбрана свеча: ход капитала за её период и размах внутри него. Операций может не быть вовсе (курс Binance двигает капитал сам), и без этой строки пустая история рядом с живой свечой выглядит как ошибка.
+const move = computed(() => candleMove(props.range))
+const moveTip = computed(() => {
+  const m = move.value
+  if (!m) return ''
+  const bn = m.bnDelta === null ? '' : `\nиз них Binance: ${moneySigned(m.bnDelta, '₴')}`
+  return `Открытие ${fmtMoney(m.open, '₴')} → закрытие ${fmtMoney(m.close, '₴')}\nМин ${fmtMoney(m.low, '₴')}, макс ${fmtMoney(m.high, '₴')}${bn}`
+})
+const pctText = (v) => (v === null ? '' : ` (${v > 0 ? '+' : v < 0 ? '−' : ''}${String(Math.abs(v)).replace('.', ',')} %)`)
 
 const cur = (t) => curSym(t.currency_code)
 
@@ -152,7 +163,11 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
         </span>
       </div>
 
-      <div v-if="selected.length" class="flex items-center gap-4 text-[11px] font-mono">
+      <div v-if="selected.length" class="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-[11px] font-mono">
+        <template v-if="move">
+          <span class="text-slate-500" :title="moveTip">Капитал <span class="font-bold" :class="tone(move.delta)">{{ moneySigned(move.delta, '₴') }}{{ pctText(move.deltaPct) }}</span></span>
+          <span class="text-slate-500" :title="moveTip">Размах <span class="font-bold text-sky-300">{{ fmtMoney(move.swing, '₴') }}{{ move.swingPct === null ? '' : ` (${String(move.swingPct).replace('.', ',')} %)` }}</span></span>
+        </template>
         <span class="text-slate-500">Приход <span class="text-emerald-400 font-bold">{{ formatMoney(totals.income) }}</span></span>
         <span class="text-slate-500">Расход <span class="text-rose-400 font-bold">{{ formatMoney(Math.abs(totals.expense)) }}</span></span>
         <span class="text-slate-500">Итого <span class="font-bold" :class="tone(totals.net)">{{ formatMoney(totals.net) }}</span></span>

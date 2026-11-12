@@ -1,8 +1,10 @@
 <script setup>
-import { ref, computed, nextTick, onMounted, onActivated, onDeactivated, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { apiSend } from '../utils/api.js'
 import { storageGet, storageSet } from '../utils/storage.js'
-import { TFS, dayStartOf, weekStartOf, alignDown, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel } from '../utils/candleMath.js'
+import { TFS, dayStartOf, weekStartOf, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, candleBounds, candleWindow, candleSpans, candleYRanges, visibleSlots } from '../utils/candleMath.js'
+import { clampWindow } from '../utils/chartView.js'
+import { useChartView } from '../composables/useChartView.js'
 import { toLocalDateStr, formatMoney, formatDateLong, formatShortDateName, formatMonthName } from '../utils/formatters.js'
 
 const props = defineProps({
@@ -17,18 +19,14 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['select'])
-const hoveredCandle = ref(null)
 const selectedKey = ref(null) // выбранная кликом свеча (только при selectable): наружу уходят границы её корзины
 const hoveredMarker = ref(null)
 const BLUE = '#93c5fd' // голубой как у бейджа покупки ОВДП
 const CLAIMED = '#64748b' // выплата уже получена — серым
 const chartContainerRef = ref(null)
-const zoomLevel = ref(1.0)
-const hasInitialScrolled = ref(false)
 
-const svgHeight = 260
-const paddingY = 30
-const paddingX = 30
+const SVG_H = 260
+const PAD = { l: 8, r: 8, t: 30, b: 30 } // поля графика (px): по ним мышь переводится в слоты и значения
 
 // ── Таймфреймы. Внутридневные окна ограничены (минутных свечей за годы — сотни тысяч), 1D и 1W — вся история.
 const readTf = () => {
@@ -44,10 +42,7 @@ const setTf = (id) => {
   tfId.value = id
   extraBack.value = 0
   storageSet('zoe.candle.tf', id)
-  zoomLevel.value = 1.0
-  hoveredCandle.value = null
   selectCandle(null)
-  nextTick(() => scrollToEnd(true))
 }
 
 
@@ -257,65 +252,43 @@ const slotDateOf = (dateStr) => {
 }
 const totalDays = computed(() => (series.value ? series.value.n + futureDays.value.length : 0))
 
-// Границы зума: ниже ~7% свеча уже тоньше 2px, дальше смысла нет. Раньше пол в 8px/свечу глушил отдаление на 40%.
-const MIN_ZOOM = 0.07
-const MAX_ZOOM = 4.0
-const pxPerCandle = computed(() => Math.max(1.5, 22 * zoomLevel.value))
 
-const svgWidth = computed(() => {
-  const calculated = totalDays.value * pxPerCandle.value + paddingX * 2
-  const minWidth = chartContainerRef.value ? chartContainerRef.value.clientWidth : 1000
-  return Math.max(minWidth, calculated)
+// ── Общий движок графиков (composables/useChartView.js): колесо — масштаб по времени, Shift+колесо — масштаб цены,
+// перетаскивание — сдвиг (вбок — время, вверх и вниз — цена, после броска с инерцией), двойной клик — сброс.
+// Ось X — слоты от правого края данных (см. candleMath.js), поэтому подгрузка истории слева окно не двигает.
+const futureCount = computed(() => futureDays.value.length)
+const nSlots = computed(() => (series.value ? series.value.n : 0))
+const containerW = ref(1000)
+const measure = () => { const w = chartContainerRef.value && chartContainerRef.value.clientWidth; if (w > 0) containerW.value = w } // скрытая вкладка даёт 0 — держим прежнюю ширину
+let resizeObs = null
+onMounted(() => {
+  measure()
+  if (typeof ResizeObserver !== 'undefined' && chartContainerRef.value) { resizeObs = new ResizeObserver(measure); resizeObs.observe(chartContainerRef.value) }
 })
-const stepPx = computed(() => (svgWidth.value - paddingX * 2) / Math.max(totalDays.value, 1))
-
-// ── Окно отрисовки. Рисуем только свечи на экране и по экрану запаса с каждой стороны: DOM не растёт с историей.
-// Окно двигается квантами (полэкрана): пока двигаешь график внутри кванта, Vue ничего не перерисовывает.
-const scrollX = ref(0)
-const viewW = ref(1000)
-const perView = computed(() => Math.max(1, Math.ceil(viewW.value / stepPx.value)))
-const quant = computed(() => Math.max(8, Math.ceil(perView.value / 2)))
-const firstVisible = computed(() => Math.floor((scrollX.value - paddingX) / stepPx.value))
-const winFrom = computed(() => Math.max(0, Math.floor((firstVisible.value - perView.value) / quant.value) * quant.value))
-const winTo = computed(() => Math.min(totalDays.value, Math.ceil((firstVisible.value + perView.value * 2) / quant.value) * quant.value))
-
-
-// ── Вертикальная шкала по видимой части (как на биржах), а не по всей загруженной истории:
-// подгрузка чанков с другими экстремумами её не трогает. Цель — min/max свечей на экране + поля;
-// показываемый диапазон плавно (экспоненциально, по времени) догоняет цель, поэтому смена масштаба при прокрутке не дёргается.
-const yLo = ref(0), yHi = ref(1)
-const yTarget = computed(() => {
-  const S = series.value
-  if (!S || !S.n) return null
-  const a = Math.max(0, firstVisible.value)
-  const b = Math.min(S.n, firstVisible.value + perView.value + 1)
-  let lo = Infinity, hi = -Infinity
-  for (let i = a; i < b; i++) { if (S.L[i] < lo) lo = S.L[i]; if (S.H[i] > hi) hi = S.H[i] }
-  if (lo === Infinity) { lo = S.min; hi = S.max } // экран целиком в будущем/пусто — держим общий диапазон
-  const pad = (hi - lo) * 0.04 || Math.abs(hi) * 0.01 || 1
-  return [lo - pad, hi + pad]
-})
-let yRaf = 0, yLast = 0, yInit = false
-const yStep = (t) => {
-  yRaf = 0
-  const tg = yTarget.value
-  if (!tg) return
-  const dt = Math.min(100, t - yLast || 16)
-  yLast = t
-  const k = 1 - Math.exp(-dt / 110)
-  const span = tg[1] - tg[0] || 1
-  const dLo = tg[0] - yLo.value, dHi = tg[1] - yHi.value
-  if (Math.abs(dLo) < span * 0.0005 && Math.abs(dHi) < span * 0.0005) { yLo.value = tg[0]; yHi.value = tg[1]; return }
-  yLo.value += dLo * k
-  yHi.value += dHi * k
-  yRaf = requestAnimationFrame(yStep)
+onBeforeUnmount(() => { if (resizeObs) resizeObs.disconnect() })
+const svgW = computed(() => containerW.value)
+const plotW = () => svgW.value - PAD.l - PAD.r
+const bounds = () => candleBounds(nSlots.value, futureCount.value)
+const spans = {
+  get minSpan() { return candleSpans({ n: nSlots.value, future: futureCount.value, plotW: plotW() }).minSpan },
+  get maxSpan() { return candleSpans({ n: nSlots.value, future: futureCount.value, plotW: plotW() }).maxSpan }
 }
-watch(yTarget, (tg) => {
-  if (!tg) return
-  if (!yInit) { yInit = true; yLo.value = tg[0]; yHi.value = tg[1]; return } // первый показ — без анимации
-  if (!yRaf) { yLast = performance.now(); yRaf = requestAnimationFrame(yStep) }
-}, { immediate: true })
-onBeforeUnmount(() => { if (yRaf) cancelAnimationFrame(yRaf) })
+const kv = useChartView({
+  width: () => svgW.value,
+  height: SVG_H,
+  pad: PAD,
+  autoX: () => clampWindow(candleWindow({ n: nSlots.value, future: futureCount.value, plotW: plotW() }), bounds()),
+  ranges: (view) => candleYRanges(series.value, view),
+  spans,
+  bounds,
+  inertia: true,
+  resetOn: () => [tfId.value]
+})
+const { svgRef, zoomed, reset: resetView } = kv
+const spanNow = computed(() => kv.view.value.x1 - kv.view.value.x0)
+const stepPx = computed(() => plotW() / spanNow.value) // пикселей на слот
+const yShown = computed(() => kv.yShown.value || kv.target.value)
+const visible = computed(() => (series.value ? visibleSlots(kv.view.value, series.value.n, totalDays.value) : { a: 0, b: 0 }))
 
 const slotMeta = (i) => {
   const S = series.value
@@ -325,7 +298,7 @@ const slotMeta = (i) => {
   }
   return { date: futureDays.value[i - S.n], time: '', future: true }
 }
-const slotX = (i) => paddingX + i * stepPx.value + stepPx.value / 2
+const slotX = (i) => PAD.l + ((i - nSlots.value + 0.5 - kv.view.value.x0) / spanNow.value) * plotW()
 
 // Выплата → слоты: по дате; в нескольких слотах одного дня (внутридневные ТФ) маркер ставим на первом
 const eventsByDate = computed(() => {
@@ -340,11 +313,11 @@ const eventsByDate = computed(() => {
 
 // ── Шкала цены справа (как на бирже): «круглые» отметки по текущему окну, сетка по ним, тег последней цены.
 const yOf = (val) => {
-  const range = yHi.value - yLo.value || 1
-  return svgHeight - paddingY - ((val - yLo.value) / range) * (svgHeight - paddingY * 2)
+  const range = yShown.value.hi - yShown.value.lo || 1
+  return SVG_H - PAD.b - ((val - yShown.value.lo) / range) * (SVG_H - PAD.t - PAD.b)
 }
 const priceTicks = computed(() => {
-  const lo = yLo.value, hi = yHi.value
+  const lo = yShown.value.lo, hi = yShown.value.hi
   if (!(hi > lo)) return []
   const step = niceStep((hi - lo) / 6)
   const out = []
@@ -365,14 +338,12 @@ const lastPrice = computed(() => {
   if (!S || !S.n) return null
   const val = S.C[S.n - 1]
   const up = S.C[S.n - 1] >= S.O[S.n - 1]
-  return { val, up, y: Math.min(svgHeight - paddingY, Math.max(paddingY / 2, yOf(val))) }
+  return { val, up, y: Math.min(SVG_H - PAD.b, Math.max(PAD.t / 2, yOf(val))) }
 })
 
 const candleAt = (i) => {
   const S = series.value
-  const min = yLo.value, max = yHi.value
-  const range = max - min || 1
-  const getY = (val) => svgHeight - paddingY - ((val - min) / range) * (svgHeight - paddingY * 2)
+  const getY = yOf
   const step = stepPx.value
   const yOpen = getY(S.O[i]), yClose = getY(S.C[i])
   const m = slotMeta(i)
@@ -393,7 +364,7 @@ const candleScales = computed(() => {
   const S = series.value
   const empty = { candles: [], ticks: [], monthBoundaries: [], markers: [], step: 0, count: 0 }
   if (!S) return empty
-  const a = winFrom.value, b = winTo.value
+  const { a, b } = visible.value
   const step = stepPx.value
   const nCandles = S.n
 
@@ -401,7 +372,7 @@ const candleScales = computed(() => {
   for (let i = a; i < Math.min(b, nCandles); i++) candles.push(candleAt(i))
 
   // маркеры выплат лежат на «полу» таймлайна, прямо над датами; в один день сыплются столбиком вверх (только на 1D)
-  const floorY = svgHeight - 38
+  const floorY = SVG_H - 38
   const slotOfDate = new Map()
   const slots = []
   for (let i = a; i < b; i++) {
@@ -485,13 +456,6 @@ const selectCandle = (c) => {
   })
 }
 defineExpose({ clearSelection: () => selectCandle(null) })
-const candleAtX = (x) => {
-  const S = series.value
-  if (!S) return null
-  const i = Math.round((x - paddingX - stepPx.value / 2) / stepPx.value)
-  return i >= 0 && i < S.n ? candleAt(i) : null
-}
-
 const tickLabel = (t) => (isDaily.value || t.future ? formatShortDateName(t.date) : t.time)
 const boundaryLabel = (m) => (isDaily.value || m.future ? formatMonthName(m.date) : formatShortDateName(m.date))
 const hoverTitle = (c) => {
@@ -499,108 +463,36 @@ const hoverTitle = (c) => {
   return isDaily.value ? formatDateLong(c.date) : `${formatDateLong(c.date)} · ${c.time}`
 }
 
-// Колесо — масштаб (якорь — свеча под курсором, как на биржах); горизонтальное колесо / Shift+колесо — сдвиг.
-const handleWheel = (e) => {
-  const container = chartContainerRef.value
-  if (!container) return
-  stopInertia()
-
-  const horizontal = e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)
-  if (horizontal) {
-    container.scrollLeft += e.deltaX || e.deltaY
-    return
-  }
-
-  // множитель вместо фиксированного шага: на малых значениях зум остаётся плавным
-  const factor = e.deltaY < 0 ? 1.18 : 1 / 1.18
-  const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoomLevel.value * factor))
-  if (newZoom === zoomLevel.value) return
-
-  const rect = container.getBoundingClientRect()
-  const mouseX = e.clientX - rect.left
-  const ratio = (container.scrollLeft + mouseX) / container.scrollWidth
-  zoomLevel.value = newZoom
-
-  nextTick(() => {
-    container.scrollLeft = ratio * container.scrollWidth - mouseX
-  })
+// Свеча под осью X (слот считается от правого края данных); null — мимо свечей
+const candleAtT = (t) => {
+  const S = series.value
+  if (!S) return null
+  const i = Math.floor(t + S.n)
+  return i >= 0 && i < S.n ? candleAt(i) : null
 }
+const hoveredCandle = computed(() => (kv.hoverX.value === null ? null : candleAtT(kv.hoverX.value)))
 
-// ── Перетаскивание: вся область — «рукоятка», слайдера внизу нет (как на биржах). С инерцией после отпускания.
-const isDragging = ref(false)
-let dragStartX = 0
-let dragStartScroll = 0
-let lastX = 0
-let lastT = 0
-let velocity = 0 // px/мс
-let inertiaRaf = 0
-
-const stopInertia = () => {
-  cancelAnimationFrame(inertiaRaf)
-  inertiaRaf = 0
-}
-
-const onPointerDown = (e) => {
+// Клик по свече (не перетаскивание) выбирает её; движение, колесо и инерцию ведёт общий движок
+let downX = null
+const onDown = (e) => {
   if (e.pointerType === 'mouse' && e.button !== 0) return
-  const container = chartContainerRef.value
-  if (!container) return
-  stopInertia()
-  isDragging.value = true
-  hoveredCandle.value = null
-  dragStartX = lastX = e.clientX
-  dragStartScroll = container.scrollLeft
-  lastT = performance.now()
-  velocity = 0
-  container.setPointerCapture?.(e.pointerId)
+  downX = e.clientX
+  hoveredMarker.value = null
+  kv.onDown(e)
 }
-
-const onPointerMove = (e) => {
-  if (!isDragging.value) return
-  const container = chartContainerRef.value
-  container.scrollLeft = dragStartScroll - (e.clientX - dragStartX)
-
-  const now = performance.now()
-  const dt = now - lastT
-  if (dt > 0) velocity = 0.8 * velocity + 0.2 * ((lastX - e.clientX) / dt)
-  lastX = e.clientX
-  lastT = now
+const onUp = (e) => {
+  const click = downX !== null && Math.abs(e.clientX - downX) < 4
+  downX = null
+  kv.onUp(e)
+  if (click && props.selectable) selectCandle(candleAtT(kv.eventT(e)))
 }
-
-const onPointerUp = (e) => {
-  if (!isDragging.value) return
-  isDragging.value = false
-  if (Math.abs(e.clientX - dragStartX) < 4) { // это клик, а не перетаскивание
-    const container = chartContainerRef.value
-    const r = container.getBoundingClientRect()
-    if (props.selectable) selectCandle(candleAtX(e.clientX - r.left + container.scrollLeft))
-    return
-  }
-  chartContainerRef.value?.releasePointerCapture?.(e.pointerId)
-  // палец/мышь остановились перед отпусканием — инерции нет
-  if (performance.now() - lastT > 80) return
-
-  let prev = performance.now()
-  const step = (t) => {
-    const container = chartContainerRef.value
-    if (!container) return
-    const dt = t - prev
-    prev = t
-    container.scrollLeft += velocity * dt
-    velocity *= Math.pow(0.95, dt / 16)
-    if (Math.abs(velocity) > 0.02) inertiaRaf = requestAnimationFrame(step)
-  }
-  inertiaRaf = requestAnimationFrame(step)
-}
-
-onBeforeUnmount(stopInertia)
+const onCancel = (e) => { downX = null; kv.onUp(e) }
 
 // ── Подгрузка истории чанками, как на биржах: подошли к левому краю — тянем ещё окно, пока идёт запрос график живёт.
-// Запрос в бэкенд — только за новыми корзинами (старые лежат в кеше); окно расширяется после ответа и позиция сохраняется.
+// Запрос в бэкенд — только за новыми корзинами (старые лежат в кеше). Координаты считаются от правого края, окно не двигается.
 const loadingMore = ref(false)
 const loadMore = async () => {
   if (loadingMore.value || !canLoadMore.value) return
-  const el = chartContainerRef.value
-  if (!el) return
   const def = tfDef.value
   const tf = tfId.value
   const epoch = bnEpoch
@@ -615,83 +507,14 @@ const loadMore = async () => {
       if (need.length && !(await fetchBnRun(bigger, 0, added - 1, epoch, tf))) return
     }
     if (tf !== tfId.value || epoch !== bnEpoch) return // за время запроса сменили таймфрейм или данные
-    const before = el.scrollLeft
     extraBack.value += def.limit
     bnVer.value++
-    await nextTick()
-    el.scrollLeft = before + added * stepPx.value // новые свечи слева: остаёмся на тех же
   } catch { /* связь пропала — попробуем при следующем сдвиге */ } finally {
     loadingMore.value = false
   }
 }
-
-let scrollRaf = 0
-const syncView = () => {
-  scrollRaf = 0
-  const el = chartContainerRef.value
-  if (!el) return
-  scrollX.value = el.scrollLeft
-  viewW.value = el.clientWidth
-  if (el.scrollLeft < el.clientWidth * 1.5) loadMore()
-}
-const onScroll = () => { if (!scrollRaf) scrollRaf = requestAnimationFrame(syncView) }
-onBeforeUnmount(() => cancelAnimationFrame(scrollRaf))
-onMounted(syncView)
-
-const resetZoom = () => {
-  zoomLevel.value = 1.0
-  scrollToEnd(true)
-}
-
-// «Свежий край» — сегодняшний день (справа от него может лежать таймлайн вперёд)
-const scrollToEnd = (force = false) => {
-  if (!force && hasInitialScrolled.value) return
-
-  nextTick(() => {
-    const el = chartContainerRef.value
-    if (!el) return
-    const S = series.value
-    el.scrollLeft = futureDays.value.length && S ? Math.max(0, slotX(S.n - 1) - el.clientWidth * 0.7) : el.scrollWidth
-    hasInitialScrolled.value = true
-    syncView()
-  })
-}
-
-onMounted(() => {
-  scrollToEnd()
-})
-
-// Вкладки живут в KeepAlive: у скрытого блока браузер сбрасывает прокрутку в 0 без события scroll, а окно свечей
-// считается по запомненному scrollX — график оставался пустым. При уходе запоминаем позицию, при возврате ставим её и пересчитываем окно.
-let savedScroll = null
-onDeactivated(() => { savedScroll = scrollX.value }) // к этому моменту блок уже скрыт и его scrollLeft обнулён — берём последний синхронизированный
-onActivated(() => {
-  if (savedScroll === null) return // первая активация — это обычный mount
-  const want = savedScroll
-  nextTick(() => {
-    const el = chartContainerRef.value
-    if (!el) return
-    el.scrollLeft = want
-    syncView()
-  })
-})
-
-// Данные приходят после монтирования: когда свечи впервые появились — встаём на свежий край
-let scrolledWithData = false
-// Выплаты приходят позже свечей и растягивают ось вперёд — встаём на сегодня ещё раз (один раз)
-let scrolledWithFuture = false
-watch(() => futureDays.value.length, (n) => {
-  if (n > 0 && !scrolledWithFuture) {
-    scrolledWithFuture = true
-    scrollToEnd(true)
-  }
-})
-watch(() => (series.value ? series.value.n : 0), (n) => {
-  if (n > 0 && !scrolledWithData) {
-    scrolledWithData = true
-    scrollToEnd(true)
-  }
-})
+// слева осталось меньше полутора экранов истории — грузим ещё
+watch([() => kv.view.value.x0, nSlots, () => spanNow.value], ([x0, n, span]) => { if (n > 0 && x0 + n < span * 1.5) loadMore() }, { immediate: true })
 </script>
 
 <template>
@@ -710,12 +533,7 @@ watch(() => (series.value ? series.value.n : 0), (n) => {
           >{{ t.id }}</button>
         </div>
         <span class="text-[10px] text-slate-500">Свечей: {{ series ? series.n : 0 }}<template v-if="loadingMore"> · грузим…</template></span>
-        <button 
-          @click="resetZoom" 
-          class="text-[10px] text-slate-400 hover:text-emerald-400 underline transition-colors"
-        >
-          Сброс ({{ Math.round(zoomLevel * 100) }}%)
-        </button>
+        <button v-if="zoomed" type="button" class="text-[10px] text-slate-400 hover:text-emerald-400 underline transition-colors" @click="resetView">Сброс масштаба</button>
       </div>
 
       <div v-if="hoveredMarker" class="flex items-center gap-4 text-[11px] font-mono min-w-0 overflow-hidden whitespace-nowrap">
@@ -733,30 +551,33 @@ watch(() => (series.value ? series.value.n : 0), (n) => {
         <span class="text-slate-500">Мин: <strong class="text-rose-400">{{ formatMoney(hoveredCandle.low) }}</strong></span>
         <span class="text-slate-500">Закр: <strong class="text-slate-200">{{ formatMoney(hoveredCandle.close) }}</strong></span>
       </div>
-      <div v-else class="text-[10px] text-slate-600 uppercase">Колесико — Zoom, Перетаскивание — Навигация</div>
+      <div v-else class="text-[10px] text-slate-600 uppercase">Колесо — масштаб, Shift+колесо — шкала, перетаскивание — навигация</div>
     </div>
 
     <div class="flex">
     <div
       ref="chartContainerRef"
       data-wheel="own"
-      @wheel.prevent="handleWheel"
-      @pointerdown="onPointerDown"
-      @pointermove="onPointerMove"
-      @pointerup="onPointerUp"
-      @pointercancel="onPointerUp"
-      @scroll.passive="onScroll"
-      class="chart-pan min-w-0 flex-1 overflow-x-auto"
-      :class="isDragging ? 'cursor-grabbing' : 'cursor-grab'"
+      class="chart-pan min-w-0 flex-1"
     >
       <svg
         v-if="series"
-        :width="svgWidth"
-        :height="svgHeight"
+        ref="svgRef"
+        :width="svgW"
+        :height="SVG_H"
+        :viewBox="`0 0 ${svgW} ${SVG_H}`"
         class="select-none block"
+        :class="zoomed ? 'cursor-grab active:cursor-grabbing' : 'cursor-crosshair'"
+        @wheel.prevent="kv.onWheel"
+        @pointerdown="onDown"
+        @pointermove="kv.onMove"
+        @pointerup="onUp"
+        @pointercancel="onCancel"
+        @pointerleave="kv.onLeave"
+        @dblclick="resetView"
       >
-        <line v-for="p in priceTicks" :key="'h-grid-' + p.val" x1="0" :y1="p.y" :x2="svgWidth" :y2="p.y" stroke="#1e293b" stroke-dasharray="3 3" />
-        <line v-if="lastPrice" x1="0" :y1="lastPrice.y" :x2="svgWidth" :y2="lastPrice.y" :stroke="lastPrice.up ? '#10b981' : '#f43f5e'" stroke-opacity="0.55" stroke-dasharray="1 3" />
+        <line v-for="p in priceTicks" :key="'h-grid-' + p.val" x1="0" :y1="p.y" :x2="svgW" :y2="p.y" stroke="#1e293b" stroke-dasharray="3 3" />
+        <line v-if="lastPrice" x1="0" :y1="lastPrice.y" :x2="svgW" :y2="lastPrice.y" :stroke="lastPrice.up ? '#10b981' : '#f43f5e'" stroke-opacity="0.55" stroke-dasharray="1 3" />
 
         <line
           v-for="t in candleScales.ticks"
@@ -764,7 +585,7 @@ watch(() => (series.value ? series.value.n : 0), (n) => {
           :x1="t.x"
           y1="10"
           :x2="t.x"
-          :y2="svgHeight - 25"
+          :y2="SVG_H - 25"
           stroke="#1e293b"
           stroke-dasharray="2 2"
         />
@@ -774,7 +595,7 @@ watch(() => (series.value ? series.value.n : 0), (n) => {
             :x1="m.x"
             y1="10"
             :x2="m.x"
-            :y2="svgHeight - 25"
+            :y2="SVG_H - 25"
             stroke="#475569"
             stroke-width="1.5"
             stroke-dasharray="4 3"
@@ -794,7 +615,7 @@ watch(() => (series.value ? series.value.n : 0), (n) => {
 
         <!-- сегодня: справа начинается таймлайн вперёд -->
         <g v-if="futureDays.length && series">
-          <line :x1="slotX(series.n - 1) + candleScales.step / 2" y1="10" :x2="slotX(series.n - 1) + candleScales.step / 2" :y2="svgHeight - 25" stroke="#38bdf8" stroke-opacity="0.35" stroke-dasharray="1 3" />
+          <line :x1="slotX(series.n - 1) + candleScales.step / 2" y1="10" :x2="slotX(series.n - 1) + candleScales.step / 2" :y2="SVG_H - 25" stroke="#38bdf8" stroke-opacity="0.35" stroke-dasharray="1 3" />
         </g>
 
         <rect
@@ -802,7 +623,7 @@ watch(() => (series.value ? series.value.n : 0), (n) => {
           :x="slotX(selectedIdx) - candleScales.step / 2"
           y="8"
           :width="candleScales.step"
-          :height="svgHeight - 30"
+          :height="SVG_H - 30"
           fill="#38bdf8"
           fill-opacity="0.12"
           stroke="#38bdf8"
@@ -814,25 +635,13 @@ watch(() => (series.value ? series.value.n : 0), (n) => {
           :x1="hoveredCandle.x"
           y1="10"
           :x2="hoveredCandle.x"
-          :y2="svgHeight - 25"
+          :y2="SVG_H - 25"
           stroke="#64748b"
           stroke-width="1.5"
           stroke-dasharray="2 2"
         />
 
-        <g
-          v-for="c in candleScales.candles"
-          :key="c.key"
-          @mouseenter="!isDragging && (hoveredCandle = c)"
-          @mouseleave="hoveredCandle = null"
-        >
-          <rect
-            :x="c.x - candleScales.step / 2"
-            y="0"
-            :width="candleScales.step"
-            :height="svgHeight"
-            fill="transparent"
-          />
+        <g v-for="c in candleScales.candles" :key="c.key">
           <line
             :x1="c.x"
             :y1="c.yHigh"
@@ -860,7 +669,7 @@ watch(() => (series.value ? series.value.n : 0), (n) => {
           v-for="mk in candleScales.markers"
           :key="mk.key"
           :transform="`translate(${mk.x} ${mk.y})`"
-          @mouseenter="!isDragging && !mk.more && (hoveredMarker = mk)"
+          @mouseenter="!mk.more && (hoveredMarker = mk)"
           @mouseleave="hoveredMarker = null"
         >
           <text v-if="mk.more" x="0" y="0" fill-opacity="0.95" :fill="mk.done ? CLAIMED : (mk.color || BLUE)" font-size="9" font-weight="bold" font-family="monospace">x{{ mk.n }}</text>
@@ -882,7 +691,7 @@ watch(() => (series.value ? series.value.n : 0), (n) => {
             v-for="t in candleScales.ticks"
             :key="'tick-text-' + t.key"
             :x="t.x"
-            :y="svgHeight - 6"
+            :y="SVG_H - 6"
             text-anchor="middle"
             fill="#64748b"
             font-size="10"
@@ -898,7 +707,7 @@ watch(() => (series.value ? series.value.n : 0), (n) => {
       </div>
     </div>
     <!-- шкала цены: стоит на месте, пока свечи листаются -->
-    <svg v-if="series" width="58" :height="svgHeight" class="select-none block shrink-0 border-l border-slate-800">
+    <svg v-if="series" width="58" :height="SVG_H" class="select-none block shrink-0 border-l border-slate-800">
       <text v-for="p in priceTicks" :key="'p-' + p.val" x="6" :y="p.y + 3" fill="#64748b" font-size="10" font-family="monospace">{{ p.label }}</text>
       <g v-if="lastPrice">
         <rect x="1" :y="lastPrice.y - 8" width="56" height="16" rx="2" :fill="lastPrice.up ? '#10b981' : '#f43f5e'" />
@@ -910,13 +719,9 @@ watch(() => (series.value ? series.value.n : 0), (n) => {
 </template>
 
 <style scoped>
-/* Слайдера внизу нет: двигаем перетаскиванием. Полосу прокрутки прячем, жест pan-y оставляет вертикальный скролл страницы на таче. */
+/* Двигаем перетаскиванием (общий движок): без выделения текста, вертикальный скролл страницы на таче остаётся за жестом pan-y. */
 .chart-pan {
-  scrollbar-width: none;
   touch-action: pan-y;
   user-select: none;
-}
-.chart-pan::-webkit-scrollbar {
-  display: none;
 }
 </style>

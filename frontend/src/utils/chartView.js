@@ -10,6 +10,22 @@ export function zoomWindow(view, factor, anchor, { minSpan = 0, maxSpan = Infini
   return { x0, x1: x0 + span }
 }
 
+/** Окно внутри границ { min, max } (единицы оси X): размах сохраняется, окно шире границ прижимается к левой. Границы null — без ограничений. */
+export function clampWindow(view, bounds) {
+  if (!bounds) return view
+  const span = view.x1 - view.x0
+  if (span >= bounds.max - bounds.min) return { x0: bounds.min, x1: bounds.min + span }
+  const x0 = Math.min(Math.max(view.x0, bounds.min), bounds.max - span)
+  return x0 === view.x0 ? view : { x0, x1: x0 + span }
+}
+
+/** Один шаг инерции после броска: v — скорость (px/мс), dt — мс. Возвращает { dx (px), v, done }; затухание 0,95 за кадр в 16 мс. */
+export function inertiaStep(v, dt, stopBelow = 0.02) {
+  const dx = v * dt
+  const next = v * Math.pow(0.95, dt / 16)
+  return { dx, v: next, done: Math.abs(next) <= stopBelow }
+}
+
 /** Сдвиг окна на dx. */
 export const panWindow = (view, dx) => ({ x0: view.x0 + dx, x1: view.x1 + dx })
 
