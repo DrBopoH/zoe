@@ -4,17 +4,25 @@ package pdftext
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"html"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
+const timeout = 30 * time.Second
+
 // Run запускает pdftotext поверх сырого PDF: Run(raw, "-layout"), Run(raw, "-bbox"), Run(raw, "-l", "1", "-layout").
+//
+// Таймаут нужен: битый или злонамеренный PDF не должен вешать обработчик (ReadTimeout сервера на дочерний процесс не действует).
 func Run(raw []byte, args ...string) (string, error) {
-	cmd := exec.Command("pdftotext", append(args, "-", "-")...)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "pdftotext", append(args, "-", "-")...)
 	cmd.Stdin = bytes.NewReader(raw)
 	var out, stderr bytes.Buffer
 	cmd.Stdout = &out
