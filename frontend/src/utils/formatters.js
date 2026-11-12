@@ -142,3 +142,7 @@ export const formatTxTime = (iso) => {
   const d = new Date(iso)
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
 }
+
+// Число с разделителями разрядов и период «дата — дата» (источники/импорт выписок)
+export const fmtN = (n) => new Intl.NumberFormat('ru-RU').format(n || 0)
+export const formatPeriod = (from, to) => (from ? `${formatRuDate(from)} — ${formatRuDate(to)}` : '—')

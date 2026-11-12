@@ -7,7 +7,7 @@ import UiIcon from './ui/UiIcon.vue'
 import CoverBar from './CoverBar.vue'
 import ImportCsvModal from './ImportCsvModal.vue'
 import { apiGetJson, apiSend, q } from '../utils/api.js'
-import { formatRuDate, formatMaskedIBAN, plural } from '../utils/formatters.js'
+import { formatRuDate, formatMaskedIBAN, plural, fmtN, formatPeriod } from '../utils/formatters.js'
 
 // Окно «ВЫПИСКИ»: всё, что известно об источниках данных (файлы выписок, снимки API) и об их присутствии в кеш-базе.
 // У каждого счёта бит: 1 — данные в кеше, 0 — нет. «Сбросить» зануляет биты, «Загрузить» взводит их из файлов-источников.
@@ -123,11 +123,10 @@ const ORIGIN = { csv: 'CSV', pdf: 'PDF', report: 'ОТЧЁТ', binance: 'ВЫП�
 const originLabel = (f) => (f.kind === 'binance-series' ? 'РЯД API' : ORIGIN[f.origin] || f.origin)
 const originTone = (f) => (f.origin === 'api' ? 'text-sky-300 border-sky-500/40' : 'text-slate-300 border-slate-600')
 
-const period = (f) => (f.from ? `${formatRuDate(f.from)} — ${formatRuDate(f.to)}` : '—')
+const period = (f) => formatPeriod(f.from, f.to)
 const label = (a) => (/^[A-Z]{2}\d{2}/.test(a.label || '') && a.label.length > 12 ? formatMaskedIBAN(a.label) : a.label)
 const hasApiFile = (a) => a.files.some(f => f.origin === 'api')
 
-const fmtN = (n) => new Intl.NumberFormat('ru-RU').format(n)
 </script>
 
 <template>
