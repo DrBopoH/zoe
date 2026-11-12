@@ -7,7 +7,7 @@ import { storageGet, storageSet } from '../utils/storage.js'
 import { useSection } from '../composables/useSection.js'
 import { apiGetJson, apiSend, apiJson } from '../utils/api.js'
 import { toLocalDateStr } from '../utils/formatters.js'
-import { SOURCES, MARKET_SECTIONS, COLUMNS, filterBonds, sortBonds, currenciesOf, bondCells, nextSort, parseIsins, holdingsOf, qtyText, restrictTo, scoreBonds, scoreColor, HORIZON_YEARS, moneyText, isMatured, rateOf } from '../utils/marketTable.js'
+import { SOURCES, MARKET_SECTIONS, COLUMNS, filterBonds, sortBonds, currenciesOf, bondCells, nextSort, parseIsins, parseIcuList, ytmFromPrice, holdingsOf, qtyText, restrictTo, scoreBonds, scoreColor, HORIZON_YEARS, moneyText, isMatured, rateOf } from '../utils/marketTable.js'
 
 // dataVersion растёт при любой записи в кеш (в том числе после опроса рынка) — по нему перечитываем список.
 // running — идёт ли сейчас опрос рынка (из /sync/status → market.running).
@@ -48,6 +48,7 @@ const list = computed(() => lists.value[section.value])
 const currencies = computed(() => currenciesOf(list.value))
 // Коэффициент и места считаются по всему списку источника, а не по найденному: поиск не меняет цвета и места
 // «Только ICU»: свой список ISIN (вставляется из брокера, помнится в браузере); места и «Топ 1» считаются среди этих бумаг.
+const icuPrices = ref({}) // ISIN → цена за бумагу в брокере (с накопленным купоном): по ней считается доходность
 const icuIds = ref([]) // хранится на сервере (core.db, список «icu»): переживает смену браузера и «стереть кеш»
 const onlyIcu = ref(storageGet('zoe.market.onlyIcu', '0') === '1')
 const icuOpen = ref(false)
@@ -68,12 +69,16 @@ const loadHoldings = async () => {
 watch(() => [props.accounts, props.dataVersion], loadHoldings, { immediate: true })
 
 const icuError = ref('')
-const putIcu = async (ids) => {
-  return (await apiJson('PUT', '/market/lists?name=icu', { isins: ids })).isins || []
+const putIcu = async (ids, prices = {}) => {
+  const r = await apiJson('PUT', '/market/lists?name=icu', { isins: ids, prices })
+  icuPrices.value = r.prices || {}
+  return r.isins || []
 }
 const loadIcu = async () => {
   try {
-    let ids = (await apiGetJson('/market/lists?name=icu')).isins || []
+    const got = await apiGetJson('/market/lists?name=icu')
+    let ids = got.isins || []
+    icuPrices.value = got.prices || {}
     const old = parseIsins(storageGet('zoe.market.icu', '')) // список из прошлой версии (только браузер): переносим на сервер один раз
     if (!ids.length && old.length) { ids = await putIcu(old); storageSet('zoe.market.icu', '') }
     icuIds.value = ids
@@ -84,7 +89,8 @@ const loadIcu = async () => {
 }
 const saveIcu = async () => {
   try {
-    icuIds.value = await putIcu(parseIsins(icuText.value))
+    const parsed = parseIcuList(icuText.value)
+    icuIds.value = await putIcu(parsed.isins, parsed.prices)
     icuError.value = ''
     if (!icuIds.value.length) onlyIcu.value = false
     icuOpen.value = false
@@ -92,9 +98,20 @@ const saveIcu = async () => {
     icuError.value = String(e.message || e)
   }
 }
-const openIcu = () => { icuText.value = icuIds.value.join('\n'); icuOpen.value = !icuOpen.value }
+const openIcu = () => { icuText.value = icuIds.value.map((id) => (icuPrices.value[id] ? `${id} ${icuPrices.value[id]}` : id)).join('\n'); icuOpen.value = !icuOpen.value }
 const pool = computed(() => (icuActive.value ? restrictTo(list.value, icuSet.value) : list.value))
-const scores = computed(() => scoreBonds(pool.value, today.value))
+// Доходность по цене брокера (только в режиме «только ICU»: у бумаг без цены остаётся аукционная или купонная)
+const icuRates = computed(() => {
+  const m = new Map()
+  if (!icuActive.value) return m
+  for (const b of pool.value || []) {
+    const price = icuPrices.value[String(b.id).toUpperCase()]
+    const y = price ? ytmFromPrice(b, price, today.value) : null
+    if (y > 0) m.set(String(b.id).toUpperCase(), y)
+  }
+  return m
+})
+const scores = computed(() => scoreBonds(pool.value, today.value, icuRates.value))
 // Сумма вложения для расчёта «через 10 лет» и графиков; помнится в браузере
 const amount = ref(Math.max(1, Number(storageGet('zoe.market.amount', '10000')) || 10000))
 watch(amount, (v) => { if (v > 0) storageSet('zoe.market.amount', String(v)) })
@@ -110,6 +127,8 @@ const rows = computed(() => sortBonds(
 ).map((b) => {
   const sc = scores.value.get(b.id) || null
   const c = bondCells(b)
+  const own = icuRates.value.get(String(b.id).toUpperCase())
+  if (own) c.yield = `${f2(own)} %`
   c.score = sc ? `${Math.round(sc.score)} %` : '—'
   c.future = sc ? moneyText(b.future, b.currency) : '—'
   return { id: b.id, c, sc, color: sc ? scoreColor(sc.score) : null, held: holdings.value.get(String(b.id).toUpperCase()) || 0 }
@@ -167,6 +186,7 @@ const TIER_CLASS = {
   top25: 'text-sky-300 border-sky-400/60 bg-sky-400/10',
   top100: 'text-slate-300 border-slate-500/60 bg-slate-500/10'
 }
+const f2 = (x) => (Math.round(x * 100) / 100).toFixed(2).replace(/0$/, '').replace(/\.$/, '').replace('.', ',')
 const f1 = (x) => String(Math.round(x * 10) / 10).replace('.', ',')
 const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Рост капитала ≈ ${f1(sc.growth)} % годовых за ${HORIZON_YEARS} лет: ставка ${f1(sc.rate)} % на ${f1(sc.years)} г., дальше под ${f1(sc.base)} % (осторожная база ${sc.currency}: нижняя четверть ставок). Место ${sc.rank} среди ${sc.currency}. Вложение ${moneyText(amountN.value, sc.currency)}: к погашению ${moneyText(amountN.value * sc.multipleT, sc.currency)}, за ${HORIZON_YEARS} лет ${moneyText(amountN.value * sc.multipleH, sc.currency)}`
 </script>
@@ -212,11 +232,11 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
     </section>
 
     <section v-if="icuOpen && section === 'nbu'" class="bg-slate-900/60 border border-slate-800 rounded p-3 space-y-2 text-xs">
-      <div class="text-slate-400">Вставь текст из ICU (экран «Купити» → ОВДП): ISIN вытащатся сами, остальное игнорируется. Список хранится на сервере; сюда можно дописывать новые ISIN, а то, что ушло из ICU, удалить.</div>
+      <div class="text-slate-400">Вставь текст из ICU (экран «Купити» → ОВДП): ISIN и цена за бумагу (например «1 117,72») вытащатся сами, остальное игнорируется. По цене считается доходность; без цены берётся ставка из реестра. Список хранится на сервере; сюда можно дописывать новые ISIN, а то, что ушло из ICU, удалить.</div>
       <textarea v-model="icuText" rows="4" class="ui-input !bg-slate-900 w-full font-mono" placeholder="UA4000239040&#10;UA4000239008&#10;…"></textarea>
       <div class="flex items-center gap-3">
         <UiButton variant="secondary" size="sm" @click="saveIcu">СОХРАНИТЬ</UiButton>
-        <span class="text-slate-500">найдено ISIN: {{ parseIsins(icuText).length }}</span>
+        <span class="text-slate-500">найдено ISIN: {{ parseIcuList(icuText).isins.length }}, с ценой: {{ Object.keys(parseIcuList(icuText).prices).length }}</span>
         <span v-if="icuError" class="text-rose-400">{{ icuError }}</span>
         <button type="button" class="text-slate-500 hover:text-slate-300 underline cursor-pointer" @click="icuOpen = false">закрыть</button>
       </div>
@@ -251,8 +271,8 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
                     :style="r.color ? { color: r.color.text, borderColor: r.color.border, backgroundColor: r.color.bg } : null"
                     :title="r.sc ? scoreTitle(r.sc) : 'Нет даты погашения или ставки: коэффициент не считается'"
                   >{{ r.c.name }}</span>
-                  <span v-if="r.held" class="px-1.5 py-0.5 rounded border text-[10px] font-bold text-emerald-300 border-emerald-500/50 bg-emerald-500/10" title="Уже куплено на брокерском счёте">{{ qtyText(r.held) }}</span>
                   <span v-if="r.sc && r.sc.tier" class="px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wider" :class="TIER_CLASS[r.sc.tier]" :title="`${r.sc.tierLabel} среди ${r.sc.currency}`">{{ r.sc.tierLabel }}</span>
+                  <span v-if="r.held" class="px-1.5 py-0.5 rounded border text-[10px] font-bold text-emerald-300 border-emerald-500/50 bg-emerald-500/10" title="Уже куплено на брокерском счёте">{{ qtyText(r.held) }}</span>
                 </span>
               </template>
               <template v-else>{{ r.c[col.key] }}</template>

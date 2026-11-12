@@ -153,3 +153,42 @@ test('сколько штук куплено: позиции складываю�
   assert.equal(holdingsOf(undefined).size, 0)
   assert.match(qtyText(1250), /^1\s250 шт\.$/)
 })
+
+import { parseIcuList, ytmFromPrice, scoreBonds as scoreB } from '../src/utils/marketTable.js'
+
+test('список ICU из текста экрана: ISIN и цена после него; проценты, даты и количества за цену не считаются', () => {
+  const t = `ОВДП 29.11.2028\nUA4000235782\nПогашення 29.11.2028\nКількість: 21 427\nYTM 16.2%\n1 117,72 ₴\nОВДП 20.02.2030\nUA4000239081\nYTM 17%\n1 038,68 ₴\nUA4000239040\nКількість: 19 565`
+  const r = parseIcuList(t)
+  assert.deepEqual(r.isins, ['UA4000235782', 'UA4000239081', 'UA4000239040'])
+  assert.equal(r.prices.UA4000235782, 1117.72)
+  assert.equal(r.prices.UA4000239081, 1038.68)
+  assert.equal(r.prices.UA4000239040, undefined)
+  assert.deepEqual(parseIcuList('UA4000239008 1067.95\nUA4000239040').prices, { UA4000239008: 1067.95 })
+})
+
+test('доходность по цене брокера совпадает с YTM в ICU (в пределах 0,05 п.п.)', () => {
+  const today = '2026-11-12'
+  const cases = [
+    ['2028-11-29', 17.8, 1117.72, 16.2], ['2030-02-20', 16.44, 1038.68, 17], ['2029-03-21', 16.49, 1033.38, 16.6],
+    ['2029-03-07', 17.48, 1062.49, 16.45], ['2028-06-14', 15.78, 1067.95, 16.15], ['2028-04-26', 15.85, 1011.12, 16.15]
+  ]
+  for (const [maturity, coupon_rate, price, icu] of cases) {
+    const y = ytmFromPrice({ maturity, coupon_rate, nominal: 1000 }, price, today)
+    assert.ok(Math.abs(y - icu) < 0.05, `${maturity}: ${y} против ${icu}`)
+  }
+  assert.equal(ytmFromPrice({ maturity: '2026-01-01', coupon_rate: 10 }, 1000, today), null) // погашена
+  assert.equal(ytmFromPrice({ maturity: '2028-01-01', coupon_rate: 10 }, 0, today), null)
+  const zero = ytmFromPrice({ maturity: '2027-11-12', coupon_rate: 0, nominal: 1000 }, 900, today) // бескупонная: 1000/900 за год
+  assert.ok(Math.abs(zero - 11.11) < 0.1)
+})
+
+test('своя доходность важнее купонной в оценке', () => {
+  const l = [
+    { id: 'UA4000A00000', currency: 'UAH', maturity: '2029-01-01', coupon_rate: 18, yield: 0 },
+    { id: 'UA4000B00000', currency: 'UAH', maturity: '2029-01-01', coupon_rate: 16, yield: 0 }
+  ]
+  assert.equal(scoreB(l, '2026-11-12').get('UA4000A00000').rank, 1)
+  const r = scoreB(l, '2026-11-12', new Map([['UA4000A00000', 14], ['UA4000B00000', 17]]))
+  assert.equal(r.get('UA4000B00000').rank, 1)
+  assert.equal(r.get('UA4000A00000').rate, 14)
+})

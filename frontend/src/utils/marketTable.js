@@ -43,6 +43,50 @@ export function holdingsOf(overviews) {
 }
 export const qtyText = (n) => `${new Intl.NumberFormat('ru-RU').format(Math.round(n * 100) / 100)}\u00A0шт.`
 
+// Из вставленного текста (экран брокера, распознанный скриншот): ISIN и цена за бумагу, если она есть сразу после ISIN
+// (до следующего ISIN). Цена — число с двумя знаками от 100 до 100 000: проценты (YTM 16.15), даты и количества не подходят.
+export function parseIcuList(text) {
+  const src = String(text || '').toUpperCase()
+  const hits = [...src.matchAll(/UA\d{10}/g)]
+  const isins = [], prices = {}
+  hits.forEach((m, i) => {
+    if (!isins.includes(m[0])) isins.push(m[0])
+    const seg = src.slice(m.index + 12, i + 1 < hits.length ? hits[i + 1].index : undefined)
+    const num = [...seg.matchAll(/(\d{1,3}(?:[\s\u00A0]\d{3})+|\d+)[.,](\d{2})(?!\d)/g)]
+      .map((x) => Number(`${x[1].replace(/[\s\u00A0]/g, '')}.${x[2]}`))
+      .find((v) => v >= 100 && v <= 100000)
+    if (num !== undefined && prices[m[0]] === undefined) prices[m[0]] = num
+  })
+  return { isins, prices }
+}
+
+const addMonthsMs = (ms, n) => {
+  const d = new Date(ms), day = d.getUTCDate()
+  const x = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n, 1))
+  x.setUTCDate(Math.min(day, new Date(Date.UTC(x.getUTCFullYear(), x.getUTCMonth() + 1, 0)).getUTCDate()))
+  return x.getTime()
+}
+
+// Доходность к погашению (эффективная годовая, %) по цене из брокера. Цена — полная, с накопленным купоном (как в ICU).
+// Купоны раз в полгода, от даты погашения назад; тот же порядок, что у расчёта выплат на бэкенде (couponDays). Без купона —
+// одна выплата в день погашения. null — если бумага погашена, цены нет или решения нет.
+export function ytmFromPrice(b, price, today) {
+  const nominal = b.nominal > 0 ? b.nominal : 1000
+  if (!b.maturity || !(price > 0) || isMatured(b, today)) return null
+  const t0 = Date.parse(`${today}T00:00:00Z`), mat = Date.parse(`${b.maturity}T00:00:00Z`)
+  if (!(mat > t0)) return null
+  const coupon = b.coupon_rate > 0 ? (nominal * b.coupon_rate) / 100 / 2 : 0
+  const flows = []
+  if (coupon > 0) for (let k = 0, d = mat; d > t0 && k < 200; k++, d = addMonthsMs(mat, -6 * k)) flows.push({ t: (d - t0) / 86400000 / 365, cf: coupon })
+  else flows.push({ t: (mat - t0) / 86400000 / 365, cf: 0 })
+  flows[0].cf += nominal
+  const pv = (y) => flows.reduce((s, f) => s + f.cf / Math.pow(1 + y, f.t), 0)
+  let lo = -0.9, hi = 5
+  if (!(pv(lo) > price) || !(pv(hi) < price)) return null
+  for (let i = 0; i < 100; i++) { const mid = (lo + hi) / 2; if (pv(mid) > price) lo = mid; else hi = mid }
+  return ((lo + hi) / 2) * 100
+}
+
 export const isMatured = (b, today) => !!b.maturity && b.maturity < today
 
 export function filterBonds(list, { q = '', currency = '', hideMatured = true, today = '' } = {}) {
@@ -133,12 +177,13 @@ export function growthOf(r, years, base, horizon = HORIZON_YEARS) {
   return (Math.expm1(held / horizon)) * 100
 }
 
-export function scoreBonds(list, today) {
+export function scoreBonds(list, today, rates = null) {
   const t0 = dayNum(today)
   const groups = new Map()
   for (const b of Array.isArray(list) ? list : []) {
     if (!b.maturity || isMatured(b, today)) continue
-    const rate = rateOf(b)
+    const own = rates && rates.get(String(b.id).toUpperCase()) // своя доходность (например из цены брокера) важнее аукционной и купонной
+    const rate = own > 0 ? own : rateOf(b)
     if (!(rate > 0)) continue
     const years = Math.max(0, dayNum(b.maturity) - t0) / 365.25
     if (!groups.has(b.currency)) groups.set(b.currency, [])
