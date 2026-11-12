@@ -27,6 +27,7 @@ const ranges = computed(() => yRanges({ items: props.items, matured: props.matur
 const target = computed(() => manualY.value || ranges.value.auto)
 const shown = ref(null) // то, что реально нарисовано: догоняет target плавно
 let raf = 0
+let dragY = false // идёт ручной сдвиг суммы: тогда подгонка без анимации (объявлено до watch(target), иначе TDZ в dev)
 const stopAnim = () => { if (raf) cancelAnimationFrame(raf); raf = 0 }
 const snap = () => { stopAnim(); shown.value = { ...target.value } }
 const step = () => {
@@ -64,7 +65,6 @@ const onWheel = (e) => {
   manualY.value = null
 }
 let drag = null
-let dragY = false
 const onDown = (e) => { drag = { x: px(e), y: py(e), view: cur.value, range: { ...(shown.value || target.value) }, axis: null }; svgRef.value.setPointerCapture(e.pointerId) }
 const hoverT = ref(null)
 const onMove = (e) => {
