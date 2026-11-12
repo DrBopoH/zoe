@@ -1,8 +1,12 @@
 <script setup>
-import { computed, toRef } from 'vue'
+import { computed, toRef, onMounted } from 'vue'
 import { money, signed } from '../utils/formatters.js'
 import CandleChart from '../components/CandleChart.vue'
 import SyncButton from '../components/SyncButton.vue'
+import CapitalStructure from '../components/CapitalStructure.vue'
+import BondPortfolio from '../components/BondPortfolio.vue'
+import { useMacro } from '../composables/useMacro.js'
+import { toLocalDateStr } from '../utils/formatters.js'
 import { useCapitalChart } from '../composables/useCapitalChart.js'
 
 const props = defineProps({
@@ -15,8 +19,13 @@ const currentYear = now.getFullYear()
 const currentMonth = now.getMonth()
 
 // График Сметы — всё время по всем счетам (выбор карт и свечей живёт в «Операционной»)
-const { uahAccounts, uahTransactions, chartTransactions, chartTotalUAH, binanceIdList, payEvents } =
+const { uahAccounts, uahTransactions, chartTransactions, chartTotalUAH, binanceIdList, payEvents, positions } =
   useCapitalChart(toRef(props, 'accounts'), toRef(props, 'transactions'))
+
+// Инфляция для реальной доходности портфеля (ряды НБУ из кеша)
+const macro = useMacro()
+onMounted(() => macro.load())
+const today = computed(() => toLocalDateStr(new Date()))
 
 const totalValueUAH = computed(() => uahAccounts.value.reduce((sum, a) => sum + a.balance, 0))
 
@@ -54,6 +63,11 @@ const monthlyDelta = computed(() => {
       </div>
       <SyncButton />
     </section>
+
+    <div class="grid gap-4 md:grid-cols-2">
+      <CapitalStructure :accounts="accounts" />
+      <BondPortfolio :positions="positions" :macro="macro.series.value" :today="today" />
+    </div>
 
     <CandleChart :transactions="chartTransactions" :binance-ids="binanceIdList" :total-value-u-a-h="chartTotalUAH" :events="payEvents" />
   </main>

@@ -33,6 +33,7 @@ export function useCapitalChart(accounts, transactions, pickedIds = ref([])) {
   // Выплаты по облигациям брокерских счетов (купоны и погашения) — маркеры на графике и таймлайн вперёд.
   // Счета обновляются вместе с версией данных, поэтому перечитываем при каждой новой загрузке.
   const allPayEvents = ref([])
+  const positions = ref([]) // позиции по облигациям брокерских счетов (qty, value, ставка, погашение) — для блока «Портфель ОВДП» Сметы
   const icuOps = ref([]) // покупки/продажи/полученные выплаты — справочные строки истории (в потоке операций и на графике их нет)
   // Переводы между кошельками Binance — тоже справочные строки истории (капитал не меняют)
   const bnMoves = ref([])
@@ -88,15 +89,18 @@ export function useCapitalChart(accounts, transactions, pickedIds = ref([])) {
   watch(accounts, async (list) => {
     const manual = (list || []).filter(a => a.bank_key === 'icu')
     const ops = []
+    const held = []
     try {
       const all = await Promise.all(manual.map(async a => {
         const ov = await apiGetJson(`/icu/ledger?account_id=${q(a.id)}`)
+        held.push(...(ov.positions || []).map(p => ({ ...p, account_id: a.id })))
         const color = bankTheme(a.bank_key || 'icu', a.type).color // маркеры в цвет счёта
         ops.push(...bondOpsOf(a.id, ov))
         return (ov.events || []).map(e => ({ ...e, color, account_id: a.id }))
       }))
       allPayEvents.value = all.flat()
       icuOps.value = ops
+      positions.value = held
     } catch (e) {
       console.error('ICU events error:', e)
     }
@@ -124,5 +128,5 @@ export function useCapitalChart(accounts, transactions, pickedIds = ref([])) {
 
   const bondOps = computed(() => [...icuOps.value, ...bnMoves.value, ...bnTrades.value, ...bnSwaps.value]) // имя прежнее: справочные строки истории всех счетов
 
-  return { bondOps, uahAccounts, uahTransactions, chartTransactions, chartTotalUAH, binanceIdList, payEvents }
+  return { bondOps, positions, uahAccounts, uahTransactions, chartTransactions, chartTotalUAH, binanceIdList, payEvents }
 }
