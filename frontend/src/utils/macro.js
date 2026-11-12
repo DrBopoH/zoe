@@ -7,8 +7,11 @@ import { robustRanges } from './chartView.js'
 export const SERIES = {
   policy_rate: { label: 'Облікова ставка', color: '#34d399', step: true },
   cpi_yoy: { label: 'Инфляция г/г', color: '#fbbf24', step: false },
-  core_yoy: { label: 'Базовая инфляция г/г', color: '#fb923c', step: false },
-  overnight_cd: { label: 'Сертификаты овернайт', color: '#38bdf8', step: true }
+  core_yoy: { label: 'Базовая инфляция г/г', color: '#fb923c', step: false, thin: true },
+  overnight_cd: { label: 'Сертификаты овернайт', color: '#38bdf8', step: true },
+  overnight_loans: { label: 'Кредиты овернайт', color: '#a78bfa', step: true },
+  cpi_mom: { label: 'Инфляция м/м', color: '#fbbf24', step: false },
+  core_mom: { label: 'Базовая м/м', color: '#fb923c', step: false, thin: true }
 }
 
 const DAY = 86400000
@@ -66,6 +69,7 @@ export function macroSummary(series, todayIso) {
 export const RANGES = [
   { key: '5', label: '5 л.', years: 5 },
   { key: '10', label: '10 л.', years: 10 },
+  { key: '2007', label: 'С 2007', from: '2007-01-01' }, // инфляция в данных НБУ начинается с 2007 года
   { key: 'all', label: 'Всё', years: 0 }
 ]
 
@@ -80,12 +84,13 @@ export const isoAt = (years, todayIso) => new Date(ms(todayIso) + years * YEAR_M
 
 const usable = (series, ids) => (ids || []).filter((id) => series && series[id] && series[id].length)
 
-/** Окно по умолчанию: years лет назад (0 — с первой точки) до сегодня с небольшим запасом справа. */
-export function macroWindow({ series, ids, todayIso, years }) {
+/** Окно по умолчанию: years лет назад (0 — с первой точки) или с даты from, до сегодня с небольшим запасом справа. Левее первой точки данных не уходит. */
+export function macroWindow({ series, ids, todayIso, years, from = null }) {
   const use = usable(series, ids)
   if (!use.length) return { x0: -1, x1: 0.05 }
   const first = use.map((id) => series[id][0].d).sort()[0]
-  const left = years ? Math.max(-years, yearsFrom(first, todayIso)) : yearsFrom(first, todayIso)
+  const firstT = yearsFrom(first, todayIso)
+  const left = from ? Math.max(yearsFrom(from, todayIso), firstT) : years ? Math.max(-years, firstT) : firstT
   const span = Math.max(-left, MACRO_MIN_SPAN)
   return { x0: -span, x1: span * 0.02 }
 }
