@@ -191,19 +191,22 @@ const hasApiFile = (a) => a.files.some(f => f.origin === 'api')
     <div class="flex flex-wrap items-center justify-between gap-3">
       <p v-if="info?.dir" class="text-[9px] text-slate-600 break-all min-w-0">Папка источников: {{ info.dir }}</p>
       <span v-else></span>
-      <div class="flex items-center gap-2 shrink-0 ml-auto">
+      <div class="flex items-start gap-2 shrink-0 ml-auto">
         <UiButton variant="danger" size="sm" :disabled="!!busy || !accounts.length" @click="confirm('reset', doReset)">
           {{ armed('reset') ? 'Точно? Сбросить' : `Сбросить${scopeSuffix}` }}
         </UiButton>
         <UiButton variant="primary" size="sm" :disabled="!!busy || !accounts.length" @click="doLoad">
           {{ busy === 'load' ? 'Загрузка…' : `Загрузить${scopeSuffix}` }}
         </UiButton>
-        <!-- «Разведать» вместо «Сохранить с API»: обход банков, а галочка — дописать снятое в источники сама, когда он закончится -->
-        <label class="flex items-center gap-1.5 text-[10px] text-slate-400 cursor-pointer select-none" title="После обхода снятое с API записывается в файлы-источники: после сброса кэш восстановится с диска, а снятые периоды заново не качаются">
-          <input type="checkbox" class="accent-emerald-500" :checked="autoSave" @change="setAutoSave($event.target.checked)" />
-          дописывать в источники
-        </label>
-        <SyncButton size="sm" />
+        <!-- «Разведать» вместо «Сохранить с API»: обход банков; под кнопкой галочка — дописать снятое в источники, когда он закончится.
+             Пустое место отделяет «Разведать» от кнопок работы с кэшем слева -->
+        <div class="ml-8 flex flex-col items-end gap-1.5">
+          <SyncButton size="sm" />
+          <label class="flex items-center gap-1.5 text-[10px] text-slate-400 cursor-pointer select-none" title="После обхода снятое с API записывается в файлы-источники: после сброса кэш восстановится с диска, а снятые периоды заново не качаются">
+            дописывать в источники
+            <input type="checkbox" class="accent-emerald-500" :checked="autoSave" @change="setAutoSave($event.target.checked)" />
+          </label>
+        </div>
       </div>
     </div>
 
