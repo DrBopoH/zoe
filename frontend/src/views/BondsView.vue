@@ -96,7 +96,8 @@ const strip = computed(() => {
 })
 const assume = computed(() => dollarAssumptions(props.dollar, today.value))
 const hasUsd = computed(() => assume.value.devUsd !== null || (list.value || []).some((b) => b.currency === 'USD'))
-const columns = computed(() => COLUMNS.filter((c) => (c.key !== 'real' || (section.value === 'nbu' && inflation.value !== null)) && ((c.key !== 'usd' && c.key !== 'realUsd') || hasUsd.value)))
+const hasAuction = computed(() => (list.value || []).some((b) => b.last_auction)) // колонка «Аукцион» пустая у бумаг без аукционов — место важнее
+const columns = computed(() => COLUMNS.filter((c) => (c.key !== 'real' || (section.value === 'nbu' && inflation.value !== null)) && ((c.key !== 'usd' && c.key !== 'realUsd') || hasUsd.value) && (c.key !== 'last_auction' || hasAuction.value)))
 
 const dy = (rate, currency) => bondDollarYield({ rate, currency, ...assume.value })
 const found = computed(() => filterBonds(pool.value, { q: q.value, currency: currency.value, hideMatured: hideMatured.value, today: today.value }))
@@ -210,7 +211,7 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
         </label>
         <button type="button" class="text-[10px] text-slate-500 hover:text-emerald-400 underline cursor-pointer" @click="icuOpen = !icuOpen">{{ icu.isins.value.length ? 'список ICU' : 'добавить список ICU' }}</button>
       </template>
-      <label class="flex items-center gap-2 text-slate-400" title="Сумма вложения: по ней считается столбец «Через 10 л.» и графики">
+      <label class="flex items-center gap-2 text-slate-400" title="Сумма вложения: по ней считается столбец «10 л.» и графики">
         вложение
         <input v-model.number="amount" type="number" min="1" step="1000" class="ui-input !bg-slate-900 !w-28 text-right" />
       </label>
@@ -241,7 +242,7 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
             <th
               v-for="col in columns"
               :key="col.key"
-              class="px-3 py-3 font-bold cursor-pointer hover:text-slate-300 whitespace-nowrap"
+              class="px-2 py-3 font-bold cursor-pointer hover:text-slate-300 whitespace-nowrap"
               :class="col.num ? 'text-right' : 'text-left'"
               @click="sort = nextSort(sort, col.key)"
             >{{ col.key === 'id' ? source.idLabel : col.label }}<span v-if="sort.key === col.key" class="text-emerald-400 ml-1">{{ sort.dir === 'asc' ? '↑' : '↓' }}</span></th>
@@ -249,7 +250,7 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
         </thead>
         <tbody>
           <tr v-for="r in rows" :key="r.id" class="border-b border-slate-800/60 hover:bg-slate-800/40">
-            <td v-for="col in columns" :key="col.key" class="px-3 py-2 whitespace-nowrap" :class="[col.num ? 'text-right tabular-nums' : 'text-left', col.key === 'id' ? 'text-slate-300' : 'text-slate-200']">
+            <td v-for="col in columns" :key="col.key" class="px-2 py-2 whitespace-nowrap" :class="[col.num ? 'text-right tabular-nums' : 'text-left', col.key === 'id' ? 'text-slate-300' : 'text-slate-200']">
               <template v-if="col.key === 'name'">
                 <span class="inline-flex items-center gap-2">
                   <span
