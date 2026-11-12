@@ -67,6 +67,49 @@ const addMonthsMs = (ms, n) => {
   return x.getTime()
 }
 
+// Кривая доходности по опорным точкам [{ years, ytm }]: между точками линейно, за краями — ближайшее значение; null, если точек нет.
+export function curveAt(points, years) {
+  const pts = (Array.isArray(points) ? points : []).filter((p) => p && p.years > 0 && p.ytm > 0).sort((a, b) => a.years - b.years)
+  if (!pts.length || !Number.isFinite(years)) return null
+  if (years <= pts[0].years) return pts[0].ytm
+  const last = pts[pts.length - 1]
+  if (years >= last.years) return last.ytm
+  for (let i = 1; i < pts.length; i++) {
+    if (years <= pts[i].years) {
+      const a = pts[i - 1], b = pts[i]
+      return b.years === a.years ? b.ytm : a.ytm + ((b.ytm - a.ytm) * (years - a.years)) / (b.years - a.years)
+    }
+  }
+  return last.ytm
+}
+
+/**
+ * Доходность каждой бумаги из списка брокера. Приоритет: по цене (price) → показанная брокером (ytm) → оценка по кривой (curve).
+ * Кривая строится из бумаг с известной доходностью и ваших точек (curve). Без всего этого бумаги в карту не попадают.
+ * Возвращает Map ISIN → { rate, source: 'price' | 'ytm' | 'curve' }.
+ */
+export function resolveRates({ pool, prices = {}, ytms = {}, curve = [], today }) {
+  const t0 = Date.parse(`${today}T00:00:00Z`)
+  const yearsOf = (b) => (Date.parse(`${b.maturity}T00:00:00Z`) - t0) / (365.25 * 86400000)
+  const out = new Map()
+  const anchors = (Array.isArray(curve) ? curve : []).map((p) => ({ years: p.years, ytm: p.ytm }))
+  const unknown = []
+  for (const b of Array.isArray(pool) ? pool : []) {
+    if (!b.maturity || isMatured(b, today)) continue
+    const id = String(b.id).toUpperCase()
+    const price = prices[id]
+    const fromPrice = price > 0 ? ytmFromPrice(b, price, today) : null
+    if (fromPrice > 0) { out.set(id, { rate: fromPrice, source: 'price' }); anchors.push({ years: yearsOf(b), ytm: fromPrice }) }
+    else if (ytms[id] > 0) { out.set(id, { rate: ytms[id], source: 'ytm' }); anchors.push({ years: yearsOf(b), ytm: ytms[id] }) }
+    else unknown.push({ id, years: yearsOf(b) })
+  }
+  for (const u of unknown) {
+    const y = curveAt(anchors, u.years)
+    if (y > 0) out.set(u.id, { rate: y, source: 'curve' })
+  }
+  return out
+}
+
 // Доходность к погашению (эффективная годовая, %) по цене из брокера. Цена — полная, с накопленным купоном (как в ICU).
 // Купоны раз в полгода, от даты погашения назад; тот же порядок, что у расчёта выплат на бэкенде (couponDays). Без купона —
 // одна выплата в день погашения. null — если бумага погашена, цены нет или решения нет.

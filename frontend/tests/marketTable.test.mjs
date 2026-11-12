@@ -192,3 +192,31 @@ test('своя доходность важнее купонной в оценк�
   assert.equal(r.get('UA4000B00000').rank, 1)
   assert.equal(r.get('UA4000A00000').rate, 14)
 })
+
+import { curveAt, resolveRates } from '../src/utils/marketTable.js'
+
+test('кривая: линейно между точками, за краями — ближайшая, без точек — null', () => {
+  const c = [{ years: 3, ytm: 17 }, { years: 1, ytm: 15 }]
+  assert.equal(curveAt(c, 2), 16)
+  assert.equal(curveAt(c, 0.2), 15)
+  assert.equal(curveAt(c, 10), 17)
+  assert.equal(curveAt([], 2), null)
+  assert.equal(curveAt([{ years: 0, ytm: 5 }, null], 2), null)
+})
+
+test('доходность бумаг ICU: цена, потом показанная YTM, потом кривая из соседей и своих точек', () => {
+  const today = '2026-11-12'
+  const mk = (id, maturity) => ({ id, maturity, coupon_rate: 16, nominal: 1000 })
+  const pool = [mk('UA4000A00001', '2029-11-12'), mk('UA4000A00002', '2027-11-12'), mk('UA4000A00003', '2028-11-12'), mk('UA4000A00004', '2026-01-01')]
+  const r = resolveRates({ pool, prices: { UA4000A00001: 1000 }, ytms: { UA4000A00002: 15 }, curve: [], today })
+  assert.equal(r.get('UA4000A00001').source, 'price')
+  assert.equal(r.get('UA4000A00002').rate, 15)
+  const mid = r.get('UA4000A00003') // между 1 годом (15 %) и 3 годами (≈16 % по цене номинал): оценка по кривой
+  assert.equal(mid.source, 'curve')
+  assert.ok(mid.rate > 15 && mid.rate < r.get('UA4000A00001').rate)
+  assert.equal(r.has('UA4000A00004'), false) // погашена
+  const none = resolveRates({ pool: [mk('UA4000B00001', '2028-01-01')], today })
+  assert.equal(none.size, 0) // ни цены, ни кривой: оценивать нечем
+  const only = resolveRates({ pool: [mk('UA4000B00001', '2028-01-01')], curve: [{ years: 1, ytm: 14 }, { years: 3, ytm: 16 }], today })
+  assert.equal(only.get('UA4000B00001').source, 'curve') // одна лишь ваша кривая
+})
