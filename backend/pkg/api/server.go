@@ -24,6 +24,7 @@ type Server struct {
 	syncStatus string
 
 	bn binanceState // Binance (read-only), см. handlers_binance.go
+	mk marketState  // облигации ОВДП и US Treasury из публичных API, см. handlers_market.go
 
 	prog progress // структурированный прогресс синка для панели на фронте
 

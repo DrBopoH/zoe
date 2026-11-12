@@ -20,6 +20,10 @@ func (s *Server) Handler() http.Handler {
 		{"/api/icu/ledger", s.HandleICULedger},
 		{"/api/icu/bonds", s.HandleICUBonds},
 
+		// Рыночные облигации: ОВДП (НБУ) и US Treasury, публичные данные в кеше
+		{"/api/market/bonds", s.HandleMarketBonds},
+		{"/api/market/sync", s.HandleMarketSync},
+
 		// Binance (только чтение кеша; обновляется через «Разведать»)
 		{"/api/binance", s.HandleBinance},
 		{"/api/binance/candles", s.HandleBinanceCandles}, // свечи оценки портфеля для графика

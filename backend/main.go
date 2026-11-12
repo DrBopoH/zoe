@@ -15,6 +15,7 @@ import (
 	"economic/pkg/api"
 	"economic/pkg/binance"
 	"economic/pkg/db"
+	"economic/pkg/market"
 	"economic/pkg/mono"
 	"economic/pkg/raif"
 )
@@ -51,6 +52,8 @@ func main() {
 	server := api.NewServer(storage, monoClients, raifClients)
 	// Binance: выписка (CSV) + публичные минутные цены, ключей нет
 	server.SetBinance(binance.NewClient())
+	// Облигации: ОВДП и US Treasury из публичных API, обновление только по запросу
+	server.SetMarket(market.NewClient())
 	if o := os.Getenv("ALLOWED_ORIGINS"); o != "" {
 		server.SetAllowedOrigins(strings.Split(o, ","))
 	}
