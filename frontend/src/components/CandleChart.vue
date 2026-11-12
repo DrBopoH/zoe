@@ -384,6 +384,50 @@ const eventsByDate = computed(() => {
   return m
 })
 
+// ── Шкала цены справа (как на бирже): «круглые» отметки по текущему окну, сетка по ним, тег последней цены.
+const yOf = (val) => {
+  const range = yHi.value - yLo.value || 1
+  return svgHeight - paddingY - ((val - yLo.value) / range) * (svgHeight - paddingY * 2)
+}
+const niceStep = (raw) => {
+  const p = Math.pow(10, Math.floor(Math.log10(raw)))
+  const f = raw / p
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p
+}
+const priceTicks = computed(() => {
+  const lo = yLo.value, hi = yHi.value
+  if (!(hi > lo)) return []
+  const step = niceStep((hi - lo) / 6)
+  const out = []
+  for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-9; v += step) {
+    const val = Math.round(v / step) * step
+    out.push({ val, y: yOf(val), label: axisLabel(val, step) })
+  }
+  return out
+})
+// компактная подпись в одной единице на всю шкалу (9,5к · 10к · 10,5к), мелкие значения — как есть
+const axisLabel = (v, step) => {
+  const top = Math.max(Math.abs(yLo.value), Math.abs(yHi.value), Math.abs(v))
+  const unit = top >= 1e6 ? 1e6 : top >= 1e4 || step >= 500 && top >= 1e3 ? 1e3 : 1
+  const suffix = unit === 1e6 ? 'М' : unit === 1e3 ? 'к' : ''
+  const u = step / unit
+  let dec = 0 // знаков ровно столько, чтобы шаг шкалы читался точно (250 → 9,75к)
+  while (dec < 3 && Math.abs(u * 10 ** dec - Math.round(u * 10 ** dec)) > 1e-6) dec++
+  return (v / unit).toFixed(dec).replace('.', ',') + suffix
+}
+// тег последней цены — точное число без сокращений («10 150»); сокращать только от миллиона, иначе тег не влезает
+const lastLabel = computed(() => {
+  const v = lastPrice.value ? lastPrice.value.val : 0
+  return Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(2).replace('.', ',') + 'М' : new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 0 }).format(v)
+})
+const lastPrice = computed(() => {
+  const S = series.value
+  if (!S || !S.n) return null
+  const val = S.C[S.n - 1]
+  const up = S.C[S.n - 1] >= S.O[S.n - 1]
+  return { val, up, y: Math.min(svgHeight - paddingY, Math.max(paddingY / 2, yOf(val))) }
+})
+
 const candleAt = (i) => {
   const S = series.value
   const min = yLo.value, max = yHi.value
@@ -737,6 +781,7 @@ watch(() => (series.value ? series.value.n : 0), (n) => {
       <div v-else class="text-[10px] text-slate-600 uppercase">Колесико — Zoom, Перетаскивание — Навигация</div>
     </div>
 
+    <div class="flex">
     <div
       ref="chartContainerRef"
       data-wheel="own"
@@ -746,7 +791,7 @@ watch(() => (series.value ? series.value.n : 0), (n) => {
       @pointerup="onPointerUp"
       @pointercancel="onPointerUp"
       @scroll.passive="onScroll"
-      class="chart-pan w-full overflow-x-auto"
+      class="chart-pan min-w-0 flex-1 overflow-x-auto"
       :class="isDragging ? 'cursor-grabbing' : 'cursor-grab'"
     >
       <svg
@@ -755,9 +800,8 @@ watch(() => (series.value ? series.value.n : 0), (n) => {
         :height="svgHeight"
         class="select-none block"
       >
-        <line x1="0" y1="30" :x2="svgWidth" y2="30" stroke="#1e293b" stroke-dasharray="3 3" />
-        <line x1="0" y1="120" :x2="svgWidth" y2="120" stroke="#1e293b" stroke-dasharray="3 3" />
-        <line x1="0" y1="210" :x2="svgWidth" y2="210" stroke="#1e293b" stroke-dasharray="3 3" />
+        <line v-for="p in priceTicks" :key="'h-grid-' + p.val" x1="0" :y1="p.y" :x2="svgWidth" :y2="p.y" stroke="#1e293b" stroke-dasharray="3 3" />
+        <line v-if="lastPrice" x1="0" :y1="lastPrice.y" :x2="svgWidth" :y2="lastPrice.y" :stroke="lastPrice.up ? '#10b981' : '#f43f5e'" stroke-opacity="0.55" stroke-dasharray="1 3" />
 
         <line
           v-for="t in candleScales.ticks"
@@ -897,6 +941,15 @@ watch(() => (series.value ? series.value.n : 0), (n) => {
       <div v-else class="h-48 flex items-center justify-center text-xs text-slate-600">
         Нет транзакций для построения свечей. Нажмите SYNC.
       </div>
+    </div>
+    <!-- шкала цены: стоит на месте, пока свечи листаются -->
+    <svg v-if="series" width="58" :height="svgHeight" class="select-none block shrink-0 border-l border-slate-800">
+      <text v-for="p in priceTicks" :key="'p-' + p.val" x="6" :y="p.y + 3" fill="#64748b" font-size="10" font-family="monospace">{{ p.label }}</text>
+      <g v-if="lastPrice">
+        <rect x="1" :y="lastPrice.y - 8" width="56" height="16" rx="2" :fill="lastPrice.up ? '#10b981' : '#f43f5e'" />
+        <text x="5" :y="lastPrice.y + 3.5" fill="#020617" font-size="9" font-weight="bold" font-family="monospace">₴ {{ lastLabel }}</text>
+      </g>
+    </svg>
     </div>
   </section>
 </template>
