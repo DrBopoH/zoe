@@ -6,7 +6,6 @@ import SyncButton from '../components/SyncButton.vue'
 import CapitalStructure from '../components/CapitalStructure.vue'
 import BondPortfolio from '../components/BondPortfolio.vue'
 import { useMacro } from '../composables/useMacro.js'
-import { FX_IDS } from '../utils/macro.js'
 import { fxRates, dollarAssumptions } from '../utils/dollar.js'
 import { capitalStructure } from '../utils/capital.js'
 import { toLocalDateStr } from '../utils/formatters.js'
@@ -28,7 +27,7 @@ const { uahAccounts, uahTransactions, chartTransactions, chartTotalUAH, binanceI
 // Инфляция для реальной доходности портфеля (ряды НБУ из кеша)
 const macro = useMacro()
 // Курсы НБУ (доллар, евро) — капитал в долларовом эквиваленте; без них всё остаётся в гривне
-const fx = useMacro([...FX_IDS, 'us_cpi_yoy'])
+const fx = useMacro('fx', ['us_cpi_yoy'])
 onMounted(() => { macro.load(); fx.load() })
 const rates = computed(() => { const r = fxRates(fx.series.value); return r.usdUah ? r : null })
 const assume = computed(() => dollarAssumptions(fx.series.value, toLocalDateStr(new Date())))

@@ -45,14 +45,6 @@ export const SERIES = {
   crypto_eth_dd: { label: 'Ethereum: просадка от максимума', color: '#a78bfa', step: false }
 }
 
-// Ряды по группам: для запроса /macro (ставки и инфляция — малые, курсы — тысячи точек, грузятся отдельно)
-export const MACRO_IDS = ['policy_rate', 'overnight_cd', 'overnight_loans', 'cpi_yoy', 'cpi_mom', 'core_yoy', 'core_mom', 'eu_cpi_yoy']
-export const FX_IDS = ['usd_uah', 'eur_uah', 'xau_uah']
-export const USECON_IDS = ['us_unrate', 'us_gdp', 'us_spread', 'us_vix', 'us_sentiment']
-export const CRYPTO_IDS = ['crypto_btc', 'crypto_eth', 'crypto_bnb', 'crypto_sol', 'crypto_fng']
-export const STOCK_IDS = ['stock_sp500', 'stock_nasdaq', 'stock_dow']
-export const US_IDS = ['fed_funds', 'fed_target', 'ust_10y', 'us_cpi_yoy', 'us_cpi_mom']
-
 // Число для оси и подсказки по единице ряда: «%» — процент, «₴»/«$» — деньги (тысячи сокращаются: 183 562 → «184 тыс.»)
 export function unitText(v, unit = '%') {
   if (v === null || v === undefined || !isFinite(v)) return '—'

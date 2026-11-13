@@ -1,7 +1,7 @@
 import { annualChange, lastPoint, realRate } from './macro.js'
 
 // Доллар как общая мера: курсы к доллару, доходность бумаг в долларах, капитал в долларовом эквиваленте. Чистые функции.
-// Курсы НБУ: usd_uah и eur_uah — гривен за единицу валюты (ряды из /api/macro, FX_IDS).
+// Курсы НБУ: usd_uah и eur_uah — гривен за единицу валюты (ряды из /api/macro, источник fx).
 
 /** Текущие курсы из макро-рядов: { usdUah, eurUah } (null — ряда нет). Евро в долларах = eurUah / usdUah. */
 export function fxRates(series) {

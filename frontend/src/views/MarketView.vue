@@ -12,7 +12,6 @@ import MacroStocksView from './MacroStocksView.vue'
 import { useSection } from '../composables/useSection.js'
 import { useMacro } from '../composables/useMacro.js'
 import { toLocalDateStr } from '../utils/formatters.js'
-import { FX_IDS, US_IDS, USECON_IDS, CRYPTO_IDS, STOCK_IDS } from '../utils/macro.js'
 import { MARKET_TREE, MARKET_SECTIONS, isBondSection } from '../utils/marketNav.js'
 
 // Оболочка вкладки «Рынок»: шторка с группами («Ценные бумаги», «Макро») и экран выбранного раздела.
@@ -26,11 +25,11 @@ const props = defineProps({
 const section = useSection('economic_market_section', MARKET_SECTIONS, 'nbu')
 const macro = useMacro()
 // Курсы и США тяжёлые (тысячи точек): читаются только на своих экранах
-const fx = useMacro(FX_IDS)
-const us = useMacro(US_IDS)
-const econ = useMacro(USECON_IDS)
-const crypto = useMacro(CRYPTO_IDS)
-const stocks = useMacro(STOCK_IDS)
+const fx = useMacro('fx')
+const us = useMacro('us')
+const econ = useMacro('usecon')
+const crypto = useMacro('crypto')
+const stocks = useMacro('stocks')
 const heavy = { fx, fed: us, usecon: econ, crypto, stocks }
 // Таблицы облигаций считают доходность в долларах: нужны курсы и инфляция США (тяжёлые ряды, поэтому только на этих экранах)
 const dollar = computed(() => ({ ...fx.series.value, ...us.series.value }))
