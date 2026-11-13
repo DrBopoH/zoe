@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { valueAt, realRate, signedPct, plainPct, currentInflation, macroSummary, inflationFor, buildMacroChart, macroWindow, macroRanges, yearsFrom, isoAt, goldUsd, annualChange, unitText, axisText } from '../src/utils/macro.js'
+import { valueAt, realRate, signedPct, plainPct, currentInflation, macroSummary, inflationFor, buildMacroChart, macroWindow, macroRanges, yearsFrom, isoAt, goldUsd, annualChange, unitText, axisText, dateOf, hasPoints } from '../src/utils/macro.js'
 import { sortBonds } from '../src/utils/marketTable.js'
 
 const rate = [{ d: '2024-12-12', v: 13.5 }, { d: '2025-01-23', v: 14.5 }, { d: '2026-01-01', v: 15.5 }]
@@ -160,4 +160,17 @@ test('inflationFor: инфляция в валюте бумаги — гривн
   assert.equal(inflationFor('EUR', s), 2.4)
   assert.equal(inflationFor('GBP', s), null)
   assert.equal(inflationFor('EUR', {}), null)
+})
+
+test('dateOf: ISO в дд.мм.гггг, пусто для пустого', () => {
+  assert.equal(dateOf('2026-11-13'), '13.11.2026')
+  assert.equal(dateOf(''), '')
+  assert.equal(dateOf(undefined), '')
+})
+
+test('hasPoints: хоть одна точка в любом ряду', () => {
+  assert.equal(hasPoints({}), false)
+  assert.equal(hasPoints(null), false)
+  assert.equal(hasPoints({ a: [], b: null }), false)
+  assert.equal(hasPoints({ a: [], b: [{ d: '2026-01-01', v: 1 }] }), true)
 })

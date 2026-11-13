@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
 import MarketHeader from '../components/MarketHeader.vue'
 import { useMarketRefresh } from '../composables/useMarketRefresh.js'
-import { lastPoint, plainPct, signedPct, drawdown, athInfo, changeSince, fearGreedLevel, unitText } from '../utils/macro.js'
+import { lastPoint, plainPct, signedPct, drawdown, athInfo, changeSince, fearGreedLevel, unitText, hasPoints, dateOf } from '../utils/macro.js'
 
 // Экран «Крипто»: недельные цены Bitcoin, Ethereum, BNB, Solana (публичные свечи Binance), просадка от максимума и индекс страха и жадности.
 // Не прогноз и не совет: картина того, где рынок относительно своих пиков и настроения.
@@ -25,9 +25,8 @@ const FNG_TEXT = { 'extreme-fear': 'крайний страх', fear: 'стра�
 const fngWord = computed(() => FNG_TEXT[fearGreedLevel(fng.value?.v)] || '')
 // Цвет числа в шапке — как у линии: страх голубой, середина серая, жадность янтарная
 const fngColor = computed(() => ({ 'extreme-fear': 'text-sky-300', fear: 'text-sky-300', neutral: 'text-slate-300', greed: 'text-amber-300', 'extreme-greed': 'text-amber-300' })[fearGreedLevel(fng.value?.v)] || 'text-slate-300')
-const dateOf = (iso) => (iso ? iso.split('-').reverse().join('.') : '')
 const coin = (id) => lastPoint(props.crypto[id])
-const has = computed(() => Object.values(props.crypto).some((a) => a && a.length))
+const has = computed(() => hasPoints(props.crypto))
 </script>
 
 <template>

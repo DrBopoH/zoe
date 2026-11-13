@@ -107,6 +107,11 @@ export function valueAt(points, iso) {
 // Последняя точка ряда или null
 export const lastPoint = (points) => (points && points.length ? points[points.length - 1] : null)
 
+// «2026-11-13» → «13.11.2026»; пусто для пустой даты
+export const dateOf = (iso) => (iso ? iso.split('-').reverse().join('.') : '')
+// Есть ли хоть одна точка хоть в одном ряду (пока нет — на экране подсказка «Нажми Обновить»)
+export const hasPoints = (series) => Object.values(series || {}).some((a) => a && a.length)
+
 // Реальная доходность, % (по Фишеру): (1 + номинальная) / (1 + инфляция) − 1. Нет инфляции или ставки — null.
 export function realRate(nominal, inflation) {
   if (!(typeof nominal === 'number' && isFinite(nominal)) || !(typeof inflation === 'number' && isFinite(inflation))) return null
