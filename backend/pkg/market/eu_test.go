@@ -1,6 +1,8 @@
 package market
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -60,5 +62,22 @@ func TestEuroInflationErrorsAreExplained(t *testing.T) {
 	t.Cleanup(bad.Close)
 	if _, err := euClient(bad).euroInflation(context.Background()); err == nil {
 		t.Fatal("HTTP 502 — ошибка")
+	}
+}
+
+func TestEuroInflationUnpacksGzipWithoutContentEncoding(t *testing.T) {
+	// как у Евростата: тело сжато gzip, заголовка Content-Encoding нет
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	zw.Write([]byte(euHead + "X,d,M,RCH_A,TOTAL,EA,2026-10,4.0,e,\n"))
+	zw.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/csv")
+		w.Write(buf.Bytes())
+	}))
+	t.Cleanup(srv.Close)
+	pts, err := euClient(srv).euroInflation(context.Background())
+	if err != nil || len(pts) != 1 || pts[0].Value != 4.0 {
+		t.Fatalf("pts=%+v err=%v", pts, err)
 	}
 }

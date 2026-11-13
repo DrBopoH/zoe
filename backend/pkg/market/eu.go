@@ -1,9 +1,12 @@
 package market
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/csv"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 )
@@ -23,9 +26,21 @@ func (c *Client) euroInflation(ctx context.Context) ([]SeriesPoint, error) {
 
 // eurostatCSV читает SDMX-CSV Евростата: колонки TIME_PERIOD («2026-10») и OBS_VALUE; даты — первое число месяца.
 func (c *Client) eurostatCSV(ctx context.Context, url string) ([]SeriesPoint, error) {
-	body, err := c.getHeaders(ctx, url, map[string]string{"Accept": "text/csv,*/*", "User-Agent": "Mozilla/5.0 (compatible; Zoe personal finance; +local)"})
+	body, err := c.getHeaders(ctx, url, map[string]string{"Accept": "text/csv,*/*", "Accept-Encoding": "identity", "User-Agent": "Mozilla/5.0 (compatible; Zoe personal finance; +local)"})
 	if err != nil {
 		return nil, err
+	}
+	// Евростат иногда присылает gzip без заголовка Content-Encoding — Go такое сам не распаковывает: узнаём по сигнатуре 1f 8b
+	if len(body) > 2 && body[0] == 0x1f && body[1] == 0x8b {
+		zr, err := gzip.NewReader(bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("ответ gzip не распаковывается: %w", err)
+		}
+		plain, err := io.ReadAll(io.LimitReader(zr, maxBody+1))
+		if err != nil {
+			return nil, fmt.Errorf("ответ gzip не распаковывается: %w", err)
+		}
+		body = plain
 	}
 	head := func() string { // начало ответа для сообщения об ошибке
 		h := strings.Join(strings.Fields(string(body)), " ")
