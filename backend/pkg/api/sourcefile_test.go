@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -290,4 +291,65 @@ func post2(t *testing.T, h http.HandlerFunc) (int, []byte) {
 	w := httptest.NewRecorder()
 	h(w, httptest.NewRequest(http.MethodGet, "/api/sync/status", nil))
 	return w.Code, w.Body.Bytes()
+}
+
+// История C2C-ордеров — дополнение к выписке того же счёта: свой файл .zoe в папке binance, имя и профиль счёта не меняет,
+// после сброса кеша возвращается через «Загрузить».
+func TestP2PHistoryIsSourceOfBinanceAccount(t *testing.T) {
+	t.Setenv("ECONOMIC_SOURCES_DIR", t.TempDir())
+	s := newICUServer(t)
+	now := time.Now().UTC().Truncate(time.Minute)
+	bnF, err := parseSource(stmtName, []byte(stmtFor(now.Add(-3*time.Hour), now.Add(-2*time.Hour))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store().Put(bnF); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.applySource(bnF); err != nil {
+		t.Fatal(err)
+	}
+	profile := s.storage.BinanceProfile()
+
+	csv := "\xef\xbb\xbfНомер ордера,Тип ордеру,Актив,Тип фіатної валюти,Загальна ціна,Ціна,Кількість,Обмінний курс,Комісія мейкера,Комісія тейкера,Контрагент,Статус,Час створення\n" +
+		"22891811517163294720,Buy,USDT,UAH,3997,44.9,89.02,,,0.17,X,Completed,2026-05-24 12:27:19\n"
+	pf, err := parseSource("Binance-Історія-C2C-ордерів-202611131224(UTC+2)-part1-of1.csv", []byte(csv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pf.Kind != source.KindP2P || pf.AccountID != db.BinanceAccountID || pf.Card != "binance" || pf.Profile != "" || pf.Count() != 1 {
+		t.Fatalf("%+v", pf)
+	}
+	if _, added, err := store().Put(pf); err != nil || !added {
+		t.Fatalf("put: %v %v", added, err)
+	}
+	if _, err := s.applySource(pf); err != nil {
+		t.Fatal(err)
+	}
+	if s.storage.BinanceProfile() != profile || profile == "" {
+		t.Fatalf("профиль счёта задаёт выписка, а не история ордеров: %q → %q", profile, s.storage.BinanceProfile())
+	}
+	if got, _ := s.storage.BinanceP2P(); len(got) != 1 || got[0].Total != 3997 || got[0].T != 1779618439000 {
+		t.Fatalf("%+v", got)
+	}
+
+	if err := s.storage.WipeCache(); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	s.HandleLoadSources(rec, httptest.NewRequest(http.MethodPost, "/api/sources/load", nil))
+	if got, _ := s.storage.BinanceP2P(); len(got) != 1 {
+		t.Fatalf("после «Загрузить» ордера вернулись: %+v %s", got, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	s.HandleBinanceP2P(rec, httptest.NewRequest(http.MethodGet, "/api/binance/p2p", nil))
+	if !strings.Contains(rec.Body.String(), `"total":3997`) {
+		t.Fatalf("%s", rec.Body.String())
+	}
+	// инспекция не требует решать алиас: имя счёта история ордеров не задаёт
+	for _, p := range s.inspect(pf, db.BinanceAccountID).Problems {
+		if p.Code == "alias" {
+			t.Fatalf("алиас: %+v", p)
+		}
+	}
 }

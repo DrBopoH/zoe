@@ -108,7 +108,7 @@ const doDelete = (acc, f) => run('del', async () => {
 })
 
 const ORIGIN = { csv: 'CSV', pdf: 'PDF', report: 'ОТЧЁТ', binance: 'ВЫПИСКА', api: 'API' }
-const originLabel = (f) => (f.kind === 'binance-series' ? 'РЯД API' : ORIGIN[f.origin] || f.origin)
+const originLabel = (f) => (f.kind === 'binance-series' ? 'РЯД API' : f.kind === 'binance-p2p' ? 'P2P' : ORIGIN[f.origin] || f.origin)
 const originTone = (f) => (f.origin === 'api' ? 'text-sky-300 border-sky-500/40' : 'text-slate-300 border-slate-600')
 
 const period = (f) => formatPeriod(f.from, f.to)

@@ -37,6 +37,7 @@ const (
 	KindBank    = "bank"
 	KindBinance = "binance"
 	KindICU     = "icu"
+	KindP2P     = "binance-p2p"    // история C2C-ордеров Binance: гривневая сторона P2P-покупок, дополняет выписку того же счёта
 	KindSeries  = "binance-series" // минутный ряд оценки портфеля Binance: данные API, собираются 10–20 минут
 
 	OriginCSV     = "csv"
@@ -54,6 +55,22 @@ type BNRow struct {
 	Asset   string  `json:"asset"`
 	Delta   float64 `json:"delta"`
 	Note    string  `json:"note,omitempty"`
+}
+
+// P2PRow — C2C-ордер Binance как в истории ордеров.
+type P2PRow struct {
+	ID           string  `json:"id"`
+	Side         string  `json:"side"`
+	Asset        string  `json:"asset"`
+	Fiat         string  `json:"fiat"`
+	Total        float64 `json:"total"`
+	Price        float64 `json:"price"`
+	Qty          float64 `json:"qty"`
+	Rate         float64 `json:"rate,omitempty"`
+	Fee          float64 `json:"fee"`
+	Counterparty string  `json:"counterparty,omitempty"`
+	Status       string  `json:"status"`
+	T            int64   `json:"t"` // мс
 }
 
 // Flow — запись журнала брокерского отчёта.
@@ -103,8 +120,9 @@ type File struct {
 	Account *mono.AccountDTO        `json:"account,omitempty"`
 	Txs     []mono.StatementItemDTO `json:"txs,omitempty"`
 
-	Profile string  `json:"profile,omitempty"` // Binance: идентификатор профиля
-	Rows    []BNRow `json:"rows,omitempty"`
+	Profile string   `json:"profile,omitempty"` // Binance: идентификатор профиля
+	Rows    []BNRow  `json:"rows,omitempty"`
+	Orders  []P2PRow `json:"orders,omitempty"` // KindP2P
 
 	Contract     string  `json:"contract,omitempty"` // ICU
 	ContractDate int64   `json:"contract_date,omitempty"`
@@ -141,6 +159,9 @@ func (f *File) span() (from, to int64) {
 	for _, r := range f.Rows {
 		note(r.T / 1000)
 	}
+	for _, o := range f.Orders {
+		note(o.T / 1000)
+	}
 	for _, fl := range f.Flows {
 		note(fl.Time)
 	}
@@ -173,7 +194,7 @@ func (f *File) Cover() (from, to int64) {
 
 // Count — сколько записей в файле.
 func (f *File) Count() int {
-	n := len(f.Txs) + len(f.Rows) + len(f.Flows)
+	n := len(f.Txs) + len(f.Rows) + len(f.Orders) + len(f.Flows)
 	if f.Series != nil {
 		n += len(f.Series.Vals)
 	}

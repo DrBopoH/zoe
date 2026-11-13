@@ -148,6 +148,7 @@ func (s *Storage) initCache() error {
 		`CREATE INDEX IF NOT EXISTS idx_tx_account ON transactions(account_id)`,
 		coverageSchema,
 		binanceCacheSchema,
+		binanceP2PSchema,
 		icuCacheSchema,
 		marketCacheSchema,
 		macroCacheSchema,
@@ -415,7 +416,7 @@ func (s *Storage) WipeCache() error {
 	if _, err := s.cacheDB.Exec(`DELETE FROM transactions`); err != nil {
 		return err
 	}
-	for _, t := range []string{"sync_coverage", "binance_minutes", "binance_state", "binance_ledger", "icu_flows", "market_bonds", "accounts"} {
+	for _, t := range []string{"sync_coverage", "binance_minutes", "binance_state", "binance_ledger", "binance_p2p", "icu_flows", "market_bonds", "accounts"} {
 		if _, err := s.cacheDB.Exec(`DELETE FROM ` + t); err != nil {
 			return err
 		}
