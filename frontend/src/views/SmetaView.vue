@@ -87,8 +87,10 @@ const monthlyDelta = computed(() => {
       <SyncButton class="ml-auto" />
     </section>
 
-    <CapitalStructure :accounts="accounts" :rates="rates" />
-    <BondPortfolio :positions="positions" :macro="macro.series.value" :today="today" :assume="assume" />
+    <div class="grid gap-4 lg:grid-cols-2 items-stretch">
+      <CapitalStructure :accounts="accounts" :rates="rates" />
+      <BondPortfolio :positions="positions" :macro="macro.series.value" :today="today" :assume="assume" />
+    </div>
     <CandleChart :transactions="chartTransactions" :binance-ids="binanceIdList" :total-value-u-a-h="chartTotalUAH" :events="payEvents" />
   </main>
 </template>

@@ -20,14 +20,14 @@ const yearsText = (y) => `${String(y).replace('.', ',')} г.`
 </script>
 
 <template>
-  <section class="bg-slate-900/60 border border-slate-800 rounded p-5 space-y-4">
+  <section class="bg-slate-900/60 border border-slate-800 rounded p-5 flex flex-col gap-3">
     <div class="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
       <div class="text-[10px] uppercase tracking-wider font-bold text-slate-500">Портфель ОВДП</div>
       <div v-if="st && st.next" class="text-xs text-slate-400">Ближайшая выплата <b class="text-slate-200">{{ formatDateLong(st.next.date) }}</b> · <b class="text-emerald-400 tabular-nums">+{{ money(st.next.amount) }}</b></div>
     </div>
     <div v-if="!st" class="text-xs text-slate-600 uppercase tracking-wider py-4 text-center">Нет облигаций со ставкой и погашением в справочнике ICU</div>
     <template v-else>
-      <div class="grid gap-3 grid-cols-2 md:grid-cols-3 xl:grid-cols-6 text-xs">
+      <div class="grid gap-3 grid-cols-2 sm:grid-cols-3 auto-rows-fr flex-1 text-xs">
         <div class="bg-slate-950/40 rounded p-3" :title="`Стоимость позиций по цене покупки`">
           <div class="text-slate-500">В облигациях</div>
           <div class="text-lg font-bold text-slate-100 tabular-nums">{{ money(st.value) }}</div>
