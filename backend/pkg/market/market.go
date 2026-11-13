@@ -89,16 +89,18 @@ func (c *Client) now() time.Time {
 }
 
 func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
-	return c.getAccept(ctx, url, "application/json")
+	return c.getHeaders(ctx, url, map[string]string{"Accept": "application/json"})
 }
 
-// getAccept — тот же запрос с нужным Accept (Евростат отдаёт CSV по параметру format, но Accept: application/json ему не нужен).
-func (c *Client) getAccept(ctx context.Context, url, accept string) ([]byte, error) {
+// getHeaders — тот же запрос со своими заголовками (Евростату нужен Accept для CSV и внятный User-Agent: стандартный Go он не любит).
+func (c *Client) getHeaders(ctx context.Context, url string, headers map[string]string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", accept)
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 	h := c.HTTP
 	if h == nil {
 		h = http.DefaultClient

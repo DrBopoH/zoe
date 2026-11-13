@@ -23,20 +23,23 @@ func (c *Client) euroInflation(ctx context.Context) ([]SeriesPoint, error) {
 
 // eurostatCSV читает SDMX-CSV Евростата: колонки TIME_PERIOD («2026-10») и OBS_VALUE; даты — первое число месяца.
 func (c *Client) eurostatCSV(ctx context.Context, url string) ([]SeriesPoint, error) {
-	body, err := c.getAccept(ctx, url, "text/csv,*/*")
+	body, err := c.getHeaders(ctx, url, map[string]string{"Accept": "text/csv,*/*", "User-Agent": "Mozilla/5.0 (compatible; Zoe personal finance; +local)"})
 	if err != nil {
 		return nil, err
+	}
+	head := func() string { // начало ответа для сообщения об ошибке
+		h := strings.Join(strings.Fields(string(body)), " ")
+		if len(h) > 160 {
+			h = h[:160]
+		}
+		return h
 	}
 	rd := csv.NewReader(strings.NewReader(string(body)))
 	rd.FieldsPerRecord = -1 // строки SDMX-CSV бывают разной длины (хвост флагов)
 	rd.LazyQuotes = true
 	rows, err := rd.ReadAll()
 	if err != nil || len(rows) < 2 {
-		head := strings.Join(strings.Fields(string(body)), " ")
-		if len(head) > 120 {
-			head = head[:120]
-		}
-		return nil, fmt.Errorf("пустой или неверный ответ (начало: %q, ошибка разбора: %v)", head, err)
+		return nil, fmt.Errorf("пустой или неверный ответ (начало: %q, ошибка разбора: %v)", head(), err)
 	}
 	ti, vi := -1, -1
 	for i, h := range rows[0] {
@@ -48,7 +51,7 @@ func (c *Client) eurostatCSV(ctx context.Context, url string) ([]SeriesPoint, er
 		}
 	}
 	if ti < 0 || vi < 0 {
-		return nil, fmt.Errorf("нет колонок TIME_PERIOD и OBS_VALUE")
+		return nil, fmt.Errorf("нет колонок TIME_PERIOD и OBS_VALUE (начало ответа: %q)", head())
 	}
 	var out []SeriesPoint
 	for _, r := range rows[1:] {
@@ -66,7 +69,7 @@ func (c *Client) eurostatCSV(ctx context.Context, url string) ([]SeriesPoint, er
 		out = append(out, SeriesPoint{Series: SerEUCPIYoY, Date: per + "-01", Value: v})
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("в ответе нет месячных значений")
+		return nil, fmt.Errorf("в ответе нет месячных значений (начало ответа: %q)", head())
 	}
 	return out, nil
 }
