@@ -12,7 +12,7 @@ const props = defineProps({
   today: { type: String, required: true },
   running: { type: Boolean, default: false }
 })
-const { refresh, startError } = useMarketRefresh(() => 'crypto')
+const { refresh } = useMarketRefresh(() => 'crypto')
 const EMPTY = 'Нет данных. Нажми «Обновить»: подтянутся цены Binance и индекс страха и жадности'
 
 // Просадку считаем на месте, из цен: отдельные ряды в кеш не пишем
@@ -40,7 +40,6 @@ const has = computed(() => Object.values(props.crypto).some((a) => a && a.length
         <template v-else>ОБНОВИТЬ</template>
       </UiButton>
     </section>
-    <div v-if="startError" class="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-3 rounded text-xs">{{ startError }}</div>
 
     <MacroPanel title="Bitcoin, $" unit="$" :series="crypto" :today="today" :ids="['crypto_btc']" log :empty="EMPTY">
       <template #summary>

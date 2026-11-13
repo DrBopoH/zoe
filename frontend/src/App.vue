@@ -4,7 +4,7 @@ import AppHeader from './components/AppHeader.vue'
 import SideMenu from './components/SideMenu.vue'
 import ScrollJumpButtons from './components/ScrollJumpButtons.vue'
 import ToastStack from './components/ToastStack.vue'
-import { pushToast } from './composables/useToasts.js'
+import { pushToast, pushRequestError } from './composables/useToasts.js'
 import { useWheelScroll } from './composables/useWheelScroll.js'
 import SmetaView from './views/SmetaView.vue'
 import MarketView from './views/MarketView.vue'
@@ -153,12 +153,11 @@ provide('refreshData', fetchData)
 
 const startFullSync = async () => {
   if (isSyncing.value) return
-  errorMsg.value = ''
   try {
     await apiSend('POST', syncPath(autoSave.value))
     await fetchStatus()
   } catch (err) {
-    errorMsg.value = err.message
+    pushRequestError('Не удалось запустить синк', err) // тост сам уходит; плашка «ERROR» остаётся только для загрузки данных
   }
 }
 

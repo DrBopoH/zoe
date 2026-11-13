@@ -12,7 +12,7 @@ const props = defineProps({
   today: { type: String, required: true },
   running: { type: Boolean, default: false }
 })
-const { refresh, startError } = useMarketRefresh(() => 'usecon')
+const { refresh } = useMarketRefresh(() => 'usecon')
 const EMPTY = 'Нет данных. Нажми «Обновить»: подтянется экономика США из FRED'
 const monthOf = (p) => (p ? `${p.d.slice(5, 7)}.${p.d.slice(0, 4)}` : '')
 const quarterOf = (p) => (p ? `${Math.floor((Number(p.d.slice(5, 7)) - 1) / 3) + 1} кв. ${p.d.slice(0, 4)}` : '')
@@ -44,7 +44,6 @@ const has = computed(() => Object.values(props.econ).some((a) => a && a.length))
         <template v-else>ОБНОВИТЬ</template>
       </UiButton>
     </section>
-    <div v-if="startError" class="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-3 rounded text-xs">{{ startError }}</div>
 
     <MacroPanel title="Безработица США" :series="econ" :today="today" :ids="['us_unrate']" :empty="EMPTY">
       <template #summary>

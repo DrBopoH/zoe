@@ -65,11 +65,11 @@ const lostFor = computed(() => {
         v-for="t in toasts"
         :key="t.id"
         class="ui-push"
-        :class="t.kind === 'err' ? 'ui-push--err' : 'ui-push--ok'"
+        :class="{ 'ui-push--err': t.kind === 'err', 'ui-push--warn': t.kind === 'warn', 'ui-push--ok': t.kind === 'ok' }"
       >
         <div class="flex items-start justify-between gap-3">
           <div class="space-y-1 min-w-0">
-            <div class="text-xs font-bold uppercase tracking-wider" :class="t.kind === 'err' ? 'text-rose-300' : 'text-emerald-300'">{{ t.title }}</div>
+            <div class="text-xs font-bold uppercase tracking-wider" :class="{ 'text-rose-300': t.kind === 'err', 'text-amber-300': t.kind === 'warn', 'text-emerald-300': t.kind === 'ok' }">{{ t.title }}</div>
             <div v-for="(l, i) in t.lines" :key="i" class="text-[10px] text-slate-300 break-words">{{ l }}</div>
           </div>
           <button type="button" class="text-slate-400 hover:text-white cursor-pointer shrink-0" aria-label="Закрыть" @click="dismissToast(t.id)">
