@@ -14,6 +14,10 @@ func euServer(t *testing.T, body string) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "prc_hicp_minr/M.RCH_A.TOTAL.EA") {
+			if strings.HasPrefix(r.UserAgent(), "Go-http-client") {
+				http.Error(w, "bots not welcome", http.StatusForbidden) // как Евростат: стандартный User-Agent Go не годится
+				return
+			}
 			w.Write([]byte(body))
 			return
 		}
@@ -47,6 +51,10 @@ func TestEuroInflationErrorsAreExplained(t *testing.T) {
 	}
 	if _, err := euClient(euServer(t, euHead)).euroInflation(context.Background()); err == nil {
 		t.Fatal("пустой набор — ошибка")
+	}
+	// страница вместо CSV (защита от ботов): понятная ошибка с началом ответа
+	if _, err := euClient(euServer(t, "<html>\n<body>blocked</body>\n</html>\n")).euroInflation(context.Background()); err == nil || !strings.Contains(err.Error(), "blocked") {
+		t.Fatalf("err=%v", err)
 	}
 	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "x", http.StatusBadGateway) }))
 	t.Cleanup(bad.Close)
