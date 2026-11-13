@@ -13,7 +13,7 @@ const props = defineProps({
   today: { type: String, required: true },
   running: { type: Boolean, default: false }
 })
-const { refresh, startError } = useMarketRefresh(() => 'fx')
+const { refresh } = useMarketRefresh(() => 'fx')
 const all = computed(() => ({ ...props.fx, xau_usd: goldUsd(props.fx) }))
 const USD_EUR = ['usd_uah', 'eur_uah']
 const GOLD_UAH = ['xau_uah']
@@ -41,7 +41,6 @@ const dateText = (iso) => (iso ? iso.split('-').reverse().join('.') : '')
         <template v-else>ОБНОВИТЬ</template>
       </UiButton>
     </section>
-    <div v-if="startError" class="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-3 rounded text-xs">{{ startError }}</div>
 
     <MacroPanel title="Доллар и евро к гривне" :series="all" :today="today" :ids="USD_EUR" unit="₴" empty="Нет данных. Нажми «Обновить»: подтянутся курсы НБУ">
       <template #summary>

@@ -5,7 +5,9 @@ async function request(method, path, opts) {
   const res = await fetch(`${API_BASE}${path}`, { method, ...opts })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
-    throw new Error(text || `${method} ${path}: ${res.status}`)
+    const err = new Error(text || `${method} ${path}: ${res.status}`)
+    err.status = res.status // 409 — «уже идёт»: это не поломка, интерфейс показывает её иначе
+    throw err
   }
   return res
 }

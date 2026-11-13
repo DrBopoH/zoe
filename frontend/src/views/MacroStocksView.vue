@@ -14,7 +14,7 @@ const props = defineProps({
   today: { type: String, required: true },
   running: { type: Boolean, default: false }
 })
-const { refresh, startError } = useMarketRefresh(() => 'stocks')
+const { refresh } = useMarketRefresh(() => 'stocks')
 const EMPTY = 'Нет данных. Нажми «Обновить»: подтянутся индексы S&P 500, NASDAQ и Dow Jones'
 
 const withDd = computed(() => ({
@@ -43,7 +43,6 @@ const has = computed(() => Object.values(props.stocks).some((a) => a && a.length
         <template v-else>ОБНОВИТЬ</template>
       </UiButton>
     </section>
-    <div v-if="startError" class="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-3 rounded text-xs">{{ startError }}</div>
 
     <MacroPanel title="S&P 500, пункты (с 1871 года)" unit="п." :series="stocks" :today="today" :ids="['stock_sp500']" benner log :empty="EMPTY">
       <template #summary>

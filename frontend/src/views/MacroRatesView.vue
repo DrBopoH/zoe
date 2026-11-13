@@ -11,7 +11,7 @@ const props = defineProps({
   today: { type: String, required: true },
   running: { type: Boolean, default: false }
 })
-const { refresh, startError } = useMarketRefresh(() => 'rates')
+const { refresh } = useMarketRefresh(() => 'rates')
 const IDS = ['policy_rate', 'overnight_cd', 'overnight_loans']
 const sum = computed(() => macroSummary(props.series, props.today))
 </script>
@@ -25,7 +25,6 @@ const sum = computed(() => macroSummary(props.series, props.today))
         <template v-else>ОБНОВИТЬ</template>
       </UiButton>
     </section>
-    <div v-if="startError" class="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-3 rounded text-xs">{{ startError }}</div>
     <MacroPanel title="Ключевые ставки НБУ" :series="series" :today="today" :ids="IDS">
       <template #summary>
         <span class="text-slate-400">Облікова ставка <b class="text-emerald-400 tabular-nums">{{ plainPct(sum.policy) }}</b></span>

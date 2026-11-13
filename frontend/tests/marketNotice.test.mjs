@@ -21,13 +21,13 @@ test('нет итога или старый итог — тостов нет', (
   assert.deepEqual(marketNotice(0, { finished_at: 5 }), { seenAt: 0, toasts: [] }) // сервер без поля feeds
 })
 
-test('новый итог: по тосту на источник, упавший красный и не исчезает сам, успех — по таймеру', () => {
+test('новый итог: по тосту на источник, упавший красный и дольше успеха, но тоже уходит сам', () => {
   const r = marketNotice(100, last(200, [ok, bad]))
   assert.equal(r.seenAt, 200)
   assert.equal(r.toasts.length, 2)
   assert.deepEqual(r.toasts[0], { kind: 'ok', title: 'ОВДП · НБУ', lines: ['Бумаг в кеше: 184'], ttl: 6000 })
   assert.equal(r.toasts[1].kind, 'err')
-  assert.equal(r.toasts[1].ttl, undefined)
+  assert.equal(r.toasts[1].ttl, 12000)
   assert.deepEqual(r.toasts[1].lines, ['HTTP 502'])
 })
 

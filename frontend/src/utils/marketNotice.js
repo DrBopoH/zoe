@@ -9,7 +9,7 @@ export const marketNotice = (seenAt, last) => {
   if (seenAt === null) return { seenAt: last.finished_at, toasts: [] }
   if (last.finished_at <= seenAt) return { seenAt, toasts: [] }
   const toasts = last.feeds.map((f) => f.state === 'error'
-    ? { kind: 'err', title: `${f.title}: не обновилось`, lines: [f.error || 'ошибка источника'] }
+    ? { kind: 'err', title: `${f.title}: не обновилось`, lines: [f.error || 'ошибка источника'], ttl: 12000 }
     : { kind: 'ok', title: f.title, lines: [`${cap(f.unit || 'бумаг')} в кеше: ${f.fetched}`], ttl: 6000 })
   return { seenAt: last.finished_at, toasts }
 }

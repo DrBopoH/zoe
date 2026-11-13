@@ -11,7 +11,7 @@ const props = defineProps({
   today: { type: String, required: true },
   running: { type: Boolean, default: false }
 })
-const { refresh, startError } = useMarketRefresh(() => 'inflation')
+const { refresh } = useMarketRefresh(() => 'inflation')
 const YOY = ['cpi_yoy', 'core_yoy']
 const MOM = ['cpi_mom', 'core_mom']
 const sum = computed(() => macroSummary(props.series, props.today))
@@ -30,7 +30,6 @@ const month = computed(() => (sum.value.cpiMonth ? `${sum.value.cpiMonth.slice(5
         <template v-else>ОБНОВИТЬ</template>
       </UiButton>
     </section>
-    <div v-if="startError" class="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-3 rounded text-xs">{{ startError }}</div>
     <MacroPanel title="Инфляция к тому же месяцу прошлого года" :series="series" :today="today" :ids="YOY">
       <template #summary>
         <span class="text-slate-400">Инфляция г/г <b class="text-amber-300 tabular-nums">{{ plainPct(sum.cpi) }}</b></span>

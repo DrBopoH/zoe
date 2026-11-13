@@ -29,7 +29,7 @@ const source = computed(() => SOURCES.find((s) => s.key === section.value) || SO
 
 const lists = ref({}) // source → список; у каждого источника свой, чтобы возврат на вкладку не мигал пустотой
 const loadError = ref('')
-const { refresh, startError } = useMarketRefresh(() => section.value)
+const { refresh } = useMarketRefresh(() => section.value)
 
 const load = async (src) => {
   try {
@@ -235,7 +235,7 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
     <GrowthChart v-if="list && (chartItems.length || chartMatured.length)" :items="chartItems" :matured="showMatured ? chartMatured : NONE" :amount="amountN" :currency="chartCurrency" :today="today" :spreads="spreads" />
     <div v-if="chartNote" class="text-[11px] text-slate-500 -mt-2">{{ chartNote }}</div>
 
-    <div v-if="startError || loadError" class="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-3 rounded text-xs">{{ startError || loadError }}</div>
+    <div v-if="loadError" class="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-3 rounded text-xs">{{ loadError }}</div>
 
     <div class="border border-slate-800 rounded overflow-x-auto bg-slate-900/40">
       <table class="w-full text-xs">

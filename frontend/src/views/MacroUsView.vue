@@ -12,7 +12,7 @@ const props = defineProps({
   today: { type: String, required: true },
   running: { type: Boolean, default: false }
 })
-const { refresh, startError } = useMarketRefresh(() => 'fed')
+const { refresh } = useMarketRefresh(() => 'fed')
 const RATES = ['fed_funds', 'fed_target', 'ust_10y']
 const YOY = ['us_cpi_yoy']
 const MOM = ['us_cpi_mom']
@@ -39,7 +39,6 @@ const uaReal = computed(() => (uaPolicy.value !== null && uaCpi.value !== null ?
         <template v-else>ОБНОВИТЬ</template>
       </UiButton>
     </section>
-    <div v-if="startError" class="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-3 rounded text-xs">{{ startError }}</div>
 
     <MacroPanel title="Ставка ФРС и доходность 10-летних Treasury" :series="us" :today="today" :ids="RATES" empty="Нет данных. Нажми «Обновить»: подтянутся ряды США из FRED" hint="Колесо: масштаб, перетаскивание: сдвиг, двойной клик: сброс. Ставка ФРС — эффективная по месяцам; ступенька — верхняя граница целевого коридора с 2008 года">
       <template #summary>

@@ -629,22 +629,71 @@ cmd_pr() {
   gh pr view "$br" --json url -q .url
 }
 
+# pr_state <PR> — «состояние|mergeable|mergeStateStatus|проверок|идут|упало» одной строкой; код 1 и текст ошибки, если GitHub не ответил
+pr_state() {
+  gh pr view "$1" --json state,mergeable,mergeStateStatus,statusCheckRollup -q '(.statusCheckRollup // []) as $c | [.state, .mergeable, .mergeStateStatus, ($c|length), ([$c[]|select((.status != null and .status != "COMPLETED") or .state == "PENDING" or .state == "EXPECTED")]|length), ([$c[]|select(.conclusion == "FAILURE" or .conclusion == "TIMED_OUT" or .conclusion == "CANCELLED" or .conclusion == "STARTUP_FAILURE" or .conclusion == "ACTION_REQUIRED" or .state == "FAILURE" or .state == "ERROR")]|length)] | map(tostring) | join("|")' 2>&1
+}
+
+# wait_pr <PR> — ждёт, пока PR можно вливать: проверки прошли и конфликтов нет. Сам из ожидания НЕ выходит (кроме упавших проверок и закрытого PR):
+# при каждой смене причины пишет, чего ждёт (конфликты, CI не стартовал, идут проверки, нет связи), раз в минуту напоминает. Выход — Ctrl+C (ловит вызывающий).
+# PR_MERGED=1, если PR уже влит.
+wait_pr() {
+  local pr=$1 out st state mg ms total pend bad msg last="" beat=$SECONDS t0=$SECONDS url
+  PR_MERGED=0
+  url=$(gh pr view "$pr" --json url -q .url 2>/dev/null || true)
+  while :; do
+    if out=$(pr_state "$pr"); then
+      st=$out
+      IFS='|' read -r state mg ms total pend bad <<<"$st"
+      case $state in
+        MERGED) PR_MERGED=1; return 0 ;;
+        CLOSED) die "PR закрыт без слияния: $url" ;;
+      esac
+      if [[ $mg == CONFLICTING || $ms == DIRTY ]]; then
+        msg="конфликты с dev: реши их на GitHub ($url). Ждать буду, пока они не исчезнут"
+      elif (( bad > 0 )); then
+        die "проверки не прошли (упало: $bad). Смотри: gh pr checks $pr — после исправления ./${SELF} merge продолжит"
+      elif [[ $mg == UNKNOWN ]]; then
+        msg="GitHub ещё считает, есть ли конфликты с dev"
+      elif (( total == 0 )); then
+        msg="проверки ещё не запустились (CI в очереди или ждёт обновления PR)"
+        if (( SECONDS - t0 > 90 )); then msg+=": если не стартуют — открой PR и посмотри, что мешает ($url)"; fi
+      elif (( pend > 0 )); then
+        msg="идут проверки: ещё не закончено $pend из $total"
+      else
+        return 0
+      fi
+    else
+      msg="нет связи с GitHub, повторяю (${out%%$'\n'*})"
+    fi
+    if [[ $msg != "$last" ]]; then
+      printf '[%s] … %s\n' "$(date +%T)" "$msg"; last=$msg; beat=$SECONDS
+    elif (( SECONDS - beat >= 60 )); then
+      printf '[%s] … всё ещё жду (%d:%02d): %s\n' "$(date +%T)" $(( (SECONDS - t0) / 60 )) $(( (SECONDS - t0) % 60 )) "$msg"; beat=$SECONDS
+    fi
+    sleep 5
+  done
+}
+
 # ./clc.sh merge — дождаться проверок PR текущей ветки → Squash and merge с заголовком PR → локальный dev ← origin/dev
-#   wip-ветка с атомарными коммитами остаётся локально
+#   wip-ветка с атомарными коммитами остаётся локально. Ожидание не обрывается само: пишет, чего ждёт (конфликты, CI…); выход — Ctrl+C, PR остаётся открытым
 cmd_merge() {
   need_gh
   local br; br=$(cur_branch)
   [[ $br == wip/* ]] || die "только из wip-ветки"
   [[ $(gh pr view "$br" --json state -q .state 2>/dev/null || true) == OPEN ]] || die "нет открытого PR: ./${SELF} pr \"сводка\""
   local title; title=$(gh pr view "$br" --json title -q .title)
-  local i out
-  for i in $(seq 1 20); do
-    out=$(gh pr checks "$br" 2>&1 || true)
-    if grep -qi 'no checks reported' <<<"$out"; then sleep 3; else break; fi
+  trap 'echo; echo "■ прервано. PR остался открытым, продолжить: ./'"${SELF}"' merge"; exit 130' INT
+  echo "… жду проверки (Ctrl+C — выйти, PR останется открытым)"
+  local out
+  while :; do
+    wait_pr "$br"
+    if (( PR_MERGED )); then break; fi
+    if out=$(gh pr merge "$br" --squash --subject "$title" --body "" 2>&1); then break; fi
+    echo "[$(date +%T)] … слияние не прошло: ${out%%$'\n'*} — проверю состояние и повторю"
+    sleep 10
   done
-  echo "… жду проверки"
-  gh pr checks "$br" --watch --interval 5 || die "проверки не прошли — PR не вливаю. Смотри: gh pr checks"
-  gh pr merge "$br" --squash --subject "$title" --body "" >/dev/null
+  trap - INT
   git fetch -q --prune origin
   git branch -f dev origin/dev
   echo "✓ dev ← $title"
@@ -711,12 +760,10 @@ cmd_build() {
   fi
   [[ -n $pr ]] || die "не нашёл PR dev → build"
   gh pr view "$pr" --json url -q .url
-  # проверки PR появляются не сразу: ждём, пока они хотя бы встанут в очередь
-  for i in $(seq 1 30); do
-    gh pr checks "$pr" 2>&1 | grep -qiE 'no checks reported|no required checks' && sleep 3 || break
-  done
-  echo "… жду проверки PR #$pr"
-  gh pr checks "$pr" --watch --interval 5 || die "проверки PR не прошли — билд не вливаю. Смотри: gh pr checks $pr"
+  trap "echo; echo '■ прервано. PR #$pr остался открытым; ./${SELF} build продолжит с него'; exit 130" INT
+  echo "… жду проверки PR #$pr (Ctrl+C — выйти)"
+  wait_pr "$pr"
+  trap - INT
   gh pr merge "$pr" --merge --subject "$title" --body "" >/dev/null || die "GitHub не дал смержить PR #$pr (правила ветки): смотри его в вебе и запусти ./${SELF} build ещё раз — он продолжит с этого PR"
   git fetch -q --prune origin
   local m; m=$(git rev-parse origin/build)
