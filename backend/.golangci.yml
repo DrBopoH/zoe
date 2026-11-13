@@ -1,0 +1,36 @@
+version: "2"
+
+# Линтер ловит то, что компилятор пропускает. Настройка — без шума: правила, которые в этом проекте дают только ложные срабатывания, выключены явно.
+linters:
+  default: standard
+  settings:
+    errcheck:
+      # Закрытие и откат в defer, запись в ответ HTTP и в тестовые серверы: ошибку обработать нечем, повторять незачем.
+      exclude-functions:
+        - (io.Closer).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+        - (*database/sql.Tx).Rollback
+        - (net/http.ResponseWriter).Write
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+    staticcheck:
+      checks:
+        - all
+        - -ST1000 # комментарий к пакету
+        - -ST1003 # стиль имён
+        - -ST1005 # «Binance …», «Mono …» в тексте ошибки — имена собственные, и фронт показывает эти тексты как есть
+        - -ST1016 # одинаковые имена приёмников
+        - -ST1020
+        - -ST1021
+        - -ST1022
+        - -QF1002 # tagged switch: читаемость выше
+  exclusions:
+    rules:
+      # В тестах подготовка данных (Save…, Create…) без проверки ошибки: если запись упала, это покажут проверки результата ниже.
+      # В боевом коде errcheck остаётся включённым.
+      - path: _test\.go
+        linters:
+          - errcheck

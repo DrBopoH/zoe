@@ -272,8 +272,12 @@ func (s Store) Put(f *File) (string, bool, error) {
 	if len(b) > gzipOver { // ряд Binance — миллионы цифр: сжимаем (Read понимает оба вида)
 		var z bytes.Buffer
 		zw := gzip.NewWriter(&z)
-		zw.Write(b)
-		zw.Close()
+		if _, err := zw.Write(b); err != nil {
+			return "", false, err
+		}
+		if err := zw.Close(); err != nil {
+			return "", false, err
+		}
 		b = z.Bytes()
 	}
 	tmp := dst + ".tmp"
@@ -281,7 +285,7 @@ func (s Store) Put(f *File) (string, bool, error) {
 		return "", false, err
 	}
 	if err := os.Rename(tmp, dst); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp) // уборка временного файла: ошибка Rename важнее
 		return "", false, err
 	}
 	return dst, true, nil

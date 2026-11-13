@@ -69,8 +69,12 @@ func TestEuroInflationUnpacksGzipWithoutContentEncoding(t *testing.T) {
 	// как у Евростата: тело сжато gzip, заголовка Content-Encoding нет
 	var buf bytes.Buffer
 	zw := gzip.NewWriter(&buf)
-	zw.Write([]byte(euHead + "X,d,M,RCH_A,TOTAL,EA,2026-10,4.0,e,\n"))
-	zw.Close()
+	if _, err := zw.Write([]byte(euHead + "X,d,M,RCH_A,TOTAL,EA,2026-10,4.0,e,\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/csv")
 		w.Write(buf.Bytes())
