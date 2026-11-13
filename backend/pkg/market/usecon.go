@@ -19,25 +19,17 @@ const (
 // USEcon — ряды экономики США. Как у USFRED: сбой одного ряда не убивает остальные, ошибка — в Result.Error.
 func (c *Client) USEcon(ctx context.Context, rep Reporter) ([]SeriesPoint, Result) {
 	res := Result{Source: SourceUSEcon}
+	r := c.fredAll(ctx, rep, []fredJob{
+		{"UNRATE", "безработица"}, {"A191RL1Q225SBEA", "рост ВВП"}, {"T10Y2Y", "кривая доходности"}, {"VIXCLS", "индекс страха VIX"}, {"UMCSENT", "настроения потребителей"},
+	})
 	var out []SeriesPoint
-	var errs []string
-	fetch := func(id string, pct int, note string) []fredObs {
-		rep.report(pct, note)
-		obs, sk, err := c.fred(ctx, id)
-		res.Skipped += sk
-		if err != nil {
-			errs = append(errs, err.Error())
-			return nil
-		}
-		return obs
-	}
-	out = append(out, toPoints(SerUSUnrate, fetch("UNRATE", 10, "безработица"))...)
-	out = append(out, toPoints(SerUSGDP, fetch("A191RL1Q225SBEA", 30, "рост ВВП"))...)
-	out = append(out, weekly(toPoints(SerUSSpread, fetch("T10Y2Y", 50, "кривая доходности")))...)
-	out = append(out, weekly(toPoints(SerUSVIX, fetch("VIXCLS", 75, "индекс страха VIX")))...)
-	out = append(out, toPoints(SerUSSentiment, fetch("UMCSENT", 90, "настроения потребителей"))...)
+	out = append(out, toPoints(SerUSUnrate, r.Obs["UNRATE"])...)
+	out = append(out, toPoints(SerUSGDP, r.Obs["A191RL1Q225SBEA"])...)
+	out = append(out, weekly(toPoints(SerUSSpread, r.Obs["T10Y2Y"]))...)
+	out = append(out, weekly(toPoints(SerUSVIX, r.Obs["VIXCLS"]))...)
+	out = append(out, toPoints(SerUSSentiment, r.Obs["UMCSENT"])...)
 	rep.report(95, "")
-	res.Fetched = len(out)
-	res.Error = strings.Join(errs, "; ")
+	res.Fetched, res.Skipped = len(out), r.Skipped
+	res.Error = strings.Join(r.Errs, "; ")
 	return out, res
 }

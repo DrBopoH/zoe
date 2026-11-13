@@ -23,39 +23,19 @@ const (
 // Stocks — ряды фондовых индексов. Сбой одного индекса не убивает остальные, ошибка — в Result.Error.
 func (c *Client) Stocks(ctx context.Context, rep Reporter) ([]SeriesPoint, Result) {
 	res := Result{Source: SourceStocks}
+	r := c.fredAll(ctx, rep, []fredJob{{"SP500", "S&P 500"}, {"NASDAQCOM", "NASDAQ"}, {"DJIA", "Dow Jones"}})
+	errs := r.Errs
 	var out []SeriesPoint
-	var errs []string
-	var fredSP []SeriesPoint
-	for _, f := range []struct {
-		fred, series, note string
-		pct                int
-	}{
-		{"SP500", SerStockSP500, "S&P 500", 15},
-		{"NASDAQCOM", SerStockNasdaq, "NASDAQ", 50},
-		{"DJIA", SerStockDow, "Dow Jones", 80},
-	} {
-		rep.report(f.pct, f.note)
-		obs, sk, err := c.fred(ctx, f.fred)
-		res.Skipped += sk
-		if err != nil {
-			errs = append(errs, err.Error())
-			continue
-		}
-		pts := weekly(toPoints(f.series, obs))
-		if f.series == SerStockSP500 {
-			fredSP = pts // склеим с историей Шиллера ниже
-			continue
-		}
-		out = append(out, pts...)
-	}
-	rep.report(88, "S&P 500: история с 1871 года")
+	out = append(out, weekly(toPoints(SerStockNasdaq, r.Obs["NASDAQCOM"]))...)
+	out = append(out, weekly(toPoints(SerStockDow, r.Obs["DJIA"]))...)
+	rep.report(92, "S&P 500: история с 1871 года")
 	hist, err := c.shillerSP500(ctx)
 	if err != nil {
 		errs = append(errs, err.Error())
 	}
-	out = append(out, stitchHistory(hist, fredSP)...)
+	out = append(out, stitchHistory(hist, weekly(toPoints(SerStockSP500, r.Obs["SP500"])))...) // недельный ряд FRED + месячная история до него
 	rep.report(95, "")
-	res.Fetched = len(out)
+	res.Fetched, res.Skipped = len(out), r.Skipped
 	res.Error = strings.Join(errs, "; ")
 	return out, res
 }

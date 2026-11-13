@@ -3,6 +3,7 @@ package db
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"economic/pkg/market"
 )
@@ -45,5 +46,53 @@ func TestMacroSeriesReplaceWholeSeriesAndKeepOthers(t *testing.T) {
 	}
 	if err := s.SaveMacroSeries(nil, 30); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Ряды фильтруются в SQL: отдаётся только запрошенное, updated_at — по запрошенным рядам; много идентификаторов — обход лимита переменных.
+func TestMacroSeriesFilterAndBigRequest(t *testing.T) {
+	d := t.TempDir()
+	s, err := NewStorage(filepath.Join(d, "c.db"), filepath.Join(d, "k.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.SaveMacroSeries([]market.SeriesPoint{{Series: "a", Date: "2026-01-01", Value: 1}, {Series: "a", Date: "2026-02-01", Value: 2}}, 10)
+	s.SaveMacroSeries([]market.SeriesPoint{{Series: "b", Date: "2026-01-01", Value: 3}}, 20)
+
+	got, upd, err := s.MacroSeries([]string{"a", "нет-такого"})
+	if err != nil || len(got) != 1 || len(got["a"]) != 2 || got["a"][0].Date != "2026-01-01" || upd != 10 {
+		t.Fatalf("%+v %d %v", got, upd, err)
+	}
+	many := make([]string, maxMacroIDs+50)
+	for i := range many {
+		many[i] = "x"
+	}
+	many[0] = "b"
+	got, _, err = s.MacroSeries(many)
+	if err != nil || len(got) != 1 || len(got["b"]) != 1 {
+		t.Fatalf("много идентификаторов: %+v %v", got, err)
+	}
+}
+
+// Большой ряд пишется одной транзакцией с подготовленным запросом.
+func TestSaveMacroSeriesBigSeries(t *testing.T) {
+	d := t.TempDir()
+	s, err := NewStorage(filepath.Join(d, "c.db"), filepath.Join(d, "k.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	pts := make([]market.SeriesPoint, 0, 20000)
+	base := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 20000; i++ {
+		pts = append(pts, market.SeriesPoint{Series: "big", Date: base.AddDate(0, 0, i).Format("2006-01-02"), Value: float64(i)})
+	}
+	if err := s.SaveMacroSeries(pts, 1); err != nil {
+		t.Fatal(err)
+	}
+	got, _, _ := s.MacroSeries([]string{"big"})
+	if len(got["big"]) != 20000 || got["big"][19999].Value != 19999 {
+		t.Fatalf("точек %d", len(got["big"]))
 	}
 }

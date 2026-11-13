@@ -26,30 +26,19 @@ const (
 // USFRED — все ряды США. Сбой одного ряда не убивает остальные: что скачалось — возвращается, ошибка в Result.Error.
 func (c *Client) USFRED(ctx context.Context, rep Reporter) ([]SeriesPoint, Result) {
 	res := Result{Source: SourceUS}
+	r := c.fredAll(ctx, rep, []fredJob{
+		{"FEDFUNDS", "ставка ФРС"}, {"DFEDTARU", "целевая ставка"}, {"CPIAUCSL", "инфляция США"}, {"DGS10", "доходность Treasury"},
+	})
 	var out []SeriesPoint
-	var errs []string
-	fetch := func(id string, pct int, note string) []fredObs {
-		rep.report(pct, note)
-		obs, sk, err := c.fred(ctx, id)
-		res.Skipped += sk
-		if err != nil {
-			errs = append(errs, err.Error())
-			return nil
-		}
-		return obs
-	}
-	for _, p := range fredPoints(SerFedFunds, fetch("FEDFUNDS", 10, "ставка ФРС")) {
-		out = append(out, p)
-	}
-	target := toPoints(SerFedTarget, fetch("DFEDTARU", 30, "целевая ставка"))
-	out = append(out, changePoints(target)...)
-	yoy, mom := cpiChanges(fetch("CPIAUCSL", 55, "инфляция США"))
+	out = append(out, toPoints(SerFedFunds, r.Obs["FEDFUNDS"])...)
+	out = append(out, changePoints(toPoints(SerFedTarget, r.Obs["DFEDTARU"]))...)
+	yoy, mom := cpiChanges(r.Obs["CPIAUCSL"])
 	out = append(out, yoy...)
 	out = append(out, mom...)
-	out = append(out, weekly(toPoints(SerUST10Y, fetch("DGS10", 75, "доходность Treasury")))...)
+	out = append(out, weekly(toPoints(SerUST10Y, r.Obs["DGS10"]))...)
 	rep.report(95, "")
-	res.Fetched = len(out)
-	res.Error = strings.Join(errs, "; ")
+	res.Fetched, res.Skipped = len(out), r.Skipped
+	res.Error = strings.Join(r.Errs, "; ")
 	return out, res
 }
 
