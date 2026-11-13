@@ -206,7 +206,7 @@ type invAccount struct {
 
 // nameRank: файл от человека (имя = псевдоним владельца) важнее служебного снимка API и ряда минут.
 func nameRank(f *source.File) int {
-	if f.Origin == source.OriginAPI || f.Kind == source.KindSeries {
+	if f.Origin == source.OriginAPI || f.Kind == source.KindSeries || f.Kind == source.KindP2P { // имя счёта дают только выписки
 		return 0
 	}
 	return 1
@@ -287,6 +287,9 @@ func (s *Server) HandleSources(w http.ResponseWriter, r *http.Request) {
 			a.Name, nameRanks[f.AccountID] = f.Name, rank
 		}
 		a.Type = f.Kind
+		if f.Kind == source.KindP2P {
+			a.Type = source.KindBinance // это тот же счёт, не отдельный вид
+		}
 		if f.Account != nil {
 			a.Type = f.Account.Type
 			if f.Account.IBAN != "" {
@@ -298,7 +301,7 @@ func (s *Server) HandleSources(w http.ResponseWriter, r *http.Request) {
 		}
 		a.Files = append(a.Files, invFile{ID: f.Hash, Kind: f.Kind, Name: f.Name, Created: f.Created, Origin: f.Origin, From: f.From, To: f.To, Count: f.Count()})
 		a.Records += f.Count()
-		if from, to := f.Cover(); to > 0 {
+		if from, to := f.Cover(); to > 0 && f.Kind != source.KindP2P { // покрытие оси — период выписки; ордера его не расширяют
 			spans[f.AccountID] = append(spans[f.AccountID], db.Span{From: from, To: to})
 		}
 		for _, t := range f.Txs {

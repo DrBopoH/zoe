@@ -324,3 +324,16 @@ func (s *Server) HandleBinanceTrades(w http.ResponseWriter, r *http.Request) {
 func (s *Server) HandleBinanceSwaps(w http.ResponseWriter, r *http.Request) {
 	bnList(s, w, r, binance.Swaps)
 }
+
+// GET /api/binance/p2p — история C2C-ордеров (гривневая сторона P2P), загруженная из выписки ордеров; пусто — не загружена.
+func (s *Server) HandleBinanceP2P(w http.ResponseWriter, r *http.Request) {
+	if !allow(w, r, http.MethodGet) {
+		return
+	}
+	orders, err := s.storage.BinanceP2P()
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	writeJSON(w, orders)
+}

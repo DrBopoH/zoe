@@ -33,6 +33,7 @@ func (s *Server) Handler() http.Handler {
 		{"/api/binance/moves", s.HandleBinanceMoves},     // переводы между кошельками для истории
 		{"/api/binance/trades", s.HandleBinanceTrades},   // покупки и продажи монет для истории
 		{"/api/binance/swaps", s.HandleBinanceSwaps},     // Convert, пыль → BNB, стейкинг для истории
+		{"/api/binance/p2p", s.HandleBinanceP2P},         // C2C-ордера: сумма в фиате, цена, комиссия
 
 		// Синхронизация, импорт и очистка кеша
 		{"/api/sync/status", s.HandleGetStatus},
