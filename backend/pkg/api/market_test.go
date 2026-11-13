@@ -38,6 +38,8 @@ func newMarketServer(t *testing.T, usUp bool) *Server {
 			} else {
 				w.Write([]byte(`[{"exchangedate":"12.11.2026","rate_per_unit":45.3222,"units":1}]`))
 			}
+		case "/eurostat/api/dissemination/sdmx/2.1/data/prc_hicp_minr/M.RCH_A.TOTAL.EA":
+			w.Write([]byte("DATAFLOW,freq,TIME_PERIOD,OBS_VALUE\nX,M,2026-10,2.4\n"))
 		case "/datasets/s-and-p-500/main/data/data.csv":
 			w.Write([]byte("Date,SP500\n1871-01-01,4.44\n"))
 		case "/api/v3/klines":
@@ -61,7 +63,7 @@ func newMarketServer(t *testing.T, usUp bool) *Server {
 	t.Cleanup(func() { st.Close() })
 	s := NewServer(st, nil, nil)
 	c := market.NewClient()
-	c.NBUBase, c.USTBase, c.FREDBase, c.BinanceBase, c.FNGBase, c.ShillerBase, c.AuctionDays = up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, 1
+	c.NBUBase, c.USTBase, c.FREDBase, c.BinanceBase, c.FNGBase, c.ShillerBase, c.EurostatBase, c.AuctionDays = up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, 1
 	s.SetMarket(c)
 	return s
 }
@@ -160,8 +162,8 @@ func TestFullSyncStartsMarketToo(t *testing.T) {
 	if len(last["feeds"].([]any)) != 8 || feedByID(last, "stocks")["state"] != "done" || feedByID(last, "crypto")["state"] != "done" || feedByID(last, "usecon")["state"] != "done" || feedByID(last, "us")["state"] != "done" || feedByID(last, "fx")["state"] != "done" || feedByID(last, "ust")["state"] != "done" || feedByID(last, "nbu")["state"] != "done" || feedByID(last, "macro")["state"] != "done" {
 		t.Fatalf("все фиды должны отработать: %+v", last)
 	}
-	if m := feedByID(last, "macro"); m["unit"] != "точек" || m["fetched"].(float64) != 2 {
-		t.Fatalf("macro: ставка (1 точка смены) + инфляция (1 точка): %+v", m)
+	if m := feedByID(last, "macro"); m["unit"] != "точек" || m["fetched"].(float64) != 3 {
+		t.Fatalf("macro: ставка (1 точка смены) + инфляция (1 точка) + еврозона (1 точка): %+v", m)
 	}
 	_, mb := call(t, s.HandleMacro, http.MethodGet, "/api/macro?series=policy_rate,cpi_yoy", "")
 	var mac struct {

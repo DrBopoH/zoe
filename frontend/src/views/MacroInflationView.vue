@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import { useMarketRefresh } from '../composables/useMarketRefresh.js'
-import { macroSummary, plainPct } from '../utils/macro.js'
+import { macroSummary, plainPct, lastPoint } from '../utils/macro.js'
 
 // Экран «Инфляция»: год к году (общая и базовая) и месяц к месяцу — два графика с общим движком.
 const props = defineProps({
@@ -15,6 +15,8 @@ const { refresh, startError } = useMarketRefresh(() => 'inflation')
 const YOY = ['cpi_yoy', 'core_yoy']
 const MOM = ['cpi_mom', 'core_mom']
 const sum = computed(() => macroSummary(props.series, props.today))
+const eu = computed(() => lastPoint(props.series.eu_cpi_yoy))
+const euMonth = computed(() => (eu.value ? `${eu.value.d.slice(5, 7)}.${eu.value.d.slice(0, 4)}` : ''))
 const month = computed(() => (sum.value.cpiMonth ? `${sum.value.cpiMonth.slice(5, 7)}.${sum.value.cpiMonth.slice(0, 4)}` : ''))
 </script>
 
@@ -33,6 +35,11 @@ const month = computed(() => (sum.value.cpiMonth ? `${sum.value.cpiMonth.slice(5
       <template #summary>
         <span class="text-slate-400">Инфляция г/г <b class="text-amber-300 tabular-nums">{{ plainPct(sum.cpi) }}</b></span>
         <span class="text-slate-400">Базовая г/г <b class="text-orange-300 tabular-nums">{{ plainPct(sum.core) }}</b></span>
+      </template>
+    </MacroPanel>
+    <MacroPanel title="Инфляция еврозоны (HICP) к тому же месяцу прошлого года" :series="series" :today="today" :ids="['eu_cpi_yoy']" empty="Нет данных. Нажми «Обновить»: подтянется инфляция еврозоны с Евростата" hint="Колесо: масштаб, перетаскивание: сдвиг. Нужна для реальной доходности облигаций в евро">
+      <template #summary>
+        <span v-if="eu" class="text-slate-400">Еврозона г/г <b class="text-sky-300 tabular-nums">{{ plainPct(eu.v) }}</b><span class="text-slate-600"> · {{ euMonth }}</span></span>
       </template>
     </MacroPanel>
     <MacroPanel title="Инфляция к предыдущему месяцу" :series="series" :today="today" :ids="MOM" hint="Месячные скачки: тот же масштаб и сдвиг, что у годового графика" />

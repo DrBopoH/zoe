@@ -42,6 +42,7 @@ func newNBU(t *testing.T) *httptest.Server {
 func testClient(nbu, ust string) *Client {
 	c := NewClient()
 	c.NBUBase, c.USTBase = nbu, ust
+	c.EurostatBase = "" // инфляция еврозоны в этих тестах не опрашивается
 	c.Now = func() time.Time { return time.Date(2026, 11, 12, 12, 0, 0, 0, time.UTC) }
 	c.AuctionDays = 5
 	return c

@@ -22,12 +22,13 @@ const (
 	SourceNBU = "nbu" // ОВДП: реестр депозитария НБУ + результаты аукционов
 	SourceUST = "ust" // US Treasury: аукционы FiscalData
 
-	DefaultNBUBase     = "https://bank.gov.ua"
-	DefaultFREDBase    = "https://fred.stlouisfed.org"
-	DefaultBinanceBase = "https://api.binance.com"
-	DefaultFNGBase     = "https://api.alternative.me"
-	DefaultShillerBase = "https://raw.githubusercontent.com"
-	DefaultUSTBase     = "https://api.fiscaldata.treasury.gov/services/api/fiscal_service"
+	DefaultNBUBase      = "https://bank.gov.ua"
+	DefaultFREDBase     = "https://fred.stlouisfed.org"
+	DefaultBinanceBase  = "https://api.binance.com"
+	DefaultFNGBase      = "https://api.alternative.me"
+	DefaultShillerBase  = "https://raw.githubusercontent.com"
+	DefaultEurostatBase = "https://ec.europa.eu"
+	DefaultUSTBase      = "https://api.fiscaldata.treasury.gov/services/api/fiscal_service"
 
 	maxBody = 32 << 20 // реестр ОВДП — единицы мегабайт; больше — это уже не он
 )
@@ -66,7 +67,9 @@ type Client struct {
 	FNGBase     string
 	// ShillerBase — GitHub raw с месячными данными Шиллера по S&P 500 с 1871 года (датасет datasets/s-and-p-500)
 	ShillerBase string
-	Now         func() time.Time
+	// EurostatBase — инфляция еврозоны (HICP, годовое изменение) из SDMX-CSV Евростата; пустая строка отключает опрос (тесты)
+	EurostatBase string
+	Now          func() time.Time
 	// USTYears — за сколько лет назад брать аукционы США (по умолчанию 3: хватает на все бумаги, что ещё в обращении
 	// у 2-летних и 3-летних выпусков; долгие бумаги подтянутся при следующих обновлениях по мере появления).
 	USTYears int
@@ -75,7 +78,7 @@ type Client struct {
 }
 
 func NewClient() *Client {
-	return &Client{HTTP: &http.Client{Timeout: 30 * time.Second}, NBUBase: DefaultNBUBase, USTBase: DefaultUSTBase, FREDBase: DefaultFREDBase, BinanceBase: DefaultBinanceBase, FNGBase: DefaultFNGBase, ShillerBase: DefaultShillerBase, Now: time.Now}
+	return &Client{HTTP: &http.Client{Timeout: 30 * time.Second}, NBUBase: DefaultNBUBase, USTBase: DefaultUSTBase, FREDBase: DefaultFREDBase, BinanceBase: DefaultBinanceBase, FNGBase: DefaultFNGBase, ShillerBase: DefaultShillerBase, EurostatBase: DefaultEurostatBase, Now: time.Now}
 }
 
 func (c *Client) now() time.Time {
@@ -86,11 +89,16 @@ func (c *Client) now() time.Time {
 }
 
 func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
+	return c.getAccept(ctx, url, "application/json")
+}
+
+// getAccept — тот же запрос с нужным Accept (Евростат отдаёт CSV по параметру format, но Accept: application/json ему не нужен).
+func (c *Client) getAccept(ctx context.Context, url, accept string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", accept)
 	h := c.HTTP
 	if h == nil {
 		h = http.DefaultClient
