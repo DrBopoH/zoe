@@ -61,5 +61,5 @@ func (s *Server) Handler() http.Handler {
 	for _, r := range routes {
 		mux.HandleFunc(r.path, r.h)
 	}
-	return s.EnableCORS(mux.ServeHTTP)
+	return s.EnableCORS(gzipJSON(mux.ServeHTTP))
 }
