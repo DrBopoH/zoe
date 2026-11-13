@@ -323,3 +323,16 @@ func (s *Server) HandleMacro(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, map[string]any{"series": series, "updated_at": updated})
 }
+
+// GET /api/macro/catalog — какие ряды даёт каждый числовой источник: {"feeds":{"fx":["usd_uah","eur_uah","xau_uah"],…}}.
+// Список ведёт бэкенд (market.Feed.Provides): фронт берёт id оттуда, а не хранит свои копии.
+func (s *Server) HandleMacroCatalog(w http.ResponseWriter, r *http.Request) {
+	if !allow(w, r, http.MethodGet) {
+		return
+	}
+	feeds := map[string][]string{}
+	if c := s.mk.client; c != nil {
+		feeds = c.Catalog()
+	}
+	writeJSON(w, map[string]any{"feeds": feeds})
+}
