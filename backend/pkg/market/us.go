@@ -86,8 +86,6 @@ func toPoints(series string, obs []fredObs) []SeriesPoint {
 	return out
 }
 
-func fredPoints(series string, obs []fredObs) []SeriesPoint { return toPoints(series, obs) }
-
 // weekly оставляет последнее значение каждой недели (ISO): дневной ряд на 60 лет слишком тяжёл для графика.
 func weekly(pts []SeriesPoint) []SeriesPoint {
 	sort.Slice(pts, func(i, j int) bool { return pts[i].Date < pts[j].Date })

@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
-import UiButton from '../components/ui/UiButton.vue'
+import MarketHeader from '../components/MarketHeader.vue'
 import { useMarketRefresh } from '../composables/useMarketRefresh.js'
 import { goldUsd, annualChange, realRate, valueAt, lastPoint, signedPct, plainPct, unitText } from '../utils/macro.js'
 
@@ -33,14 +33,9 @@ const dateText = (iso) => (iso ? iso.split('-').reverse().join('.') : '')
 
 <template>
   <div class="space-y-4">
-    <section class="flex flex-wrap items-center gap-3 text-xs">
-      <h2 class="font-bold text-slate-300 uppercase tracking-wider mr-2">Курсы</h2>
+    <MarketHeader title="Курсы" :running="running" @refresh="refresh">
       <span v-if="usd" class="text-slate-500">курс НБУ на {{ dateText(usd.d) }}</span>
-      <UiButton variant="secondary" size="sm" class="ml-auto" :disabled="running" @click="refresh">
-        <template v-if="running">ОБНОВЛЯЮ...</template>
-        <template v-else>ОБНОВИТЬ</template>
-      </UiButton>
-    </section>
+    </MarketHeader>
 
     <MacroPanel title="Доллар и евро к гривне" :series="all" :today="today" :ids="USD_EUR" unit="₴" empty="Нет данных. Нажми «Обновить»: подтянутся курсы НБУ">
       <template #summary>

@@ -45,7 +45,7 @@ func decodeWindows1251(b []byte) string {
 
 func cp1251ToRune(b byte) rune {
 	switch {
-	case b >= 0xC0 && b <= 0xFF:
+	case b >= 0xC0: // 0xC0…0xFF
 		return rune(0x0410 + int(b-0xC0))
 	case b == 0xA8:
 		return 'Ё'

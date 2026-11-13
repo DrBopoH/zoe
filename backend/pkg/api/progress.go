@@ -212,7 +212,6 @@ func (s *Server) progressSnapshot() progressView {
 	type cp struct {
 		c    clientProg
 		accs []accProg
-		win  []*progWin
 	}
 	var cps []cp
 	for _, c := range s.prog.clients {
@@ -447,7 +446,7 @@ func (s *Server) remainingRequests(a *accProg, spans []db.Span, txs []int64, com
 	opened := s.storage.OpenedAt(a.ID)
 
 	// нижняя граница, ниже которой дыры считаем: открытие, либо самый низ уже снятого
-	floor, lowCov := lo, int64(0)
+	var floor, lowCov int64
 	for _, sp := range spans {
 		if sp.From > 0 && (lowCov == 0 || sp.From < lowCov) {
 			lowCov = sp.From
@@ -496,13 +495,6 @@ func (s *Server) remainingRequests(a *accProg, spans []db.Span, txs []int64, com
 		rem = 1
 	}
 	return rem
-}
-
-func max1(n int) int {
-	if n < 1 {
-		return 1
-	}
-	return n
 }
 
 // txCell — клетка шкалы для снятого отрезка [ca, cb): '1' — в нём есть операции (txs отсортирован), '2' — снято, но пусто.

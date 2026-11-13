@@ -31,15 +31,6 @@ func (s *Server) updateStatus(msg string) {
 	log.Printf("[Sync Status] %s", msg)
 }
 
-var ruMonthsShort = []string{
-	"", "янв.", "февр.", "марта", "апр.", "мая", "июня",
-	"июля", "авг.", "сент.", "окт.", "нояб.", "декабря",
-}
-
-func formatHumanDate(t time.Time) string {
-	return fmt.Sprintf("%d %s %d", t.Day(), ruMonthsShort[t.Month()], t.Year())
-}
-
 // sleepCtx — пауза, которую прерывает отмена обхода.
 func sleepCtx(ctx context.Context, d time.Duration) {
 	t := time.NewTimer(d)

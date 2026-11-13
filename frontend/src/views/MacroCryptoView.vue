@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
-import UiButton from '../components/ui/UiButton.vue'
+import MarketHeader from '../components/MarketHeader.vue'
 import { useMarketRefresh } from '../composables/useMarketRefresh.js'
 import { lastPoint, plainPct, signedPct, drawdown, athInfo, changeSince, fearGreedLevel, unitText } from '../utils/macro.js'
 
@@ -32,14 +32,9 @@ const has = computed(() => Object.values(props.crypto).some((a) => a && a.length
 
 <template>
   <div class="space-y-4">
-    <section class="flex flex-wrap items-center gap-3 text-xs">
-      <h2 class="font-bold text-slate-300 uppercase tracking-wider mr-2">Крипто</h2>
+    <MarketHeader title="Крипто" :running="running" @refresh="refresh">
       <span v-if="btc" class="text-slate-500">цены по закрытию недели · последняя точка {{ dateOf(btc.d) }}</span>
-      <UiButton variant="secondary" size="sm" class="ml-auto" :disabled="running" @click="refresh">
-        <template v-if="running">ОБНОВЛЯЮ...</template>
-        <template v-else>ОБНОВИТЬ</template>
-      </UiButton>
-    </section>
+    </MarketHeader>
 
     <MacroPanel title="Bitcoin, $" unit="$" :series="crypto" :today="today" :ids="['crypto_btc']" log :empty="EMPTY">
       <template #summary>
