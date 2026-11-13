@@ -16,7 +16,12 @@ import (
 // источники-«фиды» идут параллельно и не знают друг о друге. Публичные API без ключей, кеш стирается вайпом.
 
 // SetMarket подключает клиент публичных облигационных данных (nil — обновление выключено, кеш читается).
-func (s *Server) SetMarket(c *market.Client) { s.mk.client = c }
+func (s *Server) SetMarket(c *market.Client) {
+	if c != nil && c.LastDate == nil {
+		c.LastDate = s.storage.MacroLastDate // тяжёлые дневные ряды FRED докачиваются хвостом от последней сохранённой даты
+	}
+	s.mk.client = c
+}
 
 const marketFeedTimeout = 90 * time.Second
 
@@ -110,7 +115,7 @@ func (s *Server) startMarket(ctx context.Context, only string) bool {
 					var pts []market.SeriesPoint
 					pts, res = f.Series(fctx, rep)
 					if ctx.Err() == nil && len(pts) > 0 {
-						if err := s.storage.SaveMacroSeries(pts, time.Now().Unix()); err != nil {
+						if err := s.storage.SaveMacroSeries(pts, time.Now().Unix(), res.Tail...); err != nil {
 							res.Error = strings.TrimSpace(res.Error + " сохранение: " + err.Error())
 						}
 					}

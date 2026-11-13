@@ -27,7 +27,7 @@ const (
 func (c *Client) USFRED(ctx context.Context, rep Reporter) ([]SeriesPoint, Result) {
 	res := Result{Source: SourceUS}
 	r := c.fredAll(ctx, rep, []fredJob{
-		{"FEDFUNDS", "ставка ФРС"}, {"DFEDTARU", "целевая ставка"}, {"CPIAUCSL", "инфляция США"}, {"DGS10", "доходность Treasury"},
+		{"FEDFUNDS", "ставка ФРС", ""}, {"DFEDTARU", "целевая ставка", ""}, {"CPIAUCSL", "инфляция США", ""}, {"DGS10", "доходность Treasury", SerUST10Y},
 	})
 	var out []SeriesPoint
 	out = append(out, toPoints(SerFedFunds, r.Obs["FEDFUNDS"])...)
@@ -38,7 +38,7 @@ func (c *Client) USFRED(ctx context.Context, rep Reporter) ([]SeriesPoint, Resul
 	out = append(out, weekly(toPoints(SerUST10Y, r.Obs["DGS10"]))...)
 	rep.report(95, "")
 	res.Fetched, res.Skipped = len(out), r.Skipped
-	res.Error = strings.Join(r.Errs, "; ")
+	res.Error, res.Tail = strings.Join(r.Errs, "; "), r.Tail
 	return out, res
 }
 
@@ -47,9 +47,13 @@ type fredObs struct {
 	Value float64
 }
 
-// fred — один ряд FRED. Строки с пропуском («.») пропускаются.
-func (c *Client) fred(ctx context.Context, id string) ([]fredObs, int, error) {
-	body, err := c.get(ctx, strings.TrimRight(c.FREDBase, "/")+"/graph/fredgraph.csv?id="+id)
+// fred — один ряд FRED (since — с какой даты, пусто: вся история). Строки с пропуском («.») пропускаются.
+func (c *Client) fred(ctx context.Context, id, since string) ([]fredObs, int, error) {
+	url := strings.TrimRight(c.FREDBase, "/") + "/graph/fredgraph.csv?id=" + id
+	if since != "" {
+		url += "&cosd=" + since // только хвост: с этой даты
+	}
+	body, err := c.get(ctx, url)
 	if err != nil {
 		return nil, 0, fmt.Errorf("FRED %s: %w", id, err)
 	}

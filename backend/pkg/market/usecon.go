@@ -20,7 +20,7 @@ const (
 func (c *Client) USEcon(ctx context.Context, rep Reporter) ([]SeriesPoint, Result) {
 	res := Result{Source: SourceUSEcon}
 	r := c.fredAll(ctx, rep, []fredJob{
-		{"UNRATE", "безработица"}, {"A191RL1Q225SBEA", "рост ВВП"}, {"T10Y2Y", "кривая доходности"}, {"VIXCLS", "индекс страха VIX"}, {"UMCSENT", "настроения потребителей"},
+		{"UNRATE", "безработица", ""}, {"A191RL1Q225SBEA", "рост ВВП", ""}, {"T10Y2Y", "кривая доходности", SerUSSpread}, {"VIXCLS", "индекс страха VIX", SerUSVIX}, {"UMCSENT", "настроения потребителей", ""},
 	})
 	var out []SeriesPoint
 	out = append(out, toPoints(SerUSUnrate, r.Obs["UNRATE"])...)
@@ -30,6 +30,6 @@ func (c *Client) USEcon(ctx context.Context, rep Reporter) ([]SeriesPoint, Resul
 	out = append(out, toPoints(SerUSSentiment, r.Obs["UMCSENT"])...)
 	rep.report(95, "")
 	res.Fetched, res.Skipped = len(out), r.Skipped
-	res.Error = strings.Join(r.Errs, "; ")
+	res.Error, res.Tail = strings.Join(r.Errs, "; "), r.Tail
 	return out, res
 }

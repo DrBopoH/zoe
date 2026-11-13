@@ -96,3 +96,38 @@ func TestSaveMacroSeriesBigSeries(t *testing.T) {
 		t.Fatalf("точек %d", len(got["big"]))
 	}
 }
+
+// Докачанный хвост заменяет ряд только с первой своей даты; раньшее остаётся, MacroLastDate видит новую границу.
+func TestSaveMacroSeriesTailKeepsHistory(t *testing.T) {
+	d := t.TempDir()
+	s, err := NewStorage(filepath.Join(d, "c.db"), filepath.Join(d, "k.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	pt := func(d string, v float64) market.SeriesPoint {
+		return market.SeriesPoint{Series: "us_vix", Date: d, Value: v}
+	}
+	if got := s.MacroLastDate("us_vix"); got != "" {
+		t.Fatalf("пустой кеш: %q", got)
+	}
+	if err := s.SaveMacroSeries([]market.SeriesPoint{pt("2026-10-02", 1), pt("2026-10-09", 2), pt("2026-10-16", 3)}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveMacroSeries([]market.SeriesPoint{pt("2026-10-09", 20), pt("2026-10-23", 40)}, 2, "us_vix"); err != nil {
+		t.Fatal(err)
+	}
+	got, _, _ := s.MacroSeries([]string{"us_vix"})
+	want := []market.SeriesPoint{pt("2026-10-02", 1), pt("2026-10-09", 20), pt("2026-10-23", 40)}
+	if len(got["us_vix"]) != len(want) {
+		t.Fatalf("ряд: %+v", got["us_vix"])
+	}
+	for i, w := range want {
+		if g := got["us_vix"][i]; g.Date != w.Date || g.Value != w.Value {
+			t.Fatalf("точка %d: %+v, ждали %+v", i, g, w)
+		}
+	}
+	if d := s.MacroLastDate("us_vix"); d != "2026-10-23" {
+		t.Fatalf("MacroLastDate: %q", d)
+	}
+}
