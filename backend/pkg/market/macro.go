@@ -21,6 +21,7 @@ const (
 	SerCPIMoM         = "cpi_mom"         // инфляция к предыдущему месяцу, %
 	SerCoreYoY        = "core_yoy"        // базовая инфляция к тому же месяцу прошлого года, %
 	SerCoreMoM        = "core_mom"        // базовая инфляция к предыдущему месяцу, %
+	SerEUCPIYoY       = "eu_cpi_yoy"      // инфляция еврозоны (HICP) к тому же месяцу прошлого года, %
 
 	// инфляция идёт окнами по 10 лет: данные начинаются с 2007 года, окно побольше сервер не отдаёт
 	cpiFirstYear = 2000
@@ -75,6 +76,14 @@ func (c *Client) MacroNBU(ctx context.Context, rep Reporter) ([]SeriesPoint, Res
 			continue
 		}
 		out = append(out, pts...)
+	}
+	if c.EurostatBase != "" {
+		rep.report(92, "инфляция еврозоны")
+		eu, err := c.euroInflation(ctx)
+		if err != nil {
+			errs = append(errs, err.Error())
+		}
+		out = append(out, eu...)
 	}
 	if !hasSeries(out, SerCPIYoY) && len(errs) == 0 {
 		errs = append(errs, "инфляция: в ответе нет общего индекса потребительских цен")

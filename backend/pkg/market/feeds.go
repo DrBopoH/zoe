@@ -47,7 +47,7 @@ func (c *Client) Feeds() []Feed {
 			}
 			return list, res
 		}},
-		{ID: SourceMacro, Title: "Ставки и инфляция · НБУ", Unit: "точек", Series: c.MacroNBU},
+		{ID: SourceMacro, Title: "Ставки и инфляция · НБУ, Евростат", Unit: "точек", Series: c.MacroNBU},
 		{ID: SourceFX, Title: "Курсы валют и золото · НБУ", Unit: "точек", Series: c.FXNBU},
 		{ID: SourceUS, Title: "Ставка ФРС и инфляция США · FRED", Unit: "точек", Series: c.USFRED},
 		{ID: SourceUSEcon, Title: "Экономика США · FRED", Unit: "точек", Series: c.USEcon},
