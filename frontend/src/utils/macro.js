@@ -30,7 +30,8 @@ export const SERIES = {
   crypto_eth: { label: 'Ethereum', color: '#a78bfa', step: false },
   crypto_bnb: { label: 'BNB', color: '#fbbf24', step: false },
   crypto_sol: { label: 'Solana', color: '#34d399', step: false },
-  crypto_fng: { label: 'Страх и жадность', color: '#38bdf8', step: false },
+  // gradient: цвет линии зависит от значения (stops: [доля от from до to, цвет, прозрачность]); noLog — ограниченный индекс, логарифм не нужен
+  crypto_fng: { label: 'Страх и жадность', color: '#94a3b8', step: false, noLog: true, gradient: { from: 0, to: 100, stops: [[0, '#38bdf8', 1], [0.5, '#94a3b8', 0.4], [1, '#fbbf24', 1]] } },
   stock_sp500: { label: 'S&P 500', color: '#38bdf8', step: false },
   stock_nasdaq: { label: 'NASDAQ Composite', color: '#a78bfa', step: false },
   stock_dow: { label: 'Dow Jones', color: '#fbbf24', step: false },
@@ -210,7 +211,9 @@ export function buildMacroChart({ series, ids, view, yRange, todayIso, width = 1
       d += i === 0 ? `M${x} ${y}` : meta.step ? `H${x}V${y}` : `L${x} ${y}`
     })
     if (meta.step && pts.length) d += `H${X(Math.min(x1 + margin, 0)).toFixed(1)}`
-    return { id, color: meta.color, label: meta.label, d }
+    // градиент по значению: вектор от значения from до to в пикселях графика (userSpaceOnUse), поэтому цвет привязан к уровню, а не к положению на экране
+    const g = meta.gradient ? { y1: Y(meta.gradient.from), y2: Y(meta.gradient.to), stops: meta.gradient.stops.map(([offset, color, opacity]) => ({ offset, color, opacity })) } : null
+    return { id, color: meta.color, label: meta.label, d, gradient: g && isFinite(g.y1) && isFinite(g.y2) && g.y1 !== g.y2 ? g : null }
   })
 
   return {

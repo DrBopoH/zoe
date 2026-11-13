@@ -28,7 +28,7 @@ const IDS = computed(() => props.ids)
 // Логарифмическая шкала возможна, только если все значения положительные (просадка, ставки с нулём и ряды со знаком остаются линейными)
 const canLog = computed(() => {
   const pts = IDS.value.flatMap((id) => props.series[id] || [])
-  return pts.length > 0 && pts.every((p) => p.v > 0)
+  return pts.length > 0 && pts.every((p) => p.v > 0) && !IDS.value.some((id) => SERIES[id]?.noLog)
 })
 
 // Окно по умолчанию — весь период данных; дальше колесо и перетаскивание
@@ -45,6 +45,13 @@ const kv = useChartView({
   resetOn: () => [props.series, props.ids]
 })
 const { svgRef, onWheel, onDown, onMove, onUp, onLeave, reset, zoomed } = kv
+// Цвета линий и значков: обычный цвет ряда или (если задан градиент по значению) полоска от цвета нижнего края к верхнему
+const gradId = (id) => `${clipId}-g-${id}`
+const strokeOf = (l) => (l.gradient ? `url(#${gradId(l.id)})` : l.color)
+const swatch = (id) => {
+  const g = SERIES[id]?.gradient
+  return g ? { backgroundImage: `linear-gradient(to right, ${g.stops.map(([, c]) => c).join(', ')})` } : { backgroundColor: SERIES[id]?.color }
+}
 const isLog = computed(() => kv.scaleMode.value === 'log')
 
 const has = computed(() => IDS.value.some((id) => props.series[id]?.length))
@@ -103,6 +110,9 @@ const hover = computed(() => {
         @dblclick="reset"
       >
         <defs>
+          <linearGradient v-for="l in chart.lines.filter((x) => x.gradient)" :id="gradId(l.id)" :key="'g' + l.id" gradientUnits="userSpaceOnUse" x1="0" x2="0" :y1="l.gradient.y1" :y2="l.gradient.y2">
+            <stop v-for="s in l.gradient.stops" :key="s.offset" :offset="s.offset" :stop-color="s.color" :stop-opacity="s.opacity" />
+          </linearGradient>
           <clipPath :id="clipId"><rect :x="chart.pad.l" :y="chart.pad.t" :width="WIDTH - chart.pad.l - chart.pad.r" :height="HEIGHT - chart.pad.t - chart.pad.b" /></clipPath>
         </defs>
         <g class="text-[10px]" fill="#64748b">
@@ -116,7 +126,7 @@ const hover = computed(() => {
         <g :clip-path="`url(#${clipId})`">
         <line v-if="chart.zeroY !== null" :x1="chart.pad.l" :x2="WIDTH - chart.pad.r" :y1="chart.zeroY" :y2="chart.zeroY" stroke="#475569" />
         <line v-if="kv.hoverPx.value !== null && kv.hoverX.value <= 0.05" :x1="kv.hoverPx.value" :x2="kv.hoverPx.value" :y1="chart.pad.t" :y2="HEIGHT - chart.pad.b" stroke="#64748b" stroke-opacity="0.6" />
-        <path v-for="l in chart.lines" :key="l.id" :d="l.d" fill="none" :stroke="l.color" :stroke-width="SERIES[l.id].thin ? 1.2 : 2" :stroke-opacity="SERIES[l.id].thin ? 0.7 : 1" stroke-linejoin="round" />
+        <path v-for="l in chart.lines" :key="l.id" :d="l.d" fill="none" :stroke="strokeOf(l)" :stroke-width="SERIES[l.id].thin ? 1.2 : 2" :stroke-opacity="SERIES[l.id].thin ? 0.7 : 1" stroke-linejoin="round" />
         </g>
         <BennerBands v-if="benner" layer="strip" v-bind="bn" :left="MACRO_PAD.l" :right="WIDTH - MACRO_PAD.r" :strip-y="HEIGHT - MACRO_PAD.b + 5" />
       </svg>
@@ -124,11 +134,11 @@ const hover = computed(() => {
       <div class="flex flex-wrap items-center gap-x-5 gap-y-1 text-[11px] text-slate-400 min-h-[1.5rem]">
         <template v-if="hover">
           <span class="text-slate-200 font-bold">{{ hover.date }}</span>
-          <span v-for="r in hover.rows" :key="r.id" class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-0.5" :style="{ backgroundColor: r.color }"></span>{{ r.label }} <b class="tabular-nums text-slate-200">{{ unitText(r.v, unit) }}</b></span>
+          <span v-for="r in hover.rows" :key="r.id" class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-0.5" :style="swatch(r.id)"></span>{{ r.label }} <b class="tabular-nums text-slate-200">{{ unitText(r.v, unit) }}</b></span>
           <span v-if="bennerNow" class="inline-flex items-center gap-1.5" title="Цикл Беннера — курьёз, не сигнал"><span class="inline-block w-2 h-2 rounded-sm" :style="{ backgroundColor: bennerNow.color }"></span>Беннер {{ bennerNow.year }}: <b class="text-slate-200">{{ bennerNow.key ? bennerNow.kind + ' · ' + bennerNow.label : 'после: ' + bennerNow.label }}</b></span>
         </template>
         <template v-else>
-        <span v-for="l in chart.lines" :key="l.id" class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-0.5" :style="{ backgroundColor: SERIES[l.id].color }"></span>{{ l.label }}</span>
+        <span v-for="l in chart.lines" :key="l.id" class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-0.5" :style="swatch(l.id)"></span>{{ l.label }}</span>
         <span class="text-slate-600">{{ hint }}</span>
         <span v-if="benner" class="text-slate-600" title="Цикл Беннера (1875). Исторический курьёз, предсказательной силы не доказано">цикл Беннера: A паника · B пик · C дно, плотный — сам год, бледный — период после (курьёз, не сигнал)</span>
         </template>

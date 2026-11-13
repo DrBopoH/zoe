@@ -23,6 +23,8 @@ const y1 = computed(() => changeSince(props.crypto.crypto_btc, props.today, 1))
 const fng = computed(() => lastPoint(props.crypto.crypto_fng))
 const FNG_TEXT = { 'extreme-fear': 'крайний страх', fear: 'страх', neutral: 'нейтрально', greed: 'жадность', 'extreme-greed': 'крайняя жадность' }
 const fngWord = computed(() => FNG_TEXT[fearGreedLevel(fng.value?.v)] || '')
+// Цвет числа в шапке — как у линии: страх голубой, середина серая, жадность янтарная
+const fngColor = computed(() => ({ 'extreme-fear': 'text-sky-300', fear: 'text-sky-300', neutral: 'text-slate-300', greed: 'text-amber-300', 'extreme-greed': 'text-amber-300' })[fearGreedLevel(fng.value?.v)] || 'text-slate-300')
 const dateOf = (iso) => (iso ? iso.split('-').reverse().join('.') : '')
 const coin = (id) => lastPoint(props.crypto[id])
 const has = computed(() => Object.values(props.crypto).some((a) => a && a.length))
@@ -62,9 +64,9 @@ const has = computed(() => Object.values(props.crypto).some((a) => a && a.length
       </template>
     </MacroPanel>
 
-    <MacroPanel title="Индекс страха и жадности крипторынка (0 — крайний страх, 100 — крайняя жадность)" unit="п." :series="crypto" :today="today" :ids="['crypto_fng']" :empty="EMPTY" hint="Колесо: масштаб, перетаскивание: сдвиг. До 25 крайний страх, выше 75 крайняя жадность">
+    <MacroPanel title="Индекс страха и жадности крипторынка" unit="п." :series="crypto" :today="today" :ids="['crypto_fng']" :empty="EMPTY" hint="Колесо: масштаб, перетаскивание: сдвиг. До 25 крайний страх, выше 75 крайняя жадность">
       <template #summary>
-        <span v-if="fng" class="text-slate-400">Сейчас <b class="text-sky-300 tabular-nums">{{ Math.round(fng.v) }}</b><span class="text-slate-600"> · {{ fngWord }}</span></span>
+        <span v-if="fng" class="text-slate-400">Сейчас <b class="tabular-nums" :class="fngColor">{{ Math.round(fng.v) }}</b><span class="text-slate-600"> · {{ fngWord }}</span></span>
       </template>
     </MacroPanel>
 
