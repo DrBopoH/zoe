@@ -26,7 +26,8 @@ export const SERIES = {
   us_spread: { label: 'Кривая: 10 л. − 2 г.', color: '#a78bfa', step: false },
   // как у индекса страха и жадности: середина (около 20, обычный фон) полупрозрачный серый, высокий VIX = страх голубой, очень низкий = самоуспокоенность янтарная
   us_vix: { label: 'VIX (индекс страха)', color: '#94a3b8', step: false, gradient: { from: 10, to: 50, stops: [[0, '#fbbf24', 1], [0.25, '#94a3b8', 0.4], [0.75, '#38bdf8', 1], [1, '#38bdf8', 1]] } },
-  us_sentiment: { label: 'Настроения потребителей', color: '#fbbf24', step: false },
+  // светофор: чем оптимистичнее люди, тем зеленее (от 50 красный, около 75 жёлтый, от 100 зелёный)
+  us_sentiment: { label: 'Настроения потребителей', color: '#fbbf24', step: false, noLog: true, gradient: { from: 50, to: 100, stops: [[0, '#f87171', 1], [0.5, '#fbbf24', 1], [1, '#34d399', 1]] } },
   crypto_btc: { label: 'Bitcoin', color: '#fb923c', step: false },
   crypto_eth: { label: 'Ethereum', color: '#a78bfa', step: false },
   crypto_bnb: { label: 'BNB', color: '#fbbf24', step: false },

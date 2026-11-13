@@ -28,6 +28,8 @@ const vix = computed(() => lastPoint(props.econ.us_vix))
 const vixColor = computed(() => { const x = vix.value?.v; return x < 14 ? 'text-amber-300' : x <= 20 ? 'text-slate-300' : 'text-sky-300' })
 const vixWord = computed(() => ({ calm: 'спокойно', nervous: 'тревожно', panic: 'паника' })[vixLevel(vix.value?.v)] || '')
 const sentiment = computed(() => lastPoint(props.econ.us_sentiment))
+// Цвет числа как у линии: ниже 65 красный, до 85 жёлтый, выше зелёный
+const sentimentColor = computed(() => { const x = sentiment.value?.v; return x < 65 ? 'text-rose-400' : x <= 85 ? 'text-amber-300' : 'text-emerald-400' })
 const CURVE_TEXT = { inverted: 'инвертирована: короткие ставки выше длинных, исторически это опережало рецессии', flat: 'почти плоская', normal: 'нормальная: длинные ставки выше коротких' }
 const has = computed(() => Object.values(props.econ).some((a) => a && a.length))
 </script>
@@ -73,7 +75,7 @@ const has = computed(() => Object.values(props.econ).some((a) => a && a.length))
 
     <MacroPanel title="Настроения потребителей (Мичиган)" unit="п." :series="econ" :today="today" :ids="['us_sentiment']" :empty="EMPTY" hint="Колесо: масштаб, перетаскивание: сдвиг. Индекс: чем выше, тем оптимистичнее люди">
       <template #summary>
-        <span v-if="sentiment" class="text-slate-400">{{ monthOf(sentiment) }} <b class="text-amber-300 tabular-nums">{{ String(Math.round(sentiment.v * 10) / 10).replace('.', ',') }}</b></span>
+        <span v-if="sentiment" class="text-slate-400">{{ monthOf(sentiment) }} <b class="tabular-nums" :class="sentimentColor">{{ String(Math.round(sentiment.v * 10) / 10).replace('.', ',') }}</b></span>
       </template>
     </MacroPanel>
 
