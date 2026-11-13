@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { valueAt, realRate, signedPct, plainPct, currentInflation, macroSummary, buildMacroChart, macroWindow, macroRanges, yearsFrom, isoAt, goldUsd, annualChange, unitText, axisText } from '../src/utils/macro.js'
+import { valueAt, realRate, signedPct, plainPct, currentInflation, macroSummary, inflationFor, buildMacroChart, macroWindow, macroRanges, yearsFrom, isoAt, goldUsd, annualChange, unitText, axisText } from '../src/utils/macro.js'
 import { sortBonds } from '../src/utils/marketTable.js'
 
 const rate = [{ d: '2024-12-12', v: 13.5 }, { d: '2025-01-23', v: 14.5 }, { d: '2026-01-01', v: 15.5 }]
@@ -151,4 +151,13 @@ test('градиент по значению: вектор от значения
   assert.ok(fng.gradient && fng.gradient.y1 > fng.gradient.y2) // 0 внизу, 100 вверху
   assert.equal(fng.gradient.stops.length, 3)
   assert.equal(un.gradient, null)
+})
+
+test('inflationFor: инфляция в валюте бумаги — гривна НБУ, доллар США, евро еврозона', () => {
+  const s = { cpi_yoy: [{ d: '2026-09-01', v: 6.1 }], us_cpi_yoy: [{ d: '2026-09-01', v: 3.0 }, { d: '2026-10-01', v: 3.2 }], eu_cpi_yoy: [{ d: '2026-10-01', v: 2.4 }] }
+  assert.equal(inflationFor('UAH', s), 6.1)
+  assert.equal(inflationFor('USD', s), 3.2)
+  assert.equal(inflationFor('EUR', s), 2.4)
+  assert.equal(inflationFor('GBP', s), null)
+  assert.equal(inflationFor('EUR', {}), null)
 })

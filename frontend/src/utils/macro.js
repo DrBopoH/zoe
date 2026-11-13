@@ -19,6 +19,7 @@ export const SERIES = {
   fed_funds: { label: 'Ставка ФРС (факт)', color: '#a78bfa', step: false },
   fed_target: { label: 'ФРС: верх коридора', color: '#34d399', step: true },
   ust_10y: { label: 'Treasury 10 л.', color: '#38bdf8', step: false, thin: true },
+  eu_cpi_yoy: { label: 'Инфляция еврозоны г/г', color: '#38bdf8', step: false },
   us_cpi_yoy: { label: 'Инфляция США г/г', color: '#fbbf24', step: false },
   us_cpi_mom: { label: 'Инфляция США м/м', color: '#fb923c', step: false },
   us_unrate: { label: 'Безработица США', color: '#38bdf8', step: false },
@@ -45,7 +46,7 @@ export const SERIES = {
 }
 
 // Ряды по группам: для запроса /macro (ставки и инфляция — малые, курсы — тысячи точек, грузятся отдельно)
-export const MACRO_IDS = ['policy_rate', 'overnight_cd', 'overnight_loans', 'cpi_yoy', 'cpi_mom', 'core_yoy', 'core_mom']
+export const MACRO_IDS = ['policy_rate', 'overnight_cd', 'overnight_loans', 'cpi_yoy', 'cpi_mom', 'core_yoy', 'core_mom', 'eu_cpi_yoy']
 export const FX_IDS = ['usd_uah', 'eur_uah', 'xau_uah']
 export const USECON_IDS = ['us_unrate', 'us_gdp', 'us_spread', 'us_vix', 'us_sentiment']
 export const CRYPTO_IDS = ['crypto_btc', 'crypto_eth', 'crypto_bnb', 'crypto_sol', 'crypto_fng']
@@ -110,6 +111,12 @@ export const lastPoint = (points) => (points && points.length ? points[points.le
 export function realRate(nominal, inflation) {
   if (!(typeof nominal === 'number' && isFinite(nominal)) || !(typeof inflation === 'number' && isFinite(inflation))) return null
   return ((1 + nominal / 100) / (1 + inflation / 100) - 1) * 100
+}
+
+/** Инфляция г/г (последний известный месяц) в валюте бумаги: UAH — НБУ, USD — США, EUR — еврозона (HICP). Нет данных или чужая валюта — null. */
+export function inflationFor(currency, series) {
+  const id = { UAH: 'cpi_yoy', USD: 'us_cpi_yoy', EUR: 'eu_cpi_yoy' }[currency]
+  return id ? lastPoint(series && series[id])?.v ?? null : null
 }
 
 // Текущая инфляция для расчёта реальной доходности: последний известный месяц (г/г). null — данных нет.
