@@ -24,6 +24,8 @@ const techRec = computed(() => technicalRecession(props.econ.us_gdp))
 const spread = computed(() => lastPoint(props.econ.us_spread))
 const curve = computed(() => curveState(spread.value?.v))
 const vix = computed(() => lastPoint(props.econ.us_vix))
+// Цвет числа как у линии: самоуспокоенность (ниже 14) янтарная, обычный фон серый, тревога и паника голубые
+const vixColor = computed(() => { const x = vix.value?.v; return x < 14 ? 'text-amber-300' : x <= 20 ? 'text-slate-300' : 'text-sky-300' })
 const vixWord = computed(() => ({ calm: 'спокойно', nervous: 'тревожно', panic: 'паника' })[vixLevel(vix.value?.v)] || '')
 const sentiment = computed(() => lastPoint(props.econ.us_sentiment))
 const CURVE_TEXT = { inverted: 'инвертирована: короткие ставки выше длинных, исторически это опережало рецессии', flat: 'почти плоская', normal: 'нормальная: длинные ставки выше коротких' }
@@ -65,7 +67,7 @@ const has = computed(() => Object.values(props.econ).some((a) => a && a.length))
 
     <MacroPanel title="VIX: индекс страха рынка акций" unit="п." :series="econ" :today="today" :ids="['us_vix']" :empty="EMPTY" hint="Колесо: масштаб, перетаскивание: сдвиг. До 20 спокойно, 20–30 тревожно, выше 30 паника">
       <template #summary>
-        <span v-if="vix" class="text-slate-400">Сейчас <b class="text-orange-300 tabular-nums">{{ String(Math.round(vix.v * 10) / 10).replace('.', ',') }}</b><span class="text-slate-600"> · {{ vixWord }}</span></span>
+        <span v-if="vix" class="text-slate-400">Сейчас <b class="tabular-nums" :class="vixColor">{{ String(Math.round(vix.v * 10) / 10).replace('.', ',') }}</b><span class="text-slate-600"> · {{ vixWord }}</span></span>
       </template>
     </MacroPanel>
 

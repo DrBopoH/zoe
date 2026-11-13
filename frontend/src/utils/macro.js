@@ -24,7 +24,8 @@ export const SERIES = {
   us_unrate: { label: 'Безработица США', color: '#38bdf8', step: false },
   us_gdp: { label: 'Рост ВВП США (в год)', color: '#34d399', step: true },
   us_spread: { label: 'Кривая: 10 л. − 2 г.', color: '#a78bfa', step: false },
-  us_vix: { label: 'VIX (индекс страха)', color: '#fb923c', step: false },
+  // как у индекса страха и жадности: середина (около 20, обычный фон) полупрозрачный серый, высокий VIX = страх голубой, очень низкий = самоуспокоенность янтарная
+  us_vix: { label: 'VIX (индекс страха)', color: '#94a3b8', step: false, gradient: { from: 10, to: 50, stops: [[0, '#fbbf24', 1], [0.25, '#94a3b8', 0.4], [0.75, '#38bdf8', 1], [1, '#38bdf8', 1]] } },
   us_sentiment: { label: 'Настроения потребителей', color: '#fbbf24', step: false },
   crypto_btc: { label: 'Bitcoin', color: '#fb923c', step: false },
   crypto_eth: { label: 'Ethereum', color: '#a78bfa', step: false },
