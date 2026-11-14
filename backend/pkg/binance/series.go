@@ -27,16 +27,20 @@ type Point struct {
 	H map[string]float64
 }
 
+// unit — шаг учёта остатков: 1e-8 (знак после запятой у Binance не глубже). Остаток копится целым числом таких шагов,
+// иначе на больших количествах (1e6 и выше) ошибка float64 (~1e-7) превышает порог dust, и закрытая позиция «не обнуляется».
+const unit = 1e8
+
 // Timeline — остатки после каждого движения (нарастающим итогом) и финальная точка endMs с теми же остатками.
 func Timeline(flows []Flow, endMs int64) []Point {
 	fl := append([]Flow(nil), flows...)
 	sort.SliceStable(fl, func(i, j int) bool { return fl[i].T < fl[j].T })
 	var pts []Point
-	cur := map[string]float64{}
+	cur := map[string]int64{}
 	snap := func() map[string]float64 {
 		m := make(map[string]float64, len(cur))
 		for a, v := range cur {
-			m[a] = v
+			m[a] = float64(v) / unit
 		}
 		return m
 	}
@@ -44,10 +48,7 @@ func Timeline(flows []Flow, endMs int64) []Point {
 		t := fl[i].T
 		for i < len(fl) && fl[i].T == t {
 			a := fl[i].Asset
-			cur[a] += fl[i].Delta
-			if math.Abs(cur[a]) < dust {
-				cur[a] = 0
-			}
+			cur[a] += int64(math.Round(fl[i].Delta * unit))
 			i++
 		}
 		pts = append(pts, Point{T: t, H: snap()})
