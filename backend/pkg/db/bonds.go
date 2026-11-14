@@ -97,112 +97,93 @@ func couponDays(mat time.Time, earliest int64) []int64 {
 
 func (b Bond) coupon() float64 { return b.Nominal * b.CouponRate / 100 / 2 }
 
-// ComputeState считает состояние счёта: баланс, позиции, выплаты. Чистая функция (тестируется без БД).
-func ComputeState(rows []LedgerRow, bonds []Bond, now time.Time) AccountState {
-	var st AccountState
-	for _, r := range rows {
-		st.Cash += r.Amount
-	}
-	today := dayNum(now.Unix())
+// heldQty — сколько бумаг isin держим по всему журналу (покупки минус продажи).
+func heldQty(rows []LedgerRow, isin string) float64 { return qtyBefore(rows, isin, math.MaxInt64) }
 
-	// qtyBefore: сколько бумаг держали к началу дня day (покупки/продажи в этот день ещё не считаются)
-	qtyBefore := func(isin string, day int64) float64 {
-		var q float64
-		for _, r := range rows {
-			if r.ISIN != isin {
-				continue
-			}
-			if dayNum(r.Time) >= day {
-				continue
-			}
-			switch r.Kind {
-			case KindBuy:
-				q += r.Qty
-			case KindSell:
-				q -= r.Qty
-			}
+// qtyBefore — сколько бумаг isin держали к началу дня day: покупки и продажи в этот день ещё не считаются.
+func qtyBefore(rows []LedgerRow, isin string, day int64) float64 {
+	var q float64
+	for _, r := range rows {
+		if r.ISIN != isin || dayNum(r.Time) >= day {
+			continue
 		}
-		return q
+		switch r.Kind {
+		case KindBuy:
+			q += r.Qty
+		case KindSell:
+			q -= r.Qty
+		}
 	}
+	return q
+}
+
+// earliestDay — день первой записи журнала (от него назад купоны считать не нужно).
+func earliestDay(rows []LedgerRow) int64 {
 	earliest := int64(math.MaxInt64)
 	for _, r := range rows {
 		if d := dayNum(r.Time); d < earliest {
 			earliest = d
 		}
 	}
+	return earliest
+}
 
-	known := map[string]bool{}
-	for _, b := range bonds {
-		known[b.ISIN] = true
-		mat, err := b.maturityDate()
-		if err != nil || b.Nominal <= 0 {
-			continue
-		}
-		var held float64
-		for _, r := range rows {
-			if r.ISIN != b.ISIN {
-				continue
-			}
-			switch r.Kind {
-			case KindBuy:
-				held += r.Qty
-			case KindSell:
-				held -= r.Qty
-			}
-		}
-		days := couponDays(mat, earliest)
-		matDay := utcDay(mat)
-		matured := matDay <= today
-
-		var nextDay int64
-		for _, d := range days {
-			isRedemption := d == matDay
-			if d <= today {
-				q := qtyBefore(b.ISIN, d)
-				if q <= 0 {
-					continue
-				}
-				amt := q * b.coupon()
-				st.Cash += amt
-				st.Events = append(st.Events, PayEvent{Date: dayString(d), Kind: "coupon", ISIN: b.ISIN, Name: b.Name, Amount: stmtkit.Round2(amt), Qty: q, Done: true})
-				if isRedemption {
-					red := q * b.Nominal
-					st.Cash += red
-					st.Events = append(st.Events, PayEvent{Date: dayString(d), Kind: "redemption", ISIN: b.ISIN, Name: b.Name, Amount: stmtkit.Round2(red), Qty: q, Done: true})
-				}
-				continue
-			}
-			if nextDay == 0 {
-				nextDay = d
-			}
-			if held > 0 {
-				st.Events = append(st.Events, PayEvent{Date: dayString(d), Kind: "coupon", ISIN: b.ISIN, Name: b.Name, Amount: stmtkit.Round2(held * b.coupon()), Qty: held})
-				if isRedemption {
-					st.Events = append(st.Events, PayEvent{Date: dayString(d), Kind: "redemption", ISIN: b.ISIN, Name: b.Name, Amount: stmtkit.Round2(held * b.Nominal), Qty: held})
-				}
-			}
-		}
-
-		if held <= 0 || matured {
-			continue
-		}
-		p := Position{Bond: b, Qty: held}
-		if nextDay != 0 {
-			prev := nextDay - couponPeriodDays
-			p.Accrued = stmtkit.Round2(b.coupon() * float64(today-prev) / couponPeriodDays)
-			p.NextDate = dayString(nextDay)
-			p.NextAmount = stmtkit.Round2(held * b.coupon())
-			if nextDay == matDay {
-				p.NextAmount = stmtkit.Round2(held * (b.coupon() + b.Nominal))
-			}
-		}
-		p.Value = stmtkit.Round2(held * (b.Nominal + p.Accrued))
-		st.Positions = append(st.Positions, p)
-		st.Balance += p.Value
+// settle проходит по датам выплат облигации: прошедшие зачисляются в cash (купон, в день погашения ещё и номинал) по тому,
+// сколько бумаг держали к началу того дня; будущие попадают в события по текущему остатку held. nextDay — ближайшая будущая выплата (0 — нет).
+func (b Bond) settle(rows []LedgerRow, earliest, today int64, held float64) (cash float64, events []PayEvent, nextDay int64) {
+	mat, _ := b.maturityDate()
+	matDay := utcDay(mat)
+	ev := func(d int64, kind string, amt, qty float64, done bool) PayEvent {
+		return PayEvent{Date: dayString(d), Kind: kind, ISIN: b.ISIN, Name: b.Name, Amount: stmtkit.Round2(amt), Qty: qty, Done: done}
 	}
+	for _, d := range couponDays(mat, earliest) {
+		isRedemption := d == matDay
+		if d <= today {
+			q := qtyBefore(rows, b.ISIN, d)
+			if q <= 0 {
+				continue
+			}
+			cash += q * b.coupon()
+			events = append(events, ev(d, "coupon", q*b.coupon(), q, true))
+			if isRedemption {
+				cash += q * b.Nominal
+				events = append(events, ev(d, "redemption", q*b.Nominal, q, true))
+			}
+			continue
+		}
+		if nextDay == 0 {
+			nextDay = d
+		}
+		if held > 0 {
+			events = append(events, ev(d, "coupon", held*b.coupon(), held, false))
+			if isRedemption {
+				events = append(events, ev(d, "redemption", held*b.Nominal, held, false))
+			}
+		}
+	}
+	return cash, events, nextDay
+}
 
-	// облигации, которых нет в справочнике: в отчёте брокера ставки и погашения нет — не теряем позицию, а оцениваем
-	// по средней цене покупки; купоны и погашение по ней не считаются, пока не заданы условия
+// position — позиция по облигации на день today: накопленный купон, ближайшая выплата, стоимость.
+func (b Bond) position(held float64, today, nextDay int64) Position {
+	p := Position{Bond: b, Qty: held}
+	if nextDay != 0 {
+		mat, _ := b.maturityDate()
+		prev := nextDay - couponPeriodDays
+		p.Accrued = stmtkit.Round2(b.coupon() * float64(today-prev) / couponPeriodDays)
+		p.NextDate = dayString(nextDay)
+		p.NextAmount = stmtkit.Round2(held * b.coupon())
+		if nextDay == utcDay(mat) {
+			p.NextAmount = stmtkit.Round2(held * (b.coupon() + b.Nominal))
+		}
+	}
+	p.Value = stmtkit.Round2(held * (b.Nominal + p.Accrued))
+	return p
+}
+
+// noTermsPositions — облигации из журнала, которых нет в справочнике (known): в отчёте брокера ставки и погашения нет, поэтому
+// позиция не теряется, а оценивается по средней цене покупки; купоны и погашение по ней не считаются, пока не заданы условия.
+func noTermsPositions(rows []LedgerRow, known map[string]bool) []Position {
 	type cost struct{ held, bought, spent float64 }
 	byISIN := map[string]*cost{}
 	var unknown []string
@@ -224,14 +205,47 @@ func ComputeState(rows []LedgerRow, bonds []Bond, now time.Time) AccountState {
 		}
 	}
 	sort.Strings(unknown)
+	var out []Position
 	for _, isin := range unknown {
 		c := byISIN[isin]
 		if c.held <= 0 || c.bought <= 0 {
 			continue
 		}
-		v := stmtkit.Round2(c.held * c.spent / c.bought)
-		st.Positions = append(st.Positions, Position{Bond: Bond{ISIN: isin, Name: "условия не заданы"}, Qty: c.held, Value: v, NoTerms: true})
-		st.Balance += v
+		out = append(out, Position{Bond: Bond{ISIN: isin, Name: "условия не заданы"}, Qty: c.held, Value: stmtkit.Round2(c.held * c.spent / c.bought), NoTerms: true})
+	}
+	return out
+}
+
+// ComputeState считает состояние счёта: баланс, позиции, выплаты. Чистая функция (тестируется без БД).
+func ComputeState(rows []LedgerRow, bonds []Bond, now time.Time) AccountState {
+	var st AccountState
+	for _, r := range rows {
+		st.Cash += r.Amount
+	}
+	today := dayNum(now.Unix())
+	earliest := earliestDay(rows)
+
+	known := map[string]bool{}
+	for _, b := range bonds {
+		known[b.ISIN] = true
+		mat, err := b.maturityDate()
+		if err != nil || b.Nominal <= 0 {
+			continue
+		}
+		held := heldQty(rows, b.ISIN)
+		cash, events, nextDay := b.settle(rows, earliest, today, held)
+		st.Cash += cash
+		st.Events = append(st.Events, events...)
+		if held <= 0 || utcDay(mat) <= today { // погашена или не держим: позиции нет
+			continue
+		}
+		p := b.position(held, today, nextDay)
+		st.Positions = append(st.Positions, p)
+		st.Balance += p.Value
+	}
+	for _, p := range noTermsPositions(rows, known) {
+		st.Positions = append(st.Positions, p)
+		st.Balance += p.Value
 	}
 	sort.SliceStable(st.Events, func(i, j int) bool { return st.Events[i].Date < st.Events[j].Date })
 	st.Cash = stmtkit.Round2(st.Cash)
