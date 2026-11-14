@@ -325,15 +325,47 @@ func (s *Server) HandleBinanceSwaps(w http.ResponseWriter, r *http.Request) {
 	bnList(s, w, r, binance.Swaps)
 }
 
+// alignedP2P — ордера со временем, выровненным по журналу: если два файла прочитаны в разных поясах, зачисления в Funding
+// (binance.DetectShift) показывают, на сколько сдвинуть ордера. Файлы-источники не меняются, сдвиг считается на чтении.
+func (s *Server) alignedP2P() ([]db.P2POrder, time.Duration, error) {
+	orders, err := s.storage.BinanceP2P()
+	if err != nil || len(orders) == 0 {
+		return orders, 0, err
+	}
+	ledger, err := s.storage.BinanceLedger()
+	if err != nil {
+		return nil, 0, err
+	}
+	rows := make([]binance.Row, len(ledger))
+	for i, r := range ledger {
+		rows[i] = binance.Row{T: r.T, Account: r.Account, Op: r.Op, Asset: r.Asset, Delta: r.Delta, Note: r.Note}
+	}
+	bo := make([]binance.P2POrder, len(orders))
+	for i, o := range orders {
+		bo[i] = binance.P2POrder{ID: o.ID, Side: o.Side, Asset: o.Asset, Status: o.Status, Qty: o.Qty, Fee: o.Fee, T: o.T}
+	}
+	shift, _ := binance.DetectShift(bo, rows)
+	if shift != 0 {
+		for i := range orders {
+			orders[i].T += shift.Milliseconds()
+		}
+	}
+	return orders, shift, nil
+}
+
 // GET /api/binance/p2p — история C2C-ордеров (гривневая сторона P2P), загруженная из выписки ордеров; пусто — не загружена.
+// Время выровнено по журналу выписки; если понадобился сдвиг (файлы в разных поясах), он в заголовке X-Time-Shift-Minutes.
 func (s *Server) HandleBinanceP2P(w http.ResponseWriter, r *http.Request) {
 	if !allow(w, r, http.MethodGet) {
 		return
 	}
-	orders, err := s.storage.BinanceP2P()
+	orders, shift, err := s.alignedP2P()
 	if err != nil {
 		failErr(w, err)
 		return
+	}
+	if shift != 0 {
+		w.Header().Set("X-Time-Shift-Minutes", strconv.Itoa(int(shift/time.Minute)))
 	}
 	writeJSON(w, orders)
 }

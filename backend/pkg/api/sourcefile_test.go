@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"economic/pkg/binance"
 	"economic/pkg/db"
 	"economic/pkg/mono"
 	"economic/pkg/source"
@@ -351,5 +352,37 @@ func TestP2PHistoryIsSourceOfBinanceAccount(t *testing.T) {
 		if p.Code == "alias" {
 			t.Fatalf("алиас: %+v", p)
 		}
+	}
+}
+
+// Файлы в разных поясах (на имени одного пометки нет): время ордеров выравнивается по зачислениям в журнале на чтении,
+// сам файл-источник не меняется, сдвиг виден в заголовке.
+func TestP2PTimeAlignedToLedger(t *testing.T) {
+	s := newICUServer(t)
+	at := time.Date(2026, 5, 19, 7, 56, 7, 0, time.UTC)
+	var rows []db.BinanceRow
+	var orders []db.P2POrder
+	for i, v := range []float64{25.06, 88.85, 40.1} {
+		o := at.Add(time.Duration(i) * 26 * time.Hour)
+		rows = append(rows, db.BinanceRow{T: o.Add(6 * time.Minute).UnixMilli(), Account: "Funding", Op: "P2P Trading", Asset: "USDT", Delta: v, Kind: binance.KindP2P})
+		orders = append(orders, db.P2POrder{ID: string(rune('a' + i)), T: o.Add(-2 * time.Hour).UnixMilli(), Side: "Buy", Asset: "USDT", Fiat: "UAH", Qty: v + 0.05, Fee: 0.05, Status: "Completed"})
+	}
+	if err := s.storage.SaveBinanceStatement("x.csv", "BN1", rows); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.storage.SaveBinanceP2P(orders); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	s.HandleBinanceP2P(rec, httptest.NewRequest(http.MethodGet, "/api/binance/p2p", nil))
+	if rec.Header().Get("X-Time-Shift-Minutes") != "120" {
+		t.Fatalf("сдвиг: %q", rec.Header().Get("X-Time-Shift-Minutes"))
+	}
+	var got []db.P2POrder
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || len(got) != 3 || got[0].T != at.UnixMilli() {
+		t.Fatalf("время ордера должно встать на момент создания: %v %+v", err, got)
+	}
+	if raw, _ := s.storage.BinanceP2P(); raw[0].T != at.Add(-2*time.Hour).UnixMilli() {
+		t.Fatal("в базе время остаётся как в файле")
 	}
 }
