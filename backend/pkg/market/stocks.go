@@ -23,7 +23,7 @@ const (
 // Stocks — ряды фондовых индексов. Сбой одного индекса не убивает остальные, ошибка — в Result.Error.
 func (c *Client) Stocks(ctx context.Context, rep Reporter) ([]SeriesPoint, Result) {
 	res := Result{Source: SourceStocks}
-	r := c.fredAll(ctx, rep, []fredJob{{"SP500", "S&P 500"}, {"NASDAQCOM", "NASDAQ"}, {"DJIA", "Dow Jones"}})
+	r := c.fredAll(ctx, rep, []fredJob{{"SP500", "S&P 500", ""}, {"NASDAQCOM", "NASDAQ", SerStockNasdaq}, {"DJIA", "Dow Jones", SerStockDow}})
 	errs := r.Errs
 	var out []SeriesPoint
 	out = append(out, weekly(toPoints(SerStockNasdaq, r.Obs["NASDAQCOM"]))...)
@@ -36,7 +36,7 @@ func (c *Client) Stocks(ctx context.Context, rep Reporter) ([]SeriesPoint, Resul
 	out = append(out, stitchHistory(hist, weekly(toPoints(SerStockSP500, r.Obs["SP500"])))...) // недельный ряд FRED + месячная история до него
 	rep.report(95, "")
 	res.Fetched, res.Skipped = len(out), r.Skipped
-	res.Error = strings.Join(errs, "; ")
+	res.Error, res.Tail = strings.Join(errs, "; "), r.Tail
 	return out, res
 }
 

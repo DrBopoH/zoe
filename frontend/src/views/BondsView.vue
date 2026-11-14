@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import UiButton from '../components/ui/UiButton.vue'
+import MarketHeader from '../components/MarketHeader.vue'
 import GrowthChart from '../components/GrowthChart.vue'
 import { storageGet, storageSet } from '../utils/storage.js'
 import IcuIntake from '../components/IcuIntake.vue'
@@ -188,8 +188,7 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
 
 <template>
   <div class="relative space-y-4">
-    <section class="flex flex-wrap items-center gap-3 text-xs">
-      <h2 class="font-bold text-slate-300 uppercase tracking-wider mr-2">{{ source.title }}</h2>
+    <MarketHeader :title="source.title" :running="running" @refresh="refresh">
       <input v-model="q" type="text" class="ui-input !bg-slate-900 !w-56" :placeholder="`Поиск: ${source.idLabel} или название`" />
       <div v-if="currencies.length > 1" class="flex items-center gap-1">
         <button
@@ -218,11 +217,7 @@ const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Р
         <input v-model.number="amount" type="number" min="1" step="1000" class="ui-input !bg-slate-900 !w-28 text-right" />
       </label>
       <span class="text-slate-500">Бумаг: {{ rows.length }}<template v-if="list && rows.length !== list.length"> из {{ list.length }}</template></span>
-      <UiButton variant="secondary" size="sm" class="ml-auto" :disabled="running" @click="refresh">
-        <template v-if="running">ОБНОВЛЯЮ...</template>
-        <template v-else>ОБНОВИТЬ</template>
-      </UiButton>
-    </section>
+    </MarketHeader>
 
     <IcuIntake v-if="icuOpen && section === 'nbu'" :registry="list || []" :today="today" :icu="icu" @close="icuOpen = false" />
 

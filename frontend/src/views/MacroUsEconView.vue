@@ -1,9 +1,9 @@
 <script setup>
 import { computed } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
-import UiButton from '../components/ui/UiButton.vue'
+import MarketHeader from '../components/MarketHeader.vue'
 import { useMarketRefresh } from '../composables/useMarketRefresh.js'
-import { lastPoint, plainPct, sahmRule, technicalRecession, curveState, vixLevel } from '../utils/macro.js'
+import { lastPoint, plainPct, sahmRule, technicalRecession, curveState, vixLevel, hasPoints } from '../utils/macro.js'
 
 // Экран «Экономика США»: рынок труда, рост, кривая доходности, страх и настроения (FRED). Это не сигналы к действию, а картина:
 // подсказки ниже графиков — как исторически читают эти ряды.
@@ -31,19 +31,14 @@ const sentiment = computed(() => lastPoint(props.econ.us_sentiment))
 // Цвет числа как у линии: ниже 65 красный, до 85 жёлтый, выше зелёный
 const sentimentColor = computed(() => { const x = sentiment.value?.v; return x < 65 ? 'text-rose-400' : x <= 85 ? 'text-amber-300' : 'text-emerald-400' })
 const CURVE_TEXT = { inverted: 'инвертирована: короткие ставки выше длинных, исторически это опережало рецессии', flat: 'почти плоская', normal: 'нормальная: длинные ставки выше коротких' }
-const has = computed(() => Object.values(props.econ).some((a) => a && a.length))
+const has = computed(() => hasPoints(props.econ))
 </script>
 
 <template>
   <div class="space-y-4">
-    <section class="flex flex-wrap items-center gap-3 text-xs">
-      <h2 class="font-bold text-slate-300 uppercase tracking-wider mr-2">Экономика США</h2>
+    <MarketHeader title="Экономика США" :running="running" @refresh="refresh">
       <span v-if="unrate" class="text-slate-500">рынок труда: последняя публикация {{ monthOf(unrate) }}</span>
-      <UiButton variant="secondary" size="sm" class="ml-auto" :disabled="running" @click="refresh">
-        <template v-if="running">ОБНОВЛЯЮ...</template>
-        <template v-else>ОБНОВИТЬ</template>
-      </UiButton>
-    </section>
+    </MarketHeader>
 
     <MacroPanel title="Безработица США" :series="econ" :today="today" :ids="['us_unrate']" :empty="EMPTY">
       <template #summary>

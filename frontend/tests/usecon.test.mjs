@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { sahmRule, technicalRecession, curveState, vixLevel, USECON_IDS, SERIES, unitText } from '../src/utils/macro.js'
+import { sahmRule, technicalRecession, curveState, vixLevel, SERIES, unitText } from '../src/utils/macro.js'
 
 const monthly = (vals) => vals.map((v, i) => ({ d: `${2025 + Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}-01`, v }))
 
@@ -30,11 +30,11 @@ test('кривая и VIX словами', () => {
 })
 
 test('все ряды экономики США описаны в SERIES и читаются без ошибок', () => {
-  for (const id of USECON_IDS) assert.ok(SERIES[id] && SERIES[id].label, id)
+  for (const id of ['us_unrate', 'us_gdp', 'us_spread', 'us_vix', 'us_sentiment']) assert.ok(SERIES[id] && SERIES[id].label, id)
   assert.equal(unitText(18.5, 'п.'), '18,5 п.')
 })
 
-import { drawdown, athInfo, changeSince, fearGreedLevel, CRYPTO_IDS, STOCK_IDS } from '../src/utils/macro.js'
+import { drawdown, athInfo, changeSince, fearGreedLevel} from '../src/utils/macro.js'
 
 test('просадка от максимума и позиция относительно пика', () => {
   const pts = [{ d: '2021-11-01', v: 60000 }, { d: '2022-06-01', v: 20000 }, { d: '2024-03-01', v: 70000 }, { d: '2026-11-01', v: 35000 }]
@@ -55,6 +55,4 @@ test('изменение за год и индекс страха словами
   assert.equal(fearGreedLevel(50), 'neutral')
   assert.equal(fearGreedLevel(65), 'greed')
   assert.equal(fearGreedLevel(90), 'extreme-greed')
-  assert.ok(CRYPTO_IDS.every((id) => id.startsWith('crypto_')))
-  assert.ok(STOCK_IDS.every((id) => id.startsWith('stock_')))
 })

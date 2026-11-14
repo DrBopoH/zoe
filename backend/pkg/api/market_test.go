@@ -244,3 +244,21 @@ func TestMarketCurve(t *testing.T) {
 		t.Fatalf("кривое имя: %d", code)
 	}
 }
+
+func TestMacroCatalog(t *testing.T) {
+	s := newMarketServer(t, true)
+	_, body := call(t, s.HandleMacroCatalog, http.MethodGet, "/api/macro/catalog", "")
+	var r struct {
+		Feeds map[string][]string `json:"feeds"`
+	}
+	if json.Unmarshal(body, &r) != nil || len(r.Feeds["us"]) != 5 || r.Feeds["us"][0] != "fed_funds" || len(r.Feeds["stocks"]) != 3 {
+		t.Fatalf("каталог: %s", body)
+	}
+	if code, _ := call(t, s.HandleMacroCatalog, http.MethodPost, "/api/macro/catalog", ""); code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST: %d", code)
+	}
+	s.SetMarket(nil)
+	if code, body := call(t, s.HandleMacroCatalog, http.MethodGet, "/api/macro/catalog", ""); code != 200 || !strings.Contains(string(body), `"feeds":{}`) {
+		t.Fatalf("без клиента: %d %s", code, body)
+	}
+}

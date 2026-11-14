@@ -1,9 +1,9 @@
 <script setup>
 import { computed } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
-import UiButton from '../components/ui/UiButton.vue'
+import MarketHeader from '../components/MarketHeader.vue'
 import { useMarketRefresh } from '../composables/useMarketRefresh.js'
-import { lastPoint, plainPct, signedPct, drawdown, athInfo, changeSince, unitText } from '../utils/macro.js'
+import { lastPoint, plainPct, signedPct, drawdown, athInfo, changeSince, unitText, hasPoints, dateOf } from '../utils/macro.js'
 
 // Экран «Биржа США»: S&P 500, NASDAQ Composite и Dow Jones (FRED, последнее закрытие недели) и просадка от максимума.
 // S&P 500: месячные данные Шиллера с 1871 года (среднее за месяц) + недельное закрытие FRED за последние ~10 лет; NASDAQ — FRED с 1971 года;
@@ -28,21 +28,15 @@ const ath = computed(() => athInfo(props.stocks.stock_sp500))
 const y1 = computed(() => changeSince(props.stocks.stock_sp500, props.today, 1))
 const nas = computed(() => athInfo(props.stocks.stock_nasdaq))
 const dow = computed(() => athInfo(props.stocks.stock_dow))
-const dateOf = (iso) => (iso ? iso.split('-').reverse().join('.') : '')
 const pt = (id) => lastPoint(props.stocks[id])
-const has = computed(() => Object.values(props.stocks).some((a) => a && a.length))
+const has = computed(() => hasPoints(props.stocks))
 </script>
 
 <template>
   <div class="space-y-4">
-    <section class="flex flex-wrap items-center gap-3 text-xs">
-      <h2 class="font-bold text-slate-300 uppercase tracking-wider mr-2">Биржа США</h2>
+    <MarketHeader title="Биржа США" :running="running" @refresh="refresh">
       <span v-if="sp" class="text-slate-500">закрытие недели · последняя точка {{ dateOf(sp.d) }}</span>
-      <UiButton variant="secondary" size="sm" class="ml-auto" :disabled="running" @click="refresh">
-        <template v-if="running">ОБНОВЛЯЮ...</template>
-        <template v-else>ОБНОВИТЬ</template>
-      </UiButton>
-    </section>
+    </MarketHeader>
 
     <MacroPanel title="S&P 500, пункты (с 1871 года)" unit="п." :series="stocks" :today="today" :ids="['stock_sp500']" benner log :empty="EMPTY">
       <template #summary>

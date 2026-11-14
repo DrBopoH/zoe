@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
-import UiButton from '../components/ui/UiButton.vue'
+import MarketHeader from '../components/MarketHeader.vue'
 import { useMarketRefresh } from '../composables/useMarketRefresh.js'
 import { macroSummary, plainPct, lastPoint } from '../utils/macro.js'
 
@@ -22,14 +22,9 @@ const month = computed(() => (sum.value.cpiMonth ? `${sum.value.cpiMonth.slice(5
 
 <template>
   <div class="space-y-4">
-    <section class="flex flex-wrap items-center gap-3 text-xs">
-      <h2 class="font-bold text-slate-300 uppercase tracking-wider mr-2">Инфляция</h2>
+    <MarketHeader title="Инфляция" :running="running" @refresh="refresh">
       <span v-if="month" class="text-slate-500">последняя публикация: {{ month }}</span>
-      <UiButton variant="secondary" size="sm" class="ml-auto" :disabled="running" @click="refresh">
-        <template v-if="running">ОБНОВЛЯЮ...</template>
-        <template v-else>ОБНОВИТЬ</template>
-      </UiButton>
-    </section>
+    </MarketHeader>
     <MacroPanel title="Инфляция к тому же месяцу прошлого года" :series="series" :today="today" :ids="YOY">
       <template #summary>
         <span class="text-slate-400">Инфляция г/г <b class="text-amber-300 tabular-nums">{{ plainPct(sum.cpi) }}</b></span>

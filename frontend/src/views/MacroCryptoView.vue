@@ -1,9 +1,9 @@
 <script setup>
 import { computed } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
-import UiButton from '../components/ui/UiButton.vue'
+import MarketHeader from '../components/MarketHeader.vue'
 import { useMarketRefresh } from '../composables/useMarketRefresh.js'
-import { lastPoint, plainPct, signedPct, drawdown, athInfo, changeSince, fearGreedLevel, unitText } from '../utils/macro.js'
+import { lastPoint, plainPct, signedPct, drawdown, athInfo, changeSince, fearGreedLevel, unitText, hasPoints, dateOf } from '../utils/macro.js'
 
 // Экран «Крипто»: недельные цены Bitcoin, Ethereum, BNB, Solana (публичные свечи Binance), просадка от максимума и индекс страха и жадности.
 // Не прогноз и не совет: картина того, где рынок относительно своих пиков и настроения.
@@ -25,21 +25,15 @@ const FNG_TEXT = { 'extreme-fear': 'крайний страх', fear: 'стра�
 const fngWord = computed(() => FNG_TEXT[fearGreedLevel(fng.value?.v)] || '')
 // Цвет числа в шапке — как у линии: страх голубой, середина серая, жадность янтарная
 const fngColor = computed(() => ({ 'extreme-fear': 'text-sky-300', fear: 'text-sky-300', neutral: 'text-slate-300', greed: 'text-amber-300', 'extreme-greed': 'text-amber-300' })[fearGreedLevel(fng.value?.v)] || 'text-slate-300')
-const dateOf = (iso) => (iso ? iso.split('-').reverse().join('.') : '')
 const coin = (id) => lastPoint(props.crypto[id])
-const has = computed(() => Object.values(props.crypto).some((a) => a && a.length))
+const has = computed(() => hasPoints(props.crypto))
 </script>
 
 <template>
   <div class="space-y-4">
-    <section class="flex flex-wrap items-center gap-3 text-xs">
-      <h2 class="font-bold text-slate-300 uppercase tracking-wider mr-2">Крипто</h2>
+    <MarketHeader title="Крипто" :running="running" @refresh="refresh">
       <span v-if="btc" class="text-slate-500">цены по закрытию недели · последняя точка {{ dateOf(btc.d) }}</span>
-      <UiButton variant="secondary" size="sm" class="ml-auto" :disabled="running" @click="refresh">
-        <template v-if="running">ОБНОВЛЯЮ...</template>
-        <template v-else>ОБНОВИТЬ</template>
-      </UiButton>
-    </section>
+    </MarketHeader>
 
     <MacroPanel title="Bitcoin, $" unit="$" :series="crypto" :today="today" :ids="['crypto_btc']" log :empty="EMPTY">
       <template #summary>

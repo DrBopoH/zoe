@@ -192,30 +192,27 @@ type SeriesResult struct {
 	Unpriced []string
 }
 
-// Series оценивает остатки pts на минутной сетке от g0 (мс, кратно минуте) до endMs.
-// Монета → USDT → ₴: прямая пара XXXUSDT, иначе через BTC/ETH/BNB; стейблы без пары = 1 USDT; UAH — как есть.
-func (c *Client) Series(pts []Point, g0, endMs int64, syms map[string]Sym, progress func(done, total int)) (*SeriesResult, error) {
-	n := int((endMs-g0)/minute) + 1
-	if n <= 0 || len(pts) == 0 {
-		return &SeriesResult{StartMs: g0}, nil
-	}
-	idx := func(t int64) int {
-		i := int((t - g0) / minute)
-		if t < g0 {
-			i = 0
-		}
-		return i
-	}
+// span — когда монета лежит на счёте: [a, b] в индексах минутной сетки.
+type span struct{ a, b int }
 
-	// когда монета лежит на счёте: [first, last] в индексах сетки
-	type span struct{ a, b int }
-	spans := map[string]span{}
+// gridIndex — номер минуты сетки с началом g0 для момента t (до начала сетки — нулевая минута).
+func gridIndex(g0, t int64) int {
+	if t < g0 {
+		return 0
+	}
+	return int((t - g0) / minute)
+}
+
+// holdingSpans — для каждой монеты (кроме токенов ликвидного стейкинга) отрезок сетки от первой ненулевой точки остатка
+// до следующей после последней (или до конца сетки), и отсортированный список монет.
+func holdingSpans(pts []Point, g0 int64, n int) (map[string]span, []string) {
 	assets := map[string]bool{}
 	for _, p := range pts {
 		for a := range p.H {
 			assets[a] = true
 		}
 	}
+	spans := map[string]span{}
 	for a := range assets {
 		if skipLD(a) {
 			continue
@@ -234,55 +231,147 @@ func (c *Client) Series(pts []Point, g0, endMs int64, syms map[string]Sym, progr
 		}
 		b := n - 1
 		if lastPos+1 < len(pts) {
-			b = idx(pts[lastPos+1].T)
+			b = gridIndex(g0, pts[lastPos+1].T)
 		}
-		spans[a] = span{idx(pts[first].T), b}
+		spans[a] = span{gridIndex(g0, pts[first].T), b}
 	}
-
 	names := make([]string, 0, len(spans))
 	for a := range spans {
 		names = append(names, a)
 	}
 	sort.Strings(names)
+	return spans, names
+}
 
-	// прогресс — по запросам: заранее считаем, сколько страниц свечей нужно (курс, монеты, промежуточные BTC/ETH/BNB)
-	if progress != nil {
-		total, midSeen := pages(n), map[string]bool{}
-		for _, a := range names {
-			sp := spans[a]
-			switch {
-			case a == "UAH", a == "USDT":
-			case syms[a+"USDT"].Base != "":
-				total += pages(sp.b - sp.a + 1)
-			case stable[a]:
-			default:
-				for _, m := range []string{"BTC", "ETH", "BNB"} {
-					if syms[a+m].Base == "" {
-						continue
-					}
-					total += pages(sp.b - sp.a + 1)
-					if !midSeen[m] {
-						midSeen[m] = true
-						total += pages(n)
-					}
-					break
+// midCoins — через какие монеты оценивается актив без прямой пары к USDT, в порядке перебора.
+var midCoins = []string{"BTC", "ETH", "BNB"}
+
+// pagesNeeded — сколько страниц свечей понадобится на весь ряд (курс, монеты, промежуточные BTC/ETH/BNB): для прогресса.
+func pagesNeeded(n int, names []string, spans map[string]span, syms map[string]Sym) int {
+	total, midSeen := pages(n), map[string]bool{}
+	for _, a := range names {
+		sp := spans[a]
+		switch {
+		case a == "UAH", a == "USDT":
+		case syms[a+"USDT"].Base != "":
+			total += pages(sp.b - sp.a + 1)
+		case stable[a]:
+		default:
+			for _, m := range midCoins {
+				if syms[a+m].Base == "" {
+					continue
 				}
+				total += pages(sp.b - sp.a + 1)
+				if !midSeen[m] {
+					midSeen[m] = true
+					total += pages(n)
+				}
+				break
 			}
 		}
-		var (
-			pm   sync.Mutex
-			done int
-		)
-		c.page = func() {
-			pm.Lock()
-			defer pm.Unlock()
-			if done < total-1 { // 100% — только когда ряд собран целиком
-				done++
-			}
-			progress(done, total)
+	}
+	return total
+}
+
+// trackPages подключает счётчик страниц свечей к progress; возвращает функцию отключения.
+func (c *Client) trackPages(total int, progress func(done, total int)) func() {
+	var (
+		pm   sync.Mutex
+		done int
+	)
+	c.page = func() {
+		pm.Lock()
+		defer pm.Unlock()
+		if done < total-1 { // 100% — только когда ряд собран целиком
+			done++
 		}
-		defer func() { c.page = nil }()
-		progress(0, total)
+		progress(done, total)
+	}
+	progress(0, total)
+	return func() { c.page = nil }
+}
+
+// assetPrices — цена монеты a в USDT на каждую минуту сетки внутри её отрезка sp; nil — оценить нечем.
+// UAH цены не имеет (учитывается как есть), USDT и стейблы без пары = 1, остальные — прямая пара XXXUSDT, иначе через BTC/ETH/BNB.
+func (c *Client) assetPrices(a string, sp span, syms map[string]Sym, g0 int64, n int, mid func(sym string) ([]float64, bool, error)) ([]float64, error) {
+	switch {
+	case a == "UAH":
+		return nil, nil
+	case a == "USDT":
+		return ones(n), nil
+	case syms[a+"USDT"].Base != "":
+		p, ok, err := c.priceGrid(a+"USDT", g0, n, sp.a, sp.b)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return p, nil
+		}
+		if stable[a] {
+			return ones(n), nil
+		}
+		return nil, nil
+	case stable[a]:
+		return ones(n), nil
+	}
+	for _, m := range midCoins {
+		if syms[a+m].Base == "" {
+			continue
+		}
+		p, ok, err := c.priceGrid(a+m, g0, n, sp.a, sp.b)
+		if err != nil {
+			return nil, err
+		}
+		mp, ok2, err := mid(m + "USDT")
+		if err != nil {
+			return nil, err
+		}
+		if ok && ok2 {
+			px := make([]float64, n)
+			for i := sp.a; i <= sp.b && i < n; i++ {
+				px[i] = p[i] * mp[i]
+			}
+			return px, nil
+		}
+	}
+	return nil, nil
+}
+
+// addHolding прибавляет стоимость остатка монеты a по минутам её отрезка: в гривнах (UAH) или в USDT.
+// Остатки меняются в точках pts; идём по ним параллельно с сеткой.
+func addHolding(pts []Point, a string, sp span, px []float64, g0 int64, n int, usdt, uah []float64) {
+	pk := 0
+	for pk+1 < len(pts) && gridIndex(g0, pts[pk+1].T) <= sp.a {
+		pk++
+	}
+	for i := sp.a; i <= sp.b && i < n; i++ {
+		for pk+1 < len(pts) && gridIndex(g0, pts[pk+1].T) <= i {
+			pk++
+		}
+		// Отрицательный остаток — «дыра» от непоказанной покупки: продажа добавила USDT, а монеты в учёте не было.
+		// Считаем её по рынку, чтобы она гасила эти USDT, а не оставляла на графике завышенный хвост, который потом рухнет.
+		h := pts[pk].H[a]
+		if pts[pk].T > g0+int64(i)*minute+minute-1 || h == 0 {
+			continue
+		}
+		if a == "UAH" {
+			uah[i] += h
+		} else {
+			usdt[i] += h * px[i]
+		}
+	}
+}
+
+// Series оценивает остатки pts на минутной сетке от g0 (мс, кратно минуте) до endMs.
+// Монета → USDT → ₴: прямая пара XXXUSDT, иначе через BTC/ETH/BNB; стейблы без пары = 1 USDT; UAH — как есть.
+func (c *Client) Series(pts []Point, g0, endMs int64, syms map[string]Sym, progress func(done, total int)) (*SeriesResult, error) {
+	n := int((endMs-g0)/minute) + 1
+	if n <= 0 || len(pts) == 0 {
+		return &SeriesResult{StartMs: g0}, nil
+	}
+	spans, names := holdingSpans(pts, g0, n)
+	if progress != nil {
+		defer c.trackPages(pagesNeeded(n, names, spans, syms), progress)()
 	}
 
 	rate, ok, err := c.priceGrid("USDTUAH", g0, n, 0, n-1)
@@ -313,72 +402,15 @@ func (c *Client) Series(pts []Point, g0, endMs int64, syms map[string]Sym, progr
 
 	res := &SeriesResult{StartMs: g0}
 	for _, a := range names {
-		sp := spans[a]
-		var px []float64
-		switch {
-		case a == "UAH":
-			// 1 ₴ = 1 ₴
-		case a == "USDT":
-			px = ones(n)
-		case syms[a+"USDT"].Base != "":
-			p, ok, err := c.priceGrid(a+"USDT", g0, n, sp.a, sp.b)
-			if err != nil {
-				return nil, err
-			}
-			if ok {
-				px = p
-			} else if stable[a] {
-				px = ones(n)
-			}
-		case stable[a]:
-			px = ones(n)
-		default:
-			for _, m := range []string{"BTC", "ETH", "BNB"} {
-				if syms[a+m].Base == "" {
-					continue
-				}
-				p, ok, err := c.priceGrid(a+m, g0, n, sp.a, sp.b)
-				if err != nil {
-					return nil, err
-				}
-				mp, ok2, err := mid(m + "USDT")
-				if err != nil {
-					return nil, err
-				}
-				if ok && ok2 {
-					px = make([]float64, n)
-					for i := sp.a; i <= sp.b && i < n; i++ {
-						px[i] = p[i] * mp[i]
-					}
-					break
-				}
-			}
+		px, err := c.assetPrices(a, spans[a], syms, g0, n, mid)
+		if err != nil {
+			return nil, err
 		}
 		if px == nil && a != "UAH" {
 			res.Unpriced = append(res.Unpriced, a)
 			continue
 		}
-		// остатки меняются в точках pts; идём по ним параллельно с сеткой
-		pk := 0
-		for pk+1 < len(pts) && idx(pts[pk+1].T) <= sp.a {
-			pk++
-		}
-		for i := sp.a; i <= sp.b && i < n; i++ {
-			for pk+1 < len(pts) && idx(pts[pk+1].T) <= i {
-				pk++
-			}
-			// Отрицательный остаток — «дыра» от непоказанной покупки: продажа добавила USDT, а монеты в учёте не было.
-			// Считаем её по рынку, чтобы она гасила эти USDT, а не оставляла на графике завышенный хвост, который потом рухнет.
-			h := pts[pk].H[a]
-			if pts[pk].T > g0+int64(i)*minute+minute-1 || h == 0 {
-				continue
-			}
-			if a == "UAH" {
-				uah[i] += h
-			} else {
-				usdt[i] += h * px[i]
-			}
-		}
+		addHolding(pts, a, spans[a], px, g0, n, usdt, uah)
 	}
 	res.Values = make([]float64, n)
 	for i := range res.Values {

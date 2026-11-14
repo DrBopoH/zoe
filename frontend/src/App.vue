@@ -18,6 +18,7 @@ import { syncOkLines } from './utils/syncNotice.js'
 import { isSyncing, autoSave, syncPath } from './composables/useSync.js'
 import { marketPanelOpen } from './utils/marketPanel.js'
 import { loadMasks } from './composables/useIbanMasks.js'
+import { pollDelay } from './utils/pollDelay.js'
 
 const STORAGE_ACTIVE_TAB = 'economic_active_tab'
 
@@ -89,7 +90,16 @@ const panelState = computed(() => {
 })
 const closePanel = () => { dismissedRun.value = progress.value?.started_at ?? null }
 
+// Опрос статуса идёт цепочкой таймеров: следующий запрос планирует сам fetchStatus (в том числе вызванный вручную),
+// поэтому после старта синка частота растёт сразу, а не через очередной «простойный» интервал. На скрытой вкладке цепочка стоит.
 let pollTimer = null
+const schedulePoll = () => {
+  clearTimeout(pollTimer)
+  pollTimer = null
+  if (document.hidden) return
+  pollTimer = setTimeout(fetchStatus, pollDelay({ syncing: isSyncing.value, marketRunning: !!market.value?.running, lost: connLostSince.value !== null }))
+}
+const onVisibility = () => { if (document.hidden) { clearTimeout(pollTimer); pollTimer = null } else fetchStatus() }
 
 const personsCount = computed(() => {
   const set = new Set()
@@ -125,6 +135,8 @@ const fetchStatus = async () => {
   } catch (err) {
     console.error('Status fetch error:', err)
     if (connLostSince.value === null) connLostSince.value = Date.now()
+  } finally {
+    schedulePoll()
   }
 }
 
@@ -167,11 +179,12 @@ onMounted(() => {
   fetchData()
 
   // Поллим только лёгкий статус; тяжёлые данные грузятся при смене data_version
-  pollTimer = setInterval(fetchStatus, 2000)
+  document.addEventListener('visibilitychange', onVisibility)
 })
 
 onUnmounted(() => {
-  if (pollTimer) clearInterval(pollTimer)
+  clearTimeout(pollTimer)
+  document.removeEventListener('visibilitychange', onVisibility)
 })
 </script>
 

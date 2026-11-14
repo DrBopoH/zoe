@@ -327,18 +327,22 @@ func mergeAmountWords(ws []word) []word {
 	return append(rest, merged...)
 }
 
-func extractPageRows(ws []word, pageNo int) []*txRow {
+// tableWords — слова таблицы операций страницы: между шапкой и подвалом, с склеенными разрядами сумм.
+func tableWords(ws []word) []word {
 	top := tableTop(ws)
 	bottom := tableBottom(ws, top)
-
 	var tw []word
 	for _, w := range ws {
 		if w.y0 > top && w.y0 < bottom {
 			tw = append(tw, w)
 		}
 	}
-	tw = mergeAmountWords(tw)
+	return mergeAmountWords(tw)
+}
 
+// findRows создаёт строку операции на каждую дату в колонке дат; время берётся из слова под датой.
+// Строки идут сверху вниз по вертикальному центру.
+func findRows(tw []word, pageNo int) []*txRow {
 	var rows []*txRow
 	for _, w := range tw {
 		if w.x0 >= colDateMax || !reDateWord.MatchString(w.text) {
@@ -355,21 +359,41 @@ func extractPageRows(ws []word, pageNo int) []*txRow {
 		}
 		rows = append(rows, row)
 	}
-	if len(rows) == 0 {
-		return nil
-	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].yc < rows[j].yc })
+	return rows
+}
 
-	nearest := func(y float64) *txRow {
-		best := rows[0]
-		for _, r := range rows[1:] {
-			if math.Abs(r.yc-y) < math.Abs(best.yc-y) {
-				best = r
-			}
+// nearestRow — строка, чей вертикальный центр ближе всего к y.
+func nearestRow(rows []*txRow, y float64) *txRow {
+	best := rows[0]
+	for _, r := range rows[1:] {
+		if math.Abs(r.yc-y) < math.Abs(best.yc-y) {
+			best = r
 		}
-		return best
 	}
+	return best
+}
 
+// setAmount кладёт сумму в поле строки по правому краю слова: операция, карта, комиссия, скидка.
+func (r *txRow) setAmount(x1 float64, v int64) {
+	switch {
+	case x1 < edgeOp:
+		if !r.haveOp {
+			r.op, r.haveOp = v, true
+		}
+	case x1 < edgeCard:
+		if !r.haveCard {
+			r.card, r.haveCard = v, true
+		}
+	case x1 < edgeFee:
+		r.fee = v
+	default:
+		r.disc = v
+	}
+}
+
+// fillColumns раскладывает слова по колонкам: суммы уходят прямо в ближайшую строку, слова деталей возвращаются по строкам (ключ — y×10).
+func fillColumns(tw []word, rows []*txRow) map[int][]word {
 	detailLines := make(map[int][]word)
 	for _, w := range tw {
 		switch {
@@ -387,35 +411,27 @@ func extractPageRows(ws []word, pageNo int) []*txRow {
 			if !ok {
 				continue
 			}
-			row := nearest(w.yc())
-			switch {
-			case w.x1 < edgeOp:
-				if !row.haveOp {
-					row.op, row.haveOp = v, true
-				}
-			case w.x1 < edgeCard:
-				if !row.haveCard {
-					row.card, row.haveCard = v, true
-				}
-			case w.x1 < edgeFee:
-				row.fee = v
-			default:
-				row.disc = v
-			}
+			nearestRow(rows, w.yc()).setAmount(w.x1, v)
 		}
 	}
+	return detailLines
+}
 
+// detailGroup — несколько соседних строк деталей, относящихся к одной операции.
+type detailGroup struct {
+	first, last float64
+	lines       []string
+}
+
+// groupDetails склеивает строки деталей сверху вниз: расстояние между строками не больше detailsRowGap — одна операция.
+func groupDetails(detailLines map[int][]word) []*detailGroup {
 	keys := make([]int, 0, len(detailLines))
 	for k := range detailLines {
 		keys = append(keys, k)
 	}
 	sort.Ints(keys)
 
-	type group struct {
-		first, last float64
-		lines       []string
-	}
-	var groups []*group
+	var groups []*detailGroup
 	for _, k := range keys {
 		line := detailLines[k]
 		sort.SliceStable(line, func(i, j int) bool { return line[i].x0 < line[j].x0 })
@@ -423,19 +439,28 @@ func extractPageRows(ws []word, pageNo int) []*txRow {
 		for i, w := range line {
 			parts[i] = w.text
 		}
-		y := float64(k) / 10
+		text, y := strings.Join(parts, " "), float64(k)/10
 		if n := len(groups); n > 0 && y-groups[n-1].last <= detailsRowGap {
 			groups[n-1].last = y
-			groups[n-1].lines = append(groups[n-1].lines, strings.Join(parts, " "))
+			groups[n-1].lines = append(groups[n-1].lines, text)
 		} else {
-			groups = append(groups, &group{first: y, last: y, lines: []string{strings.Join(parts, " ")}})
+			groups = append(groups, &detailGroup{first: y, last: y, lines: []string{text}})
 		}
 	}
-	for _, g := range groups {
-		row := nearest((g.first + g.last + lineHeightPt) / 2)
+	return groups
+}
+
+// extractPageRows собирает операции одной страницы по координатам слов: строки по датам, суммы и детали — в ближайшую строку.
+func extractPageRows(ws []word, pageNo int) []*txRow {
+	tw := tableWords(ws)
+	rows := findRows(tw, pageNo)
+	if len(rows) == 0 {
+		return nil
+	}
+	for _, g := range groupDetails(fillColumns(tw, rows)) {
+		row := nearestRow(rows, (g.first+g.last+lineHeightPt)/2)
 		row.details = append(row.details, strings.Join(g.lines, " "))
 	}
-
 	return rows
 }
 

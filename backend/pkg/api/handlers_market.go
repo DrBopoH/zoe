@@ -16,7 +16,12 @@ import (
 // источники-«фиды» идут параллельно и не знают друг о друге. Публичные API без ключей, кеш стирается вайпом.
 
 // SetMarket подключает клиент публичных облигационных данных (nil — обновление выключено, кеш читается).
-func (s *Server) SetMarket(c *market.Client) { s.mk.client = c }
+func (s *Server) SetMarket(c *market.Client) {
+	if c != nil && c.LastDate == nil {
+		c.LastDate = s.storage.MacroLastDate // тяжёлые дневные ряды FRED докачиваются хвостом от последней сохранённой даты
+	}
+	s.mk.client = c
+}
 
 const marketFeedTimeout = 90 * time.Second
 
@@ -110,7 +115,7 @@ func (s *Server) startMarket(ctx context.Context, only string) bool {
 					var pts []market.SeriesPoint
 					pts, res = f.Series(fctx, rep)
 					if ctx.Err() == nil && len(pts) > 0 {
-						if err := s.storage.SaveMacroSeries(pts, time.Now().Unix()); err != nil {
+						if err := s.storage.SaveMacroSeries(pts, time.Now().Unix(), res.Tail...); err != nil {
 							res.Error = strings.TrimSpace(res.Error + " сохранение: " + err.Error())
 						}
 					}
@@ -322,4 +327,17 @@ func (s *Server) HandleMacro(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"series": series, "updated_at": updated})
+}
+
+// GET /api/macro/catalog — какие ряды даёт каждый числовой источник: {"feeds":{"fx":["usd_uah","eur_uah","xau_uah"],…}}.
+// Список ведёт бэкенд (market.Feed.Provides): фронт берёт id оттуда, а не хранит свои копии.
+func (s *Server) HandleMacroCatalog(w http.ResponseWriter, r *http.Request) {
+	if !allow(w, r, http.MethodGet) {
+		return
+	}
+	feeds := map[string][]string{}
+	if c := s.mk.client; c != nil {
+		feeds = c.Catalog()
+	}
+	writeJSON(w, map[string]any{"feeds": feeds})
 }

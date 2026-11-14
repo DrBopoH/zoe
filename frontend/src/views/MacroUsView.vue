@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
-import UiButton from '../components/ui/UiButton.vue'
+import MarketHeader from '../components/MarketHeader.vue'
 import { useMarketRefresh } from '../composables/useMarketRefresh.js'
 import { lastPoint, valueAt, realRate, signedPct, plainPct } from '../utils/macro.js'
 
@@ -31,14 +31,9 @@ const uaReal = computed(() => (uaPolicy.value !== null && uaCpi.value !== null ?
 
 <template>
   <div class="space-y-4">
-    <section class="flex flex-wrap items-center gap-3 text-xs">
-      <h2 class="font-bold text-slate-300 uppercase tracking-wider mr-2">Ставка ФРС</h2>
+    <MarketHeader title="Ставка ФРС" :running="running" @refresh="refresh">
       <span v-if="month" class="text-slate-500">инфляция США: последняя публикация {{ month }}</span>
-      <UiButton variant="secondary" size="sm" class="ml-auto" :disabled="running" @click="refresh">
-        <template v-if="running">ОБНОВЛЯЮ...</template>
-        <template v-else>ОБНОВИТЬ</template>
-      </UiButton>
-    </section>
+    </MarketHeader>
 
     <MacroPanel title="Ставка ФРС и доходность 10-летних Treasury" :series="us" :today="today" :ids="RATES" empty="Нет данных. Нажми «Обновить»: подтянутся ряды США из FRED" hint="Колесо: масштаб, перетаскивание: сдвиг, двойной клик: сброс. Ставка ФРС — эффективная по месяцам; ступенька — верхняя граница целевого коридора с 2008 года">
       <template #summary>
