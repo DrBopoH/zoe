@@ -53,3 +53,31 @@ func TestParse(t *testing.T) {
 		t.Fatalf("tz: %d", tx[0].Time)
 	}
 }
+
+// Разбор выписки по частям: каждая часть проверяется отдельно, чтобы поломка показывала, где именно.
+func TestParserParts(t *testing.T) {
+	if d, err := detectDelimiter("шапка, с запятой\nДата і час;Сума;Деталі операції\n"); err != nil || d != ';' {
+		t.Fatalf("разделитель по строке заголовка, а не шапки: %q %v", d, err)
+	}
+	if d, _ := detectDelimiter("Дата,Опис,Сума\n"); d != ',' {
+		t.Fatalf("запятая: %q", d)
+	}
+	if _, err := detectDelimiter("\n  \n"); err == nil {
+		t.Fatal("пустой файл должен давать ошибку")
+	}
+
+	col := mapColumns([]string{"Дата", "x", "Номер картки", "Опис", "MCC", "Сума у валюті рахунку", "Комісія"})
+	if col != (columns{date: 0, desc: 3, mcc: 4, amount: 5, fee: 6, card: 2}) {
+		t.Fatalf("колонки: %+v", col)
+	}
+	if got := mapColumns([]string{"a", "b"}); got != defaultColumns() {
+		t.Fatalf("без названий — по умолчанию: %+v", got)
+	}
+
+	if counterOf("Переказ: Іван Петренко") != "Іван Петренко" || counterOf("Зарахування: 01.11.2026") != "" || counterOf("без двоеточия") != "" {
+		t.Fatal("имя контрагента из описания")
+	}
+	if iban, card, bal := statementHead("UA583003350000026001234567890\nКартка: 4441****1234\nБаланс на кінець періоду: −1 234,50"); iban == "" || card != "4441****1234" || bal != -1234.5 {
+		t.Fatalf("шапка: %q %q %v", iban, card, bal)
+	}
+}
