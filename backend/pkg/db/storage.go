@@ -259,89 +259,93 @@ CREATE TABLE IF NOT EXISTS account_overrides (
 );
 `
 
-func (s *Storage) initCore() error {
-	s.coreMu.Lock()
-	defer s.coreMu.Unlock()
+// legacyPair — строка старой таблицы: две или три колонки (третья пустая у двухколоночных).
+type legacyPair struct{ a, b, c string }
 
-	tx, err := s.coreDB.Begin()
+// legacyCore — что лежит в core.db от старой схемы (до «алиас → структура»): флаги, какие таблицы старые, и их строки.
+type legacyCore struct {
+	aliases, links, accounts bool         // user_aliases, alias_accounts, user_accounts в старом виде
+	oldAliases               []legacyPair // (user_id, alias)
+	oldLinks                 []legacyPair // (alias, account_identifier)
+	oldUA                    []legacyPair // (alias-заметка, account_identifier, parent_identifier)
+}
+
+func (l legacyCore) hasAny() bool { return l.aliases || l.links || l.accounts }
+
+// readPairs читает строки запроса из двух (n=2) или трёх (n=3) колонок.
+func readPairs(tx *sql.Tx, q string, n int) ([]legacyPair, error) {
+	rows, err := tx.Query(q)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer tx.Rollback()
-
-	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS users (
-		id TEXT PRIMARY KEY, name TEXT NOT NULL,
-		role TEXT NOT NULL DEFAULT 'DONOR', avatar_url TEXT)`); err != nil {
-		return err
-	}
-
-	// ── миграция со старой схемы ──
-	legacyAliases := tableExists(tx, "user_aliases") && !hasColumn(tx, "user_aliases", "alias_key")
-	legacyLinks := tableExists(tx, "alias_accounts") && !hasColumn(tx, "alias_accounts", "alias_key")
-	legacyUA := tableExists(tx, "user_accounts")
-
-	type pair struct{ a, b, c string }
-	var oldAliases, oldLinks, oldUA []pair
-
-	read := func(q string, n int) ([]pair, error) {
-		rows, err := tx.Query(q)
+	defer rows.Close()
+	var out []legacyPair
+	for rows.Next() {
+		var p legacyPair
+		var err error
+		if n == 2 {
+			err = rows.Scan(&p.a, &p.b)
+		} else {
+			err = rows.Scan(&p.a, &p.b, &p.c)
+		}
 		if err != nil {
 			return nil, err
 		}
-		defer rows.Close()
-		var out []pair
-		for rows.Next() {
-			var p pair
-			var err error
-			if n == 2 {
-				err = rows.Scan(&p.a, &p.b)
-			} else {
-				err = rows.Scan(&p.a, &p.b, &p.c)
-			}
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, p)
-		}
-		return out, rows.Err()
+		out = append(out, p)
 	}
+	return out, rows.Err()
+}
 
-	if legacyAliases {
+// readLegacyCore определяет старые таблицы и вычитывает их строки — до того, как они будут переименованы.
+func readLegacyCore(tx *sql.Tx) (legacyCore, error) {
+	l := legacyCore{
+		aliases:  tableExists(tx, "user_aliases") && !hasColumn(tx, "user_aliases", "alias_key"),
+		links:    tableExists(tx, "alias_accounts") && !hasColumn(tx, "alias_accounts", "alias_key"),
+		accounts: tableExists(tx, "user_accounts"),
+	}
+	var err error
+	if l.aliases {
 		// только алиасы существующих лиц (иначе FK уронит миграцию)
-		if oldAliases, err = read(`SELECT ua.user_id, ua.alias FROM user_aliases ua JOIN users u ON u.id = ua.user_id`, 2); err != nil {
-			return err
+		if l.oldAliases, err = readPairs(tx, `SELECT ua.user_id, ua.alias FROM user_aliases ua JOIN users u ON u.id = ua.user_id`, 2); err != nil {
+			return l, err
 		}
 	}
-	if legacyLinks {
-		if oldLinks, err = read(`SELECT alias, account_identifier FROM alias_accounts`, 2); err != nil {
-			return err
+	if l.links {
+		if l.oldLinks, err = readPairs(tx, `SELECT alias, account_identifier FROM alias_accounts`, 2); err != nil {
+			return l, err
 		}
 	}
-	if legacyUA && hasColumn(tx, "user_accounts", "note") {
+	if l.accounts && hasColumn(tx, "user_accounts", "note") {
 		parentCol := `''`
 		if hasColumn(tx, "user_accounts", "parent_identifier") {
 			parentCol = `COALESCE(parent_identifier,'')`
 		}
-		if oldUA, err = read(`SELECT COALESCE(note,''), account_identifier, `+parentCol+` FROM user_accounts`, 3); err != nil {
-			return err
+		if l.oldUA, err = readPairs(tx, `SELECT COALESCE(note,''), account_identifier, `+parentCol+` FROM user_accounts`, 3); err != nil {
+			return l, err
 		}
 	}
+	return l, nil
+}
 
-	if legacyAliases {
-		if _, err := tx.Exec(`ALTER TABLE user_aliases RENAME TO user_aliases_legacy`); err != nil {
+// renameLegacyTables убирает старые таблицы с дороги (они остаются как *_legacy), чтобы создать новую схему под теми же именами.
+func renameLegacyTables(tx *sql.Tx, l legacyCore) error {
+	for _, r := range []struct {
+		old  bool
+		name string
+	}{{l.aliases, "user_aliases"}, {l.links, "alias_accounts"}} {
+		if !r.old {
+			continue
+		}
+		if _, err := tx.Exec(`ALTER TABLE ` + r.name + ` RENAME TO ` + r.name + `_legacy`); err != nil {
 			return err
 		}
 	}
-	if legacyLinks {
-		if _, err := tx.Exec(`ALTER TABLE alias_accounts RENAME TO alias_accounts_legacy`); err != nil {
-			return err
-		}
-	}
-	if _, err := tx.Exec(coreSchema); err != nil {
-		return fmt.Errorf("core schema: %w", err)
-	}
+	return nil
+}
 
-	for _, p := range oldAliases {
+// restoreLegacyRows переносит строки старой схемы в новую: алиасы, затем связи «алиас → счёт» (из alias_accounts и user_accounts).
+func restoreLegacyRows(tx *sql.Tx, l legacyCore) error {
+	for _, p := range l.oldAliases {
 		if k := aliasKey(p.b); k != "" {
 			if _, err := tx.Exec(`INSERT OR IGNORE INTO user_aliases(alias_key, alias, user_id) VALUES(?,?,?)`, k, strings.TrimSpace(p.b), p.a); err != nil {
 				return err
@@ -349,7 +353,7 @@ func (s *Storage) initCore() error {
 		}
 	}
 	parentOf := map[string]string{}
-	for _, p := range oldUA {
+	for _, p := range l.oldUA {
 		if p.c != "" {
 			parentOf[p.b] = p.c
 		}
@@ -366,23 +370,71 @@ func (s *Storage) initCore() error {
 			k, strings.TrimSpace(alias), strings.TrimSpace(id), parent)
 		return err
 	}
-	for _, p := range oldLinks {
+	for _, p := range l.oldLinks {
 		if err := insLink(p.a, p.b, parentOf[p.b]); err != nil {
 			return err
 		}
 	}
-	for _, p := range oldUA {
+	for _, p := range l.oldUA {
 		if err := insLink(p.a, p.b, p.c); err != nil {
 			return err
 		}
 	}
-	if legacyUA {
+	if l.accounts {
 		if _, err := tx.Exec(`ALTER TABLE user_accounts RENAME TO user_accounts_legacy`); err != nil {
 			return err
 		}
 	}
+	return nil
+}
 
-	if err := tx.Commit(); err != nil {
+// migrateCoreSchema — одна транзакция: таблица лиц, перенос старой схемы (если она есть), новая схема. Возвращает, была ли миграция.
+func (s *Storage) migrateCoreSchema() (migrated bool, err error) {
+	tx, err := s.coreDB.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS users (
+		id TEXT PRIMARY KEY, name TEXT NOT NULL,
+		role TEXT NOT NULL DEFAULT 'DONOR', avatar_url TEXT)`); err != nil {
+		return false, err
+	}
+	legacy, err := readLegacyCore(tx)
+	if err != nil {
+		return false, err
+	}
+	if err := renameLegacyTables(tx, legacy); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(coreSchema); err != nil {
+		return false, fmt.Errorf("core schema: %w", err)
+	}
+	if err := restoreLegacyRows(tx, legacy); err != nil {
+		return false, err
+	}
+	return legacy.hasAny(), tx.Commit()
+}
+
+// ensureAccountLifeColumns добавляет в account_overrides ручные даты жизни счёта (NULL — «считай по выписке»).
+func (s *Storage) ensureAccountLifeColumns() error {
+	for _, col := range []string{"opened_at INTEGER", "closed_at INTEGER"} {
+		if !hasColumn(s.coreDB, "account_overrides", strings.Fields(col)[0]) {
+			if _, err := s.coreDB.Exec(`ALTER TABLE account_overrides ADD COLUMN ` + col); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Storage) initCore() error {
+	s.coreMu.Lock()
+	defer s.coreMu.Unlock()
+
+	migrated, err := s.migrateCoreSchema()
+	if err != nil {
 		return err
 	}
 	if err := s.initICU(); err != nil {
@@ -394,15 +446,10 @@ func (s *Storage) initCore() error {
 	if err := s.dropLegacyBinanceCore(); err != nil {
 		return fmt.Errorf("drop legacy binance tables: %w", err)
 	}
-	// ручные даты жизни счёта (NULL — «считай по выписке»)
-	for _, col := range []string{"opened_at INTEGER", "closed_at INTEGER"} {
-		if !hasColumn(s.coreDB, "account_overrides", strings.Fields(col)[0]) {
-			if _, err := s.coreDB.Exec(`ALTER TABLE account_overrides ADD COLUMN ` + col); err != nil {
-				return err
-			}
-		}
+	if err := s.ensureAccountLifeColumns(); err != nil {
+		return err
 	}
-	if legacyAliases || legacyLinks || legacyUA {
+	if migrated {
 		log.Printf("[DB] core.db мигрирована на схему «алиас → структура» (старые таблицы сохранены как *_legacy)")
 	}
 	return nil
