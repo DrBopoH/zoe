@@ -150,7 +150,7 @@ func (w *walker) step() (finished bool, err error) {
 	}
 	// 3. Окно, запрос, запись результата.
 	from := w.windowStart(spans)
-	items, done, err := w.request(from)
+	items, done, err := w.request(from, w.atHistoryBottom(spans))
 	if err != nil || done {
 		return true, err
 	}
@@ -197,8 +197,19 @@ func (w *walker) windowStart(spans []db.Span) int64 {
 	return from
 }
 
+// atHistoryBottom — ниже курсора в кеше ничего нет: ни снятого отрезка, ни известной даты открытия раньше него.
+// Только здесь отказ банка «раньше ничего нет» может значить конец истории. Над уже снятым (свежий хвост, дыра между
+// отрезками) счёт точно существовал, и тот же отказ — ошибка запроса, а не край истории.
+func (w *walker) atHistoryBottom(spans []db.Span) bool {
+	if _, ok := db.SpanEndingBefore(spans, w.to); ok {
+		return false
+	}
+	return w.opened == 0 || w.to < w.opened
+}
+
 // request запрашивает окно [from, to] у банка. done — банк сказал «раньше ничего нет»: счёт снят целиком.
-func (w *walker) request(from int64) (items []mono.StatementItemDTO, done bool, err error) {
+// bottom — ниже этого окна в кеше ничего нет (см. atHistoryBottom).
+func (w *walker) request(from int64, bottom bool) (items []mono.StatementItemDTO, done bool, err error) {
 	if w.cfg.onWindow != nil {
 		w.cfg.onWindow(from, w.to)
 	}
@@ -214,6 +225,10 @@ func (w *walker) request(from int64) (items []mono.StatementItemDTO, done bool, 
 	switch {
 	case err == nil:
 		return items, false, nil
+	case w.cfg.classify(err) == errHistoryEnd && !bottom:
+		// Отрезок не помечаем снятым: следующая синхронизация спросит его снова, а причина видна в панели.
+		log.Printf("[Sync Error] %s: банк отклонил окно %d–%d счёта %s, хотя история ниже уже снята: %v", w.cfg.label, from, w.to, w.accID, err)
+		return nil, false, fmt.Errorf("банк отклонил запрос свежего отрезка: %w", err)
 	case w.cfg.classify(err) == errHistoryEnd:
 		log.Printf("[Sync] %s: банк не отдаёт историю раньше — счёт %s снят целиком", w.cfg.label, w.accID)
 		w.complete(w.to)

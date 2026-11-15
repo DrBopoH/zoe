@@ -3,7 +3,9 @@ package mono
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -67,10 +69,31 @@ func (e *RateLimitError) Error() string {
 	return "rate limit 429: mono api limits to 1 req / 60 sec"
 }
 
-type BadRequestError struct{}
+// BadRequestError — банк ответил 400 на запрос выписки. Обычно это «раньше счёта не было» (окно до его открытия),
+// но тем же кодом банк отклоняет и неверные параметры: Msg — его собственное объяснение (errorDescription), если было.
+type BadRequestError struct{ Msg string }
 
 func (e *BadRequestError) Error() string {
+	if e.Msg != "" {
+		return "bad request 400: " + e.Msg
+	}
 	return "bad request 400: reached account creation limit"
+}
+
+// badRequestText достаёт объяснение банка из тела ответа 400: {"errorDescription":"…"}; не JSON — первые 200 символов как есть.
+func badRequestText(body io.Reader) string {
+	raw, _ := io.ReadAll(io.LimitReader(body, 4096))
+	var r struct {
+		ErrorDescription string `json:"errorDescription"`
+	}
+	if json.Unmarshal(raw, &r) == nil && r.ErrorDescription != "" {
+		return r.ErrorDescription
+	}
+	t := []rune(strings.TrimSpace(string(raw)))
+	if len(t) > 200 {
+		t = t[:200]
+	}
+	return string(t)
 }
 
 func (c *Client) GetClientInfo() (*UserInfoDTO, error) {
@@ -107,7 +130,7 @@ func (c *Client) get(path, what string, badRequest bool, out any) error {
 	case resp.StatusCode == http.StatusTooManyRequests:
 		return &RateLimitError{}
 	case resp.StatusCode == http.StatusBadRequest && badRequest:
-		return &BadRequestError{}
+		return &BadRequestError{Msg: badRequestText(resp.Body)}
 	case resp.StatusCode != http.StatusOK:
 		return fmt.Errorf("mono %s status: %d", what, resp.StatusCode)
 	}
