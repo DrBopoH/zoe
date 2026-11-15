@@ -75,6 +75,15 @@ test('у рядов Норвегии, Швеции и Канады и курсо
   for (const id of ['nok_uah', 'sek_uah', 'cad_uah']) assert.ok(SERIES[id]?.label && SERIES[id]?.color, id)
 })
 
+test('карточка Украины: резервы в млрд долларов и рост M3 в процентах', () => {
+  const ua = { cc: 'ua', name: 'Украина', metrics: { policy: 'policy_rate', reserves: 'ua_reserves', m3: 'ua_m3_yoy' } }
+  const rows = countryRows(ua, { ua_reserves: [{ d: '2026-09-01', v: 48.67 }], ua_m3_yoy: [{ d: '2026-09-01', v: 9.94 }] })
+  assert.deepEqual(rows.map((r) => r.key), ['policy', 'reserves', 'm3'])
+  assert.equal(rows[1].text, '48,67 млрд $')
+  assert.equal(rows[2].text, '9,94 %')
+  for (const id of ['ua_reserves', 'ua_m0', 'ua_m3', 'ua_m3_yoy']) assert.ok(SERIES[id]?.label && SERIES[id]?.color, id)
+})
+
 test('высокая инфляция в карточке: без сокращений и потери знаков', () => {
   const eg = { cc: 'eg', name: 'Египет', metrics: { cpi: 'eg_cpi' } }
   assert.equal(countryRows(eg, { eg_cpi: [{ d: '2026-09-01', v: 165.2 }] })[0].text, '165,2 %')
