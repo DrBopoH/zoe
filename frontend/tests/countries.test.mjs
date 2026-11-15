@@ -46,3 +46,12 @@ test('карточка Швейцарии: только те показател�
   const ch = { cc: 'ch', name: 'Швейцария', metrics: { policy: 'ch_policy', cpi: 'ch_cpi', u: 'ch_u', fx: 'chf_uah' } }
   assert.deepEqual(countryRows(ch, {}).map((r) => r.key), ['policy', 'cpi', 'u', 'fx'])
 })
+
+test('у рядов Японии, Китая, доходности Швейцарии и курсов иены и юаня есть подпись и цвет', () => {
+  for (const id of ['ch_y10', 'jp_policy', 'jp_cpi', 'jp_u', 'jp_y10', 'jp_nikkei', 'cn_policy', 'cn_cpi', 'jpy_uah', 'cny_uah']) assert.ok(SERIES[id]?.label && SERIES[id]?.color, id)
+})
+
+test('карточка Китая: ставка, инфляция и курс; безработицы и доходности нет', () => {
+  const cn = { cc: 'cn', name: 'Китай', metrics: { policy: 'cn_policy', cpi: 'cn_cpi', fx: 'cny_uah' } }
+  assert.deepEqual(countryRows(cn, { cn_cpi: [{ d: '2026-09-01', v: 0.3 }] }).map((r) => r.text), ['—', '0,3 %', '—'])
+})

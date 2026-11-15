@@ -57,6 +57,8 @@ func packServer(t *testing.T, failSub string) *httptest.Server {
 			return
 		}
 		switch {
+		case strings.Contains(p, "IRLTLT01CHM156N"):
+			w.Write([]byte("observation_date,IRLTLT01CHM156N\n2026-08-01,0.55\n2026-09-01,0.59\n"))
 		case strings.Contains(p, "IUDBEDR"):
 			w.Write([]byte("DATE,IUDBEDR\n02 Jan 2024,5.25\n03 Jan 2024,5.25\n01 Aug 2024,5.00\n"))
 		case strings.Contains(p, "IUDSOIA"):
@@ -129,6 +131,9 @@ func TestSwitzerlandBuildsSeries(t *testing.T) {
 	if p := by[SerCHPolicy]; len(p) != 2 || p[1].Date != "2026-10-01" || p[1].Value != 0.25 {
 		t.Fatalf("policy: %+v", p)
 	}
+	if y := by[SerCHY10]; len(y) != 2 || y[1].Value != 0.59 {
+		t.Fatalf("ch_y10 (FRED): %+v", y)
+	}
 	if len(by[SerCHCPI]) != 2 || len(by[SerCHUnrate]) != 2 {
 		t.Fatalf("cpi/unrate: %v", by)
 	}
@@ -136,7 +141,7 @@ func TestSwitzerlandBuildsSeries(t *testing.T) {
 
 func TestPacksSkipDisabledBases(t *testing.T) {
 	c := NewClient()
-	c.BoEBase, c.ONSBase, c.BISBase, c.EurostatBase = "", "", "", ""
+	c.BoEBase, c.ONSBase, c.BISBase, c.EurostatBase, c.FREDBase = "", "", "", "", ""
 	if pts, res := c.UK(context.Background(), nil); len(pts) != 0 || res.Error != "" {
 		t.Fatalf("UK: %d %q", len(pts), res.Error)
 	}
@@ -146,11 +151,11 @@ func TestPacksSkipDisabledBases(t *testing.T) {
 }
 
 func TestPacksRegisteredWithSources(t *testing.T) {
-	if !IsSource(SourceGB) || !IsSource(SourceCH) {
+	if !IsSource(SourceGB) || !IsSource(SourceCH) || !IsSource(SourceJP) || !IsSource(SourceCN) {
 		t.Fatal("gb/ch не зарегистрированы")
 	}
 	cat := NewClient().Catalog()
-	if len(cat[SourceGB]) != 6 || len(cat[SourceCH]) != 3 {
+	if len(cat[SourceGB]) != 6 || len(cat[SourceCH]) != 4 || len(cat[SourceJP]) != 5 || len(cat[SourceCN]) != 2 {
 		t.Fatalf("%v", cat)
 	}
 	for _, c := range Countries() {
