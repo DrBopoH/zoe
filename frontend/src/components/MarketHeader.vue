@@ -2,7 +2,7 @@
 import UiButton from './ui/UiButton.vue'
 import UiIcon from './ui/UiIcon.vue'
 
-// Шапка раздела «Рынок»: заголовок, справа кнопка обновления — иконка из двух стрелок: при наведении поворачивается, пока идёт опрос — крутится. Всё своё у раздела (поиск, переключатели, «последняя точка …»)
+// Шапка раздела «Рынок»: заголовок, справа кнопка обновления — иконка из двух стрелок: при наведении поворачивается, пока идёт опрос — серая кнопка с крутящимися стрелками. Всё своё у раздела (поиск, переключатели, «последняя точка …»)
 // кладётся в слот между ними. Кнопка сама не знает, что обновлять: нажатие уходит событием refresh.
 defineProps({
   title: { type: String, required: true },
@@ -21,7 +21,7 @@ defineEmits(['refresh'])
     >
       <UiIcon
         name="refresh" size="lg"
-        :class="running ? 'animate-spin text-emerald-400' : 'transition-transform duration-500 ease-out group-hover:rotate-180'"
+        :class="running ? 'animate-spin text-slate-500' : 'transition-transform duration-500 ease-out group-hover:rotate-180'"
         class="motion-reduce:animate-none motion-reduce:transition-none"
       />
     </UiButton>
