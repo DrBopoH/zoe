@@ -375,12 +375,9 @@ func (c *Client) Series(pts []Point, g0, endMs int64, syms map[string]Sym, progr
 		defer c.trackPages(pagesNeeded(n, names, spans, syms), progress)()
 	}
 
-	rate, ok, err := c.priceGrid("USDTUAH", g0, n, 0, n-1)
+	rate, err := c.rateGrid(g0, n)
 	if err != nil {
 		return nil, err
-	}
-	if !ok {
-		return nil, errNoRate
 	}
 
 	usdt := make([]float64, n)

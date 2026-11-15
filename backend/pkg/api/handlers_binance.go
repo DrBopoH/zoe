@@ -9,12 +9,14 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"economic/pkg/binance"
 	"economic/pkg/db"
+	"economic/pkg/market"
 )
 
 // Binance — такой же источник, как банки: выписка (CSV) загружается общим импортом (importSource), всё полученное — кеш
@@ -123,6 +125,11 @@ func (s *Server) syncBinance(ctx context.Context, progress func(done, total int)
 	if err != nil {
 		return err
 	}
+	// Пара USDTUAH снята с торгов: после её последней свечи гривневый курс USDT — официальный курс доллара НБУ.
+	c.UAHRate = s.nbuUSDRate()
+	if r, external, err := c.RateUAH(time.Now().UnixMilli()); err == nil && (external || prices["USDTUAH"] <= 0) {
+		prices["USDTUAH"] = r // тикер снятой пары пуст или застыл на последней сделке
+	}
 	v, ok := binance.Value(h, prices)
 	if !ok {
 		return errors.New("нет курса USDT/UAH — оценить портфель в гривнах нечем")
@@ -206,6 +213,24 @@ func (s *Server) syncBinance(ctx context.Context, progress func(done, total int)
 		return fmt.Errorf("минутный ряд не дописан (кончается %s): %w", time.Unix(last, 0).Format("02.01.2006 15:04"), tailErr)
 	}
 	return nil
+}
+
+// nbuUSDRate — официальный курс доллара НБУ из кеша рыночных данных: гривен за доллар на день момента tMs (по UTC),
+// а если на этот день курса нет (выходной, ряд ещё не обновлён) — последний известный раньше. 0 — курса нет вовсе.
+func (s *Server) nbuUSDRate() func(tMs int64) float64 {
+	series, _, err := s.storage.MacroSeries([]string{market.SerUSDUAH})
+	pts := series[market.SerUSDUAH]
+	if err != nil || len(pts) == 0 {
+		return func(int64) float64 { return 0 }
+	}
+	return func(tMs int64) float64 {
+		day := time.UnixMilli(tMs).UTC().Format("2006-01-02")
+		i := sort.Search(len(pts), func(i int) bool { return pts[i].Date > day }) // первая точка позже дня
+		if i == 0 {
+			return 0
+		}
+		return pts[i-1].Value
+	}
 }
 
 // valueBinanceTxs оценивает в ₴ внешние движения, которых ещё нет среди операций счёта, и сразу кладёт их в кеш.

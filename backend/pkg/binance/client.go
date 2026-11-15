@@ -30,6 +30,9 @@ type Client struct {
 	Stop func() bool
 	// Workers — сколько окон свечей качается одновременно (0 — 4).
 	Workers int
+	// UAHRate — гривен за доллар на момент tMs из внешнего источника (курс НБУ); 0 — неизвестно. Нужен после снятия
+	// пары USDTUAH с торгов: см. uahrate.go. nil — внешнего курса нет.
+	UAHRate func(tMs int64) float64
 
 	page func() // вызывается после каждой скачанной страницы свечей (Series: прогресс по запросам)
 	reqs atomic.Int64
