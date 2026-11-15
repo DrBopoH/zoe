@@ -113,7 +113,8 @@ const originLabel = (f) => (f.kind === 'binance-series' ? 'РЯД API' : f.kind 
 const originTone = (f) => (f.origin === 'api' ? 'text-sky-300 border-sky-500/40' : 'text-slate-300 border-slate-600')
 
 const period = (f) => formatPeriod(f.from, f.to)
-const label = (a) => (/^[A-Z]{2}\d{2}/.test(a.label || '') && a.label.length > 12 ? formatMaskedIBAN(a.label) : a.label)
+// IBAN и идентификатор профиля Binance (BN…) показываем маскированными
+const label = (a) => ((a.type === 'binance' || /^[A-Z]{2}\d{2}/.test(a.label || '') && a.label.length > 12) ? formatMaskedIBAN(a.label) : a.label)
 const hasApiFile = (a) => a.files.some(f => f.origin === 'api')
 
 // Группы по имени файла и вид каждого счёта (цвет банка, значок OVDP/HOT)
@@ -121,6 +122,14 @@ const groups = computed(() => groupAccounts(accounts.value))
 const looks = computed(() => new Map(accounts.value.map(a => [a.id, accountLook(a)])))
 const look = (a) => looks.value.get(a.id) || accountLook(a)
 const title = (a) => label(a) || a.id // подпись счёта: IBAN, договор или идентификатор профиля
+
+// Свёрнутые группы (по имени файла)
+const folded = ref(new Set())
+const toggleFold = (name) => {
+  const s = new Set(folded.value)
+  s.has(name) ? s.delete(name) : s.add(name)
+  folded.value = s
+}
 
 // Отметка группы целиком: все счета группы отмечены / часть / ни одного
 const groupState = (g) => {
@@ -160,6 +169,12 @@ const toggleGroup = (g) => {
       <section v-for="g in groups" :key="g.name" class="space-y-2">
         <!-- Заголовок группы: имя файла (без тега), отметка всей группы -->
         <div class="flex items-center gap-2 px-1 pt-1">
+          <button
+            type="button"
+            class="text-slate-500 hover:text-slate-200 w-4 shrink-0 text-xs"
+            :title="folded.has(g.name) ? 'Развернуть группу' : 'Свернуть группу'"
+            @click="toggleFold(g.name)"
+          >{{ folded.has(g.name) ? '▸' : '▾' }}</button>
           <input
             type="checkbox"
             class="accent-emerald-500"
@@ -168,10 +183,11 @@ const toggleGroup = (g) => {
             :title="'Отметить все счета группы'"
             @change="toggleGroup(g)"
           />
-          <span class="font-bold text-slate-100 truncate min-w-0" :title="g.name">{{ g.name }}</span>
+          <span class="font-bold text-slate-100 truncate min-w-0 cursor-pointer select-none" :title="g.name" @click="toggleFold(g.name)">{{ g.name }}</span>
           <span class="text-[10px] text-slate-500 shrink-0">{{ g.accounts.length }} {{ plural(g.accounts.length, 'счёт', 'счёта', 'счетов') }}</span>
         </div>
 
+        <div v-show="!folded.has(g.name)" class="ml-5 pl-3 border-l border-slate-800 space-y-2">
         <div v-for="a in g.accounts" :key="a.id" class="rounded border p-3 space-y-2 transition-colors" :class="picked.has(a.id) ? 'border-emerald-500/50 bg-emerald-950/10' : 'border-slate-800 bg-slate-950/30'">
           <div class="flex items-start gap-3">
             <input type="checkbox" class="accent-emerald-500 mt-1" :checked="picked.has(a.id)" @change="toggle(a.id)" />
@@ -217,6 +233,7 @@ const toggleGroup = (g) => {
             </div>
             <p v-if="hasApiFile(a)" class="text-[9px] text-slate-600">API-снимок хранит и снятые периоды: пока он на месте, они заново не качаются.</p>
           </div>
+        </div>
         </div>
       </section>
     </div>
