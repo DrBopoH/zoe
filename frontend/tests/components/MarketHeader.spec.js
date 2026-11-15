@@ -11,7 +11,8 @@ describe('MarketHeader', () => {
 
   it('кнопка шлёт refresh', async () => {
     const w = mount(MarketHeader, { props: { title: 'X' } })
-    expect(w.find('button').text()).toBe('ОБНОВИТЬ')
+    expect(w.find('button').attributes('aria-label')).toBe('Обновить')
+    expect(w.find('svg').classes()).not.toContain('animate-spin')
     await w.find('button').trigger('click')
     expect(w.emitted('refresh')).toHaveLength(1)
   })
@@ -19,7 +20,9 @@ describe('MarketHeader', () => {
   it('пока идёт опрос: кнопка занята и не шлёт refresh', async () => {
     const w = mount(MarketHeader, { props: { title: 'X', running: true } })
     const b = w.find('button')
-    expect(b.text()).toBe('ОБНОВЛЯЮ...')
+    expect(b.attributes('aria-label')).toBe('Обновляю…')
+    expect(b.attributes('aria-busy')).toBe('true')
+    expect(b.find('svg').classes()).toContain('animate-spin')
     expect(b.attributes('disabled')).toBeDefined()
     await b.trigger('click')
     expect(w.emitted('refresh')).toBeUndefined()
