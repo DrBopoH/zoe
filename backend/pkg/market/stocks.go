@@ -55,8 +55,8 @@ func stitchHistory(hist, recent []SeriesPoint) []SeriesPoint {
 	return append(out, recent...)
 }
 
-// shillerSP500 читает месячный S&P 500 (колонки Date, SP500, …) из датасета datasets/s-and-p-500.
-func (c *Client) shillerSP500(ctx context.Context) ([]SeriesPoint, error) {
+// shillerRows скачивает таблицу Шиллера (Date, SP500, Dividend, Earnings, …, PE10) и возвращает строки вместе с заголовком.
+func (c *Client) shillerRows(ctx context.Context) ([][]string, error) {
 	body, err := c.get(ctx, strings.TrimRight(c.ShillerBase, "/")+"/datasets/s-and-p-500/main/data/data.csv")
 	if err != nil {
 		return nil, fmt.Errorf("Шиллер S&P 500: %w", err)
@@ -64,6 +64,15 @@ func (c *Client) shillerSP500(ctx context.Context) ([]SeriesPoint, error) {
 	rows, err := csv.NewReader(strings.NewReader(string(body))).ReadAll()
 	if err != nil || len(rows) < 2 || len(rows[0]) < 2 {
 		return nil, fmt.Errorf("Шиллер S&P 500: пустой или неверный ответ")
+	}
+	return rows, nil
+}
+
+// shillerSP500 читает месячный S&P 500 (колонки Date, SP500, …) из датасета datasets/s-and-p-500.
+func (c *Client) shillerSP500(ctx context.Context) ([]SeriesPoint, error) {
+	rows, err := c.shillerRows(ctx)
+	if err != nil {
+		return nil, err
 	}
 	var out []SeriesPoint
 	for _, r := range rows[1:] {
