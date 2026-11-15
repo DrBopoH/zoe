@@ -19,7 +19,7 @@ func TestCatalogIsConsistent(t *testing.T) {
 		}
 	}
 	cat := c.Catalog()
-	if len(cat) != 25 || len(cat["fx"]) != 14 || cat["fx"][0] != SerUSDUAH || len(cat["macro"]) != 27 {
+	if len(cat) != 25 || len(cat["fx"]) != 26 || cat["fx"][0] != SerUSDUAH || len(cat["macro"]) != 27 {
 		t.Fatalf("каталог: %v", cat)
 	}
 	if _, ok := cat["nbu"]; ok {
