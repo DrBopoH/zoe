@@ -55,3 +55,12 @@ test('карточка Китая: ставка, инфляция и курс; �
   const cn = { cc: 'cn', name: 'Китай', metrics: { policy: 'cn_policy', cpi: 'cn_cpi', fx: 'cny_uah' } }
   assert.deepEqual(countryRows(cn, { cn_cpi: [{ d: '2026-09-01', v: 0.3 }] }).map((r) => r.text), ['—', '0,3 %', '—'])
 })
+
+test('у рядов России и Египта и курсов рубля и египетского фунта есть подпись и цвет', () => {
+  for (const id of ['ru_policy', 'ru_cpi', 'eg_policy', 'eg_cpi', 'rub_uah', 'egp_uah']) assert.ok(SERIES[id]?.label && SERIES[id]?.color, id)
+})
+
+test('высокая инфляция в карточке: без сокращений и потери знаков', () => {
+  const eg = { cc: 'eg', name: 'Египет', metrics: { cpi: 'eg_cpi' } }
+  assert.equal(countryRows(eg, { eg_cpi: [{ d: '2026-09-01', v: 165.2 }] })[0].text, '165,2 %')
+})
