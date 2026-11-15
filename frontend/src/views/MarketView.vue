@@ -12,6 +12,8 @@ import MacroUsRealView from './MacroUsRealView.vue'
 import MacroUsPricesView from './MacroUsPricesView.vue'
 import MacroUsJobsView from './MacroUsJobsView.vue'
 import MacroUsActivityView from './MacroUsActivityView.vue'
+import MacroUsLiquidityView from './MacroUsLiquidityView.vue'
+import MacroUsCreditView from './MacroUsCreditView.vue'
 import MacroCryptoView from './MacroCryptoView.vue'
 import MacroStocksView from './MacroStocksView.vue'
 import { useSection } from '../composables/useSection.js'
@@ -40,9 +42,11 @@ const real = useMacro('usreal')
 const prices = useMacro('usprices', ['us_cpi_yoy'])
 const jobs = useMacro('usjobs', ['us_unrate', 'us_cpi_yoy'])
 const activity = useMacro('usact')
+const liquidity = useMacro('usliq')
+const credit = useMacro('uscredit')
 const crypto = useMacro('crypto')
 const stocks = useMacro('stocks')
-const heavy = { fx, fed: us, yields: curve, real, prices, jobs, activity, usecon: econ, crypto, stocks }
+const heavy = { fx, fed: us, yields: curve, real, prices, jobs, activity, liquidity, credit, usecon: econ, crypto, stocks }
 // Таблицы облигаций считают доходность в долларах: нужны курсы и инфляция США (тяжёлые ряды, поэтому только на этих экранах)
 const dollar = computed(() => ({ ...fx.series.value, ...us.series.value }))
 const loadBond = () => { if (!bondSection.value) return; for (const h of [fx, us]) if (!Object.keys(h.series.value).length) h.load() }
@@ -68,6 +72,8 @@ const bondSection = computed(() => (isBondSection(section.value) ? section.value
     <MacroUsPricesView v-else-if="section === 'prices'" :prices="prices.series.value" :today="today" :running="running" />
     <MacroUsJobsView v-else-if="section === 'jobs'" :jobs="jobs.series.value" :today="today" :running="running" />
     <MacroUsActivityView v-else-if="section === 'activity'" :activity="activity.series.value" :today="today" :running="running" />
+    <MacroUsLiquidityView v-else-if="section === 'liquidity'" :liquidity="liquidity.series.value" :today="today" :running="running" />
+    <MacroUsCreditView v-else-if="section === 'credit'" :credit="credit.series.value" :today="today" :running="running" />
     <MacroUsEconView v-else-if="section === 'usecon'" :econ="econ.series.value" :today="today" :running="running" />
     <MacroStocksView v-else-if="section === 'stocks'" :stocks="stocks.series.value" :today="today" :running="running" />
     <MacroCryptoView v-else-if="section === 'crypto'" :crypto="crypto.series.value" :today="today" :running="running" />
