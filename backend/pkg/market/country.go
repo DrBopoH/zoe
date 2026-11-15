@@ -19,7 +19,7 @@ func Countries() []Country {
 		{CC: "us", Name: "США", Currency: "USD", Source: SourceUS, Metrics: map[string]string{
 			"policy": SerFedFunds, "cpi": SerUSCPIYoY, "cpi_core": SerUSCoreCPIYoY, "u": SerUSUnrate, "gdp": SerUSGDP, "y10": SerUST10Y, "fx": SerUSDUAH}},
 		{CC: "ua", Name: "Украина", Currency: "UAH", Source: SourceMacro, Metrics: map[string]string{
-			"policy": SerPolicyRate, "cpi": SerCPIYoY, "cpi_core": SerCoreYoY}},
+			"policy": SerPolicyRate, "cpi": SerCPIYoY, "cpi_core": SerCoreYoY, "reserves": SerUAReserves, "m3": SerUAM3YoY}},
 		{CC: "ez", Name: "Еврозона", Currency: "EUR", Source: SourceEZ, Metrics: map[string]string{
 			"policy": SerEZPolicy, "cpi": SerEUCPIYoY, "cpi_core": SerEZCPICore, "u": SerEZUnrate, "gdp": SerEZGDP, "y10": SerEZY10, "fx": SerEURUAH}},
 		{CC: "gb", Name: "Великобритания", Currency: "GBP", Source: SourceGB, Metrics: map[string]string{
