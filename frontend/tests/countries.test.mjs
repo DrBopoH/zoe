@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { COUNTRY_METRICS, countryIds, countryRows } from '../src/utils/countries.js'
+import { COUNTRY_METRICS, countryIds, countryRows, memberIds, spreadIds } from '../src/utils/countries.js'
 import { SERIES } from '../src/utils/macro.js'
 
 const ez = { cc: 'ez', name: 'Еврозона', currency: 'EUR', metrics: { policy: 'ez_policy', cpi: 'eu_cpi_yoy', y10: 'ez_y10', fx: 'eur_uah' } }
@@ -30,4 +30,10 @@ test('страна без показателя не получает строк�
   assert.deepEqual(countryRows(ua, {}).map((r) => r.key), ['policy', 'cpi'])
   assert.deepEqual(countryRows(null, null), [])
   assert.equal(COUNTRY_METRICS.length, new Set(COUNTRY_METRICS.map((m) => m.key)).size)
+})
+
+test('ряды стран еврозоны: у каждого есть подпись и цвет, у спредов — тоже', () => {
+  assert.deepEqual(memberIds('y10'), ['de_y10', 'fr_y10', 'it_y10', 'es_y10', 'nl_y10'])
+  assert.deepEqual(spreadIds(), ['it_bund_spread', 'fr_bund_spread', 'es_bund_spread'])
+  for (const id of [...memberIds('cpi'), ...memberIds('u'), ...memberIds('y10'), ...spreadIds()]) assert.ok(SERIES[id]?.label && SERIES[id]?.color, id)
 })

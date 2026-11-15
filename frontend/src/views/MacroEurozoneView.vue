@@ -3,7 +3,8 @@ import { computed } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
 import MarketHeader from '../components/MarketHeader.vue'
 import { useMarketRefresh } from '../composables/useMarketRefresh.js'
-import { lastPoint, plainPct, hasPoints } from '../utils/macro.js'
+import { lastPoint, plainPct, hasPoints, SERIES } from '../utils/macro.js'
+import { memberIds, spreadIds } from '../utils/countries.js'
 
 // Экран «Еврозона»: ставки ЕЦБ и €STR, кривая 2 и 10 лет, инфляция (общая и базовая), безработица и рост ВВП. Источники — ЕЦБ и Евростат, без ключей.
 const props = defineProps({
@@ -24,6 +25,10 @@ const core = computed(() => lastPoint(props.ez.ez_cpi_core))
 const u = computed(() => lastPoint(props.ez.ez_u))
 const gdp = computed(() => lastPoint(props.ez.ez_gdp))
 const has = computed(() => hasPoints(props.ez))
+// Страны-члены: последнее значение каждой в шапке панели; цвет и подпись — из SERIES
+const MEMBER_CPI = memberIds('cpi'), MEMBER_U = memberIds('u'), MEMBER_Y10 = memberIds('y10'), SPREADS = spreadIds()
+const lasts = (ids) => ids.map((id) => ({ id, label: SERIES[id].label.split(':')[0].split(' −')[0], color: SERIES[id].color, p: lastPoint(props.ez[id]) })).filter((r) => r.p)
+const members = computed(() => ({ cpi: lasts(MEMBER_CPI), u: lasts(MEMBER_U), y10: lasts(MEMBER_Y10), spread: lasts(SPREADS) }))
 </script>
 
 <template>
@@ -57,6 +62,30 @@ const has = computed(() => hasPoints(props.ez))
       <template #summary>
         <span v-if="u" class="text-slate-400">Безработица <b class="tabular-nums text-sky-300">{{ plainPct(u.v) }}</b></span>
         <span v-if="gdp" class="text-slate-400">ВВП за квартал <b class="tabular-nums text-emerald-300">{{ plainPct(gdp.v) }}</b></span>
+      </template>
+    </MacroPanel>
+
+    <MacroPanel title="Инфляция по странам еврозоны (HICP)" :series="ez" :today="today" :ids="MEMBER_CPI" :empty="EMPTY">
+      <template #summary>
+        <span v-for="r in members.cpi" :key="r.id" class="text-slate-400">{{ r.label }} <b class="tabular-nums" :style="{ color: r.color }">{{ plainPct(r.p.v) }}</b></span>
+      </template>
+    </MacroPanel>
+
+    <MacroPanel title="Безработица по странам еврозоны" :series="ez" :today="today" :ids="MEMBER_U" :empty="EMPTY">
+      <template #summary>
+        <span v-for="r in members.u" :key="r.id" class="text-slate-400">{{ r.label }} <b class="tabular-nums" :style="{ color: r.color }">{{ plainPct(r.p.v) }}</b></span>
+      </template>
+    </MacroPanel>
+
+    <MacroPanel title="Доходность 10 лет по странам еврозоны" :series="ez" :today="today" :ids="MEMBER_Y10" :empty="EMPTY">
+      <template #summary>
+        <span v-for="r in members.y10" :key="r.id" class="text-slate-400">{{ r.label }} <b class="tabular-nums" :style="{ color: r.color }">{{ plainPct(r.p.v) }}</b></span>
+      </template>
+    </MacroPanel>
+
+    <MacroPanel title="Спред к Германии (10 лет)" unit="п. п." :series="ez" :today="today" :ids="SPREADS" :empty="EMPTY" hint="Колесо: масштаб, перетаскивание: сдвиг. Разница доходностей со страной Bund — плата за риск страны внутри еврозоны">
+      <template #summary>
+        <span v-for="r in members.spread" :key="r.id" class="text-slate-400">{{ r.label }} <b class="tabular-nums" :style="{ color: r.color }">{{ String(Math.round(r.p.v * 100) / 100).replace('.', ',') }} п. п.</b></span>
       </template>
     </MacroPanel>
 
