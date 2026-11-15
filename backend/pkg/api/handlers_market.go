@@ -204,7 +204,7 @@ func (s *Server) HandleMarketSync(w http.ResponseWriter, r *http.Request) {
 	}
 	src := strings.ToLower(r.URL.Query().Get("source"))
 	if src != "" && !market.IsSource(src) {
-		fail(w, http.StatusBadRequest, "source: nbu, ust, macro, fx, us, usecon, uscurve, usreal, usprices, usjobs, usact, usliq, uscredit, ez, gb, ch, jp, cn, ru, eg, pl, tr, no, se, ca, commodities, world, chain, crypto или stocks")
+		fail(w, http.StatusBadRequest, "source: nbu, ust, macro, fx, us, usecon, uscurve, usreal, usprices, usjobs, usact, usliq, uscredit, ez, gb, ch, jp, cn, ru, eg, pl, tr, no, se, ca, commodities, world, chain, ppp, crypto или stocks")
 		return
 	}
 	s.syncMutex.Lock()
