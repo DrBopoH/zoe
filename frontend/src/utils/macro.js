@@ -188,6 +188,7 @@ export const SERIES = {
   mcap_total: { label: 'Капитализация крипторынка, $ трлн', color: '#38bdf8', step: false },
   pw_ua: { label: 'Покупательная способность: Украина', color: '#fbbf24', step: false },
   pw_us: { label: 'Покупательная способность: США', color: '#38bdf8', step: false },
+  stress_idx: { label: 'Индекс стресса США', color: '#f87171', step: false, noLog: true },
   pw_ez: { label: 'Покупательная способность: Еврозона', color: '#a78bfa', step: false },
   pw_de: { label: 'Покупательная способность: Германия', color: '#a78bfa', step: false },
   pw_gb: { label: 'Покупательная способность: Великобритания', color: '#f472b6', step: false },

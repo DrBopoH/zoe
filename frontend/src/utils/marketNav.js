@@ -17,6 +17,7 @@ export const MACRO_SECTIONS = [
   { key: 'liquidity', label: 'Ликвидность США', icon: 'usa', feed: 'usliq' },
   { key: 'credit', label: 'Кредит и доллар', icon: 'usa', feed: 'uscredit' },
   { key: 'usecon', label: 'Экономика США', icon: 'usa', feed: 'usecon' },
+  { key: 'scorecard', label: 'Скоркард', icon: 'usa', feed: 'usecon' },
   { key: 'commodities', label: 'Сырьё', icon: 'commodity', feed: 'commodities' },
   { key: 'stocks', label: 'Биржа США', icon: 'stocks', feed: 'stocks' },
   { key: 'world', label: 'Мировые акции', icon: 'stocks', feed: 'world' },
