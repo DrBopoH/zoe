@@ -30,5 +30,9 @@ func Countries() []Country {
 			"policy": SerJPPolicy, "cpi": SerJPCPI, "u": SerJPUnrate, "y10": SerJPY10, "fx": SerJPYUAH}},
 		{CC: "cn", Name: "Китай", Currency: "CNY", Source: SourceCN, Metrics: map[string]string{
 			"policy": SerCNPolicy, "cpi": SerCNCPI, "fx": SerCNYUAH}},
+		{CC: "ru", Name: "Россия", Currency: "RUB", Source: SourceRU, Metrics: map[string]string{
+			"policy": SerRUPolicy, "cpi": SerRUCPI, "fx": SerRUBUAH}},
+		{CC: "eg", Name: "Египет", Currency: "EGP", Source: SourceEG, Metrics: map[string]string{
+			"policy": SerEGPolicy, "cpi": SerEGCPI, "fx": SerEGPUAH}},
 	}
 }
