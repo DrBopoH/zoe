@@ -140,6 +140,7 @@ func (s *Server) syncBinance(ctx context.Context, progress func(done, total int)
 		start   int64
 		vals    []float64
 		replace bool
+		tailErr error // хвост ряда дописать не вышло: оценка и баланс сохраняются, но обход кончается ошибкой, а не «Готово»
 	)
 	syms := func() (map[string]binance.Sym, error) { return c.Symbols() }
 	end := now.UnixMilli() / 60_000 * 60_000
@@ -148,8 +149,10 @@ func (s *Server) syncBinance(ctx context.Context, progress func(done, total int)
 		// минуты. Остатки берём из настоящей таймлайны — после новой выписки внутри хвоста есть движения, текущие остатки не годятся.
 		sm, err := syms()
 		if err != nil {
+			tailErr = err
 			warns = append(warns, "минутный ряд: "+err.Error())
 		} else if res, err := c.Series(binance.Timeline(flows, now.UnixMilli()), last*1000, end, sm, progress); err != nil {
+			tailErr = err
 			warns = append(warns, "минутный ряд: "+err.Error())
 		} else if len(res.Values) > 0 {
 			start, vals = res.StartMs/1000, res.Values
@@ -199,6 +202,9 @@ func (s *Server) syncBinance(ctx context.Context, progress func(done, total int)
 	first, last, n := s.storage.BinanceSeriesInfo()
 	log.Printf("[Sync] Binance: портфель %.2f ₴, ряд %s — %s (%d мин), %s", v.TotalUAH,
 		time.Unix(first, 0).Format("2006-01-02"), time.Unix(last, 0).Format("2006-01-02 15:04"), n, map[bool]string{true: "собран с нуля", false: "дописан"}[replace])
+	if tailErr != nil && !errors.Is(tailErr, binance.ErrStopped) {
+		return fmt.Errorf("минутный ряд не дописан (кончается %s): %w", time.Unix(last, 0).Format("02.01.2006 15:04"), tailErr)
+	}
 	return nil
 }
 

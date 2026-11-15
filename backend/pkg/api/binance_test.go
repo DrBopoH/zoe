@@ -389,3 +389,45 @@ func TestBinanceSwapsEndpoint(t *testing.T) {
 		t.Fatalf("обмены: %d %s", c, b)
 	}
 }
+
+// Ряд уже есть, а дописать хвост не вышло (Binance не отдал свечи): строка панели красная с причиной, а не «Готово»
+// со старым концом ряда. Следующий «Разведать» дописывает хвост как обычно.
+func TestBinanceTailFailureIsVisible(t *testing.T) {
+	var down atomic.Bool
+	fake := newPriceFake(func(path string) (int, string) {
+		if down.Load() && path == "/api/v3/klines" {
+			return 500, ""
+		}
+		return 0, ""
+	})
+	defer fake.Close()
+	s, st := newBinanceServer(t, fake)
+	now := time.Now().UTC()
+	if _, err := s.importSource(stmtName, []byte(stmtFor(now.Add(-3*time.Hour), now.Add(-2*time.Hour)))); err != nil {
+		t.Fatal(err)
+	}
+	crawlBinanceOnce(s)
+	_, built, n := st.BinanceSeriesInfo()
+	if n == 0 {
+		t.Fatal("ряд не собран")
+	}
+
+	down.Store(true)
+	crawlBinanceOnce(s)
+	a := s.progressSnapshot().Clients[0].Accounts[0]
+	if a.State != "error" || !strings.Contains(a.Error, "минутный ряд не дописан") {
+		t.Fatalf("сбой хвоста должен быть виден в панели: %+v", a)
+	}
+	if _, last, _ := st.BinanceSeriesInfo(); last != built {
+		t.Fatalf("ряд не должен был измениться: %d → %d", built, last)
+	}
+
+	down.Store(false)
+	crawlBinanceOnce(s)
+	if a := s.progressSnapshot().Clients[0].Accounts[0]; a.State != "done" {
+		t.Fatalf("после восстановления: %+v", a)
+	}
+	if _, last, _ := st.BinanceSeriesInfo(); last < built {
+		t.Fatalf("хвост не дописан: %d < %d", last, built)
+	}
+}
