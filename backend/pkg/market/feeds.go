@@ -72,7 +72,7 @@ func (c *Client) Feeds() []Feed {
 		{ID: SourceUSAct, Title: "Активность США · FRED", Unit: "точек", Provides: []string{SerUSRetailYoY, SerUSIndproYoY, SerUSHousing, SerUSHomePriceYoY}, Series: c.USActivity},
 		{ID: SourceUSLiq, Title: "Ликвидность США · FRED", Unit: "точек", Provides: []string{SerUSM2, SerUSM2YoY, SerUSFedBS, SerUSRRP, SerUSTGA, SerUSNetLiq, SerUSSOFR}, Series: c.USLiquidity},
 		{ID: SourceUSCredit, Title: "Кредит и доллар США · FRED", Unit: "точек", Provides: []string{SerUSHY, SerUSIG, SerUSNFCI, SerUSUSD, SerUSDebtGDP}, Series: c.USCredit},
-		{ID: SourceEZ, Title: "Еврозона · ЕЦБ и Евростат", Unit: "точек", Provides: []string{SerEZPolicy, SerEZMRO, SerEZESTR, SerEZY2, SerEZY10, SerEZCPICore, SerEZUnrate, SerEZGDP}, Series: c.Eurozone},
+		{ID: SourceEZ, Title: "Еврозона · ЕЦБ и Евростат", Unit: "точек", Provides: append([]string{SerEZPolicy, SerEZMRO, SerEZESTR, SerEZY2, SerEZY10, SerEZCPICore, SerEZUnrate, SerEZGDP}, ezMemberSeries()...), Series: c.Eurozone},
 		{ID: SourceCrypto, Title: "Крипто · Binance", Unit: "точек", Provides: []string{SerCryptoBTC, SerCryptoETH, SerCryptoBNB, SerCryptoSOL, SerCryptoFNG}, Series: c.Crypto},
 		{ID: SourceStocks, Title: "Биржа США · FRED", Unit: "точек", Provides: []string{SerStockSP500, SerStockNasdaq, SerStockDow}, Series: c.Stocks},
 	}
