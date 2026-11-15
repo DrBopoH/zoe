@@ -31,6 +31,8 @@ func newMarketServer(t *testing.T, usUp bool) *Server {
 			}
 		case "/NBUStatService/v1/statdirectory/res":
 			w.Write([]byte(`[{"dt":"20260901","id_api":"RES_OffReserveAssets","tzep":"T071USD_7","value":48670.23}]`))
+		case "/NBUStatService/v1/statdirectory/balanceofpayments":
+			w.Write([]byte(`[{"dt":"20260101","id_api":"Cur_acc","tzep":"D021USD_7","value":-1023},{"dt":"20260101","id_api":"G_S","tzep":"D021USD_7","value":-6810}]`))
 		case "/NBUStatService/v1/statdirectory/monetary":
 			w.Write([]byte(`[{"dt":"20260901","txt":"Грошовий агрегат M3","id_api":"M3","k076":"Total","value":4177749.7541},{"dt":"20260901","txt":"Готівкові кошти в обігу поза депозитними корпораціями (M0)","id_api":"M0","k076":"Total","value":1000000}]`))
 		case "/graph/fredgraph.csv":
@@ -166,8 +168,8 @@ func TestFullSyncStartsMarketToo(t *testing.T) {
 	if len(last["feeds"].([]any)) != 27 || feedByID(last, "stocks")["state"] != "done" || feedByID(last, "crypto")["state"] != "done" || feedByID(last, "usecon")["state"] != "done" || feedByID(last, "us")["state"] != "done" || feedByID(last, "fx")["state"] != "done" || feedByID(last, "ust")["state"] != "done" || feedByID(last, "nbu")["state"] != "done" || feedByID(last, "macro")["state"] != "done" {
 		t.Fatalf("все фиды должны отработать: %+v", last)
 	}
-	if m := feedByID(last, "macro"); m["unit"] != "точек" || m["fetched"].(float64) != 6 {
-		t.Fatalf("macro: ставка (1 точка смены) + инфляция (1 точка) + еврозона (1 точка) + резервы, M0 и M3 (по точке): %+v", m)
+	if m := feedByID(last, "macro"); m["unit"] != "точек" || m["fetched"].(float64) != 8 {
+		t.Fatalf("macro: ставка (1 точка смены) + инфляция (1 точка) + еврозона (1 точка) + резервы, M0, M3, текущий счёт, баланс товаров и услуг (по точке): %+v", m)
 	}
 	_, mb := call(t, s.HandleMacro, http.MethodGet, "/api/macro?series=policy_rate,cpi_yoy", "")
 	var mac struct {

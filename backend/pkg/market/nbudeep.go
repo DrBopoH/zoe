@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Глубокий слой НБУ: резервы и денежные агрегаты. Адреса и поля сняты живым зондом Дока 15.11.2026 (bank.gov.ua/NBUStatService/v1/statdirectory):
@@ -20,10 +21,32 @@ const (
 	SerUAM3       = "ua_m3"       // денежная масса M3, млрд гривен, помесячно
 	SerUAM3YoY    = "ua_m3_yoy"   // рост M3 к тому же месяцу прошлого года, %
 
+	SerUAPPI = "ua_ppi_yoy" // цены производителей в промышленности (весь BCDE) г/г, %
+	SerUACA  = "ua_ca"      // сальдо текущего счёта платёжного баланса, млрд долларов, за месяц
+	SerUAGS  = "ua_gs"      // баланс товаров и услуг, млрд долларов, за месяц
+
 	nbuReservesID = "RES_OFFRESERVEASSETS"
+	bopMonths     = 24 // окно платёжного баланса: набор тяжёлый (7,5 МБ за год), история копится в кеше сама
+	bopChunk      = 6  // месяцев в одном запросе: меньше ответ, не упираемся в 30-секундный таймаут
 )
 
-var nbuDeepSeries = []string{SerUAReserves, SerUAM0, SerUAM3, SerUAM3YoY}
+// uaCPIGroups — группы потребительских цен НБУ (справочник MCRD081): 01 продукты … 12 разное.
+var uaCPIGroups = []string{"01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"}
+
+// SerUACPIGroup — id ряда инфляции по группе: ua_cpi_01 … ua_cpi_12.
+func SerUACPIGroup(code string) string { return "ua_cpi_" + code }
+
+var (
+	nbuDeepSeries = []string{SerUAReserves, SerUAM0, SerUAM3, SerUAM3YoY, SerUACA, SerUAGS}
+	// uaInflationSeries — ряды, которые отдаёт разбор инфляции (macro.go), помимо общего и базового индекса
+	uaInflationSeries = func() []string {
+		out := make([]string, 0, len(uaCPIGroups)+1)
+		for _, g := range uaCPIGroups {
+			out = append(out, SerUACPIGroup(g))
+		}
+		return append(out, SerUAPPI)
+	}()
+)
 
 // MacroAll — ставки и инфляция НБУ плюс глубокий слой (резервы, M0, M3). Сбой любой части не трогает остальные: ошибки склеиваются в Result.
 func (c *Client) MacroAll(ctx context.Context, rep Reporter) ([]SeriesPoint, Result) {
@@ -54,8 +77,69 @@ func (c *Client) nbuDeep(ctx context.Context, rep Reporter) ([]SeriesPoint, Resu
 		out = append(out, pts...)
 		res.Skipped += sk
 	}
+	rep.report(99, "платёжный баланс")
+	pts, sk, err := c.nbuBoP(ctx) // при сбое одного окна остальные точки сохраняются
+	if err != nil {
+		errs = append(errs, err.Error())
+	}
+	out = append(out, pts...)
+	res.Skipped += sk
 	res.Fetched, res.Error = len(out), strings.Join(errs, "; ")
 	return out, res
+}
+
+// nbuBoP — текущий счёт (Cur_acc) и баланс товаров и услуг (G_S) в долларах (tzep D021USD_7), млн → млрд. Последние bopMonths месяцев окнами по bopChunk;
+// сбой окна не трогает остальные.
+func (c *Client) nbuBoP(ctx context.Context) ([]SeriesPoint, int, error) {
+	now := c.now()
+	first := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -(bopMonths - 1), 0)
+	var out []SeriesPoint
+	var errs []string
+	skipped := 0
+	for s := first; !s.After(now); s = s.AddDate(0, bopChunk, 0) {
+		end := s.AddDate(0, bopChunk, -1)
+		if end.After(now) {
+			end = now
+		}
+		q := fmt.Sprintf("start=%s&end=%s&json", s.Format("20060102"), end.Format("20060102"))
+		body, err := c.get(ctx, c.macroURL("balanceofpayments", q))
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("платёжный баланс %s: %v", s.Format("2006-01"), err))
+			continue
+		}
+		recs, err := records(body)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("платёжный баланс %s: %v", s.Format("2006-01"), err))
+			continue
+		}
+		for _, r := range recs {
+			id := ""
+			switch r.str("id_api") {
+			case "Cur_acc":
+				id = SerUACA
+			case "G_S":
+				id = SerUAGS
+			}
+			d := r.date("dt")
+			if id == "" || !strings.EqualFold(r.str("tzep"), "D021USD_7") || d == "" || r.str("value") == "" {
+				skipped++
+				continue
+			}
+			out = append(out, SeriesPoint{Series: id, Date: d[:8] + "01", Value: round2(r.num("value") / 1000)})
+		}
+	}
+	by := groupSeries(out)
+	out = out[:0]
+	for _, id := range []string{SerUACA, SerUAGS} {
+		out = append(out, sortedUnique(by[id])...)
+	}
+	if len(out) == 0 && len(errs) == 0 {
+		errs = append(errs, "платёжный баланс: в ответе нет текущего счёта")
+	}
+	if len(errs) > 0 {
+		return out, skipped, fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return out, skipped, nil
 }
 
 // nbuReserves — официальные резервные активы: млн долларов → млрд. Если у ряда есть строки в долларах, берутся только они.

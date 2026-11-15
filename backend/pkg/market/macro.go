@@ -165,6 +165,10 @@ func (c *Client) inflation(ctx context.Context, from, to time.Time) ([]SeriesPoi
 	skipped := 0
 	var out []SeriesPoint
 	for _, r := range recs {
+		if p, ok := inflationExtra(r); ok {
+			out = append(out, p)
+			continue
+		}
 		if r.str("ku") != "" || r.str("mcrk110") != "" || !strings.EqualFold(r.str("mcrd081"), "total") {
 			skipped++
 			continue
@@ -199,4 +203,29 @@ func (c *Client) inflation(ctx context.Context, from, to time.Time) ([]SeriesPoi
 		out = append(out, SeriesPoint{Series: id, Date: d[:8] + "01", Value: r.num("value")})
 	}
 	return out, skipped, nil
+}
+
+// inflationExtra — группы потребительских цен (mcrd081 = 01…12, справочник НБУ) и цены производителей по всей промышленности (mcrk110 = BCDE)
+// на национальном уровне (ku пуст), только годовое изменение (DTPY_). Справочники — из документации НБУ «Data set fields macro prices».
+func inflationExtra(r record) (SeriesPoint, bool) {
+	if r.str("ku") != "" || !strings.EqualFold(r.str("tzep"), "DTPY_") || r.str("value") == "" {
+		return SeriesPoint{}, false
+	}
+	name := strings.ToLower(r.str("txt", "txten"))
+	id := ""
+	switch {
+	case r.str("mcrk110") == "" && (strings.HasPrefix(name, "індекс споживчих") || strings.HasPrefix(name, "consumer price")):
+		for _, g := range uaCPIGroups {
+			if r.str("mcrd081") == g {
+				id = SerUACPIGroup(g)
+			}
+		}
+	case strings.EqualFold(r.str("mcrd081"), "total") && strings.EqualFold(r.str("mcrk110"), "BCDE") && (strings.HasPrefix(name, "індекс цін виробників") || strings.HasPrefix(name, "industrial producer")):
+		id = SerUAPPI
+	}
+	d := r.date("dt")
+	if id == "" || d == "" {
+		return SeriesPoint{}, false
+	}
+	return SeriesPoint{Series: id, Date: d[:8] + "01", Value: r.num("value")}, true
 }

@@ -61,7 +61,7 @@ func (c *Client) Feeds() []Feed {
 			}
 			return list, res
 		}},
-		{ID: SourceMacro, Title: "Ставки, инфляция, резервы и деньги · НБУ, Евростат", Unit: "точек", Provides: append([]string{SerPolicyRate, SerOvernightCD, SerOvernightLoans, SerCPIYoY, SerCPIMoM, SerCoreYoY, SerCoreMoM, SerEUCPIYoY}, nbuDeepSeries...), Series: c.MacroAll},
+		{ID: SourceMacro, Title: "Ставки, инфляция, резервы и деньги · НБУ, Евростат", Unit: "точек", Provides: append(append([]string{SerPolicyRate, SerOvernightCD, SerOvernightLoans, SerCPIYoY, SerCPIMoM, SerCoreYoY, SerCoreMoM, SerEUCPIYoY}, uaInflationSeries...), nbuDeepSeries...), Series: c.MacroAll},
 		{ID: SourceFX, Title: "Курсы валют и золото · НБУ", Unit: "точек", Provides: []string{SerUSDUAH, SerEURUAH, SerXAUUAH, SerGBPUAH, SerCHFUAH, SerJPYUAH, SerCNYUAH, SerRUBUAH, SerEGPUAH, SerPLNUAH, SerTRYUAH, SerNOKUAH, SerSEKUAH, SerCADUAH}, Series: c.FXNBU},
 		{ID: SourceUS, Title: "Ставка ФРС и инфляция США · FRED", Unit: "точек", Provides: []string{SerFedFunds, SerFedTarget, SerUSCPIYoY, SerUSCPIMoM, SerUST10Y}, Series: c.USFRED},
 		{ID: SourceUSEcon, Title: "Экономика США · FRED", Unit: "точек", Provides: []string{SerUSUnrate, SerUSGDP, SerUSSpread, SerUSVIX, SerUSSentiment}, Series: c.USEcon},
