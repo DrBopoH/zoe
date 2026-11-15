@@ -426,7 +426,9 @@ export function buildMacroChart({ series, ids, view, yRange, todayIso, width = 1
     if (meta.step && pts.length) d += `H${X(Math.min(x1 + margin, 0)).toFixed(1)}`
     // градиент по значению: вектор от значения from до to в пикселях графика (userSpaceOnUse), поэтому цвет привязан к уровню, а не к положению на экране
     const g = meta.gradient ? { y1: Y(meta.gradient.from), y2: Y(meta.gradient.to), stops: meta.gradient.stops.map(([offset, color, opacity]) => ({ offset, color, opacity })) } : null
-    return { id, color: meta.color, label: meta.label, d, gradient: g && isFinite(g.y1) && isFinite(g.y2) && g.y1 !== g.y2 ? g : null }
+    // ряд из единственной точки (снимок, который только начал копиться) линией не нарисовать: рисуется маркер
+    const dot = series[id].length === 1 && pts.length === 1 ? { x: X(pts[0].t), y: Y(pts[0].v) } : null
+    return { id, color: meta.color, label: meta.label, d, dot, gradient: g && isFinite(g.y1) && isFinite(g.y2) && g.y1 !== g.y2 ? g : null }
   })
 
   return {
