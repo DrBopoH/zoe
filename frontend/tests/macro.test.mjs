@@ -174,3 +174,11 @@ test('hasPoints: хоть одна точка в любом ряду', () => {
   assert.equal(hasPoints({ a: [], b: null }), false)
   assert.equal(hasPoints({ a: [], b: [{ d: '2026-01-01', v: 1 }] }), true)
 })
+
+test('график: ряд из одной точки рисуется маркером, из нескольких — линией без маркера', () => {
+  const one = chartOf({ p2p_ask: [{ d: '2026-11-12', v: 47.4 }] }, ['p2p_ask'], 0).chart.lines[0]
+  assert.ok(one.dot && Number.isFinite(one.dot.x) && Number.isFinite(one.dot.y))
+  const many = chartOf({ p2p_ask: [{ d: '2026-11-10', v: 47.4 }, { d: '2026-11-12', v: 47.5 }] }, ['p2p_ask'], 0).chart.lines[0]
+  assert.equal(many.dot, null)
+  assert.ok(many.d.includes('L'))
+})

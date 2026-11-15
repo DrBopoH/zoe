@@ -8,6 +8,7 @@
 package market
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -34,6 +35,13 @@ const (
 	DefaultBISBase      = "https://stats.bis.org"
 	DefaultWBBase       = "https://api.worldbank.org"
 	DefaultUSTBase      = "https://api.fiscaldata.treasury.gov/services/api/fiscal_service"
+	DefaultP2PBase      = "https://p2p.binance.com"
+	DefaultFuturesBase  = "https://fapi.binance.com"
+	DefaultLlamaBase    = "https://stablecoins.llama.fi"
+	DefaultMempoolBase  = "https://mempool.space"
+	DefaultTronBase     = "https://api.trongrid.io"
+	DefaultEthRPCBase   = "https://ethereum-rpc.publicnode.com"
+	DefaultGeckoBase    = "https://api.coingecko.com"
 
 	maxBody = 32 << 20 // реестр ОВДП — единицы мегабайт; больше — это уже не он
 )
@@ -82,7 +90,9 @@ type Client struct {
 	BoEBase, ONSBase, BISBase string
 	// WBBase — Всемирный банк (годовые показатели стран, которых нет в BIS); пустая строка отключает опрос (тесты)
 	WBBase string
-	Now    func() time.Time
+	// Крипто-контур (источник «chain»): P2P Binance, фьючерсы Binance, DefiLlama, mempool.space, TronGrid, публичный RPC Ethereum, CoinGecko; пустая строка отключает часть (тесты)
+	P2PBase, FuturesBase, LlamaBase, MempoolBase, TronBase, EthRPCBase, GeckoBase string
+	Now                                                                           func() time.Time
 	// LastDate — до какой даты ряд уже лежит в кеше (пусто — нет такого). По ней тяжёлые дневные ряды FRED докачиваются хвостом, а не целиком.
 	// nil — всегда качать всю историю.
 	LastDate func(series string) string
@@ -94,7 +104,7 @@ type Client struct {
 }
 
 func NewClient() *Client {
-	return &Client{HTTP: &http.Client{Timeout: 30 * time.Second}, NBUBase: DefaultNBUBase, USTBase: DefaultUSTBase, FREDBase: DefaultFREDBase, BinanceBase: DefaultBinanceBase, FNGBase: DefaultFNGBase, ShillerBase: DefaultShillerBase, EurostatBase: DefaultEurostatBase, ECBBase: DefaultECBBase, BoEBase: DefaultBoEBase, ONSBase: DefaultONSBase, BISBase: DefaultBISBase, WBBase: DefaultWBBase, Now: time.Now}
+	return &Client{HTTP: &http.Client{Timeout: 30 * time.Second}, NBUBase: DefaultNBUBase, USTBase: DefaultUSTBase, FREDBase: DefaultFREDBase, BinanceBase: DefaultBinanceBase, FNGBase: DefaultFNGBase, ShillerBase: DefaultShillerBase, EurostatBase: DefaultEurostatBase, ECBBase: DefaultECBBase, BoEBase: DefaultBoEBase, ONSBase: DefaultONSBase, BISBase: DefaultBISBase, WBBase: DefaultWBBase, P2PBase: DefaultP2PBase, FuturesBase: DefaultFuturesBase, LlamaBase: DefaultLlamaBase, MempoolBase: DefaultMempoolBase, TronBase: DefaultTronBase, EthRPCBase: DefaultEthRPCBase, GeckoBase: DefaultGeckoBase, Now: time.Now}
 }
 
 func (c *Client) now() time.Time {
@@ -110,7 +120,20 @@ func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
 
 // getHeaders — тот же запрос со своими заголовками (Евростату нужен Accept для CSV и внятный User-Agent: стандартный Go он не любит).
 func (c *Client) getHeaders(ctx context.Context, url string, headers map[string]string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	return c.do(ctx, http.MethodGet, url, nil, headers)
+}
+
+// postJSON — POST с JSON-телом (P2P Binance и RPC Ethereum принимают только его).
+func (c *Client) postJSON(ctx context.Context, url string, payload []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, url, payload, map[string]string{"Accept": "application/json", "Content-Type": "application/json"})
+}
+
+func (c *Client) do(ctx context.Context, method, url string, payload []byte, headers map[string]string) ([]byte, error) {
+	var rd io.Reader
+	if payload != nil {
+		rd = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, rd)
 	if err != nil {
 		return nil, err
 	}

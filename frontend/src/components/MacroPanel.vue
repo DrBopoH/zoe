@@ -127,6 +127,7 @@ const hover = computed(() => {
         <line v-if="chart.zeroY !== null" :x1="chart.pad.l" :x2="WIDTH - chart.pad.r" :y1="chart.zeroY" :y2="chart.zeroY" stroke="#475569" />
         <line v-if="kv.hoverPx.value !== null && kv.hoverX.value <= 0.05" :x1="kv.hoverPx.value" :x2="kv.hoverPx.value" :y1="chart.pad.t" :y2="HEIGHT - chart.pad.b" stroke="#64748b" stroke-opacity="0.6" />
         <path v-for="l in chart.lines" :key="l.id" :d="l.d" fill="none" :stroke="strokeOf(l)" :stroke-width="SERIES[l.id].thin ? 1.2 : 2" :stroke-opacity="SERIES[l.id].thin ? 0.7 : 1" stroke-linejoin="round" />
+        <circle v-for="l in chart.lines.filter((x) => x.dot)" :key="'d' + l.id" :cx="l.dot.x" :cy="l.dot.y" r="4.5" :fill="l.color" stroke="#020617" stroke-width="1.5" />
         </g>
         <BennerBands v-if="benner" layer="strip" v-bind="bn" :left="MACRO_PAD.l" :right="WIDTH - MACRO_PAD.r" :strip-y="HEIGHT - MACRO_PAD.b + 5" />
       </svg>

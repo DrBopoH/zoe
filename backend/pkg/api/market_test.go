@@ -70,6 +70,7 @@ func newMarketServer(t *testing.T, usUp bool) *Server {
 	s := NewServer(st, nil, nil)
 	c := market.NewClient()
 	c.NBUBase, c.USTBase, c.FREDBase, c.BinanceBase, c.FNGBase, c.ShillerBase, c.EurostatBase, c.ECBBase, c.BoEBase, c.ONSBase, c.BISBase, c.WBBase, c.AuctionDays = up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, 1
+	c.P2PBase, c.FuturesBase, c.LlamaBase, c.MempoolBase, c.TronBase, c.EthRPCBase, c.GeckoBase = up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL
 	s.SetMarket(c)
 	return s
 }
@@ -165,7 +166,7 @@ func TestFullSyncStartsMarketToo(t *testing.T) {
 		t.Fatalf("sync/full: %d", code)
 	}
 	last := waitMarketLast(t, s)
-	if len(last["feeds"].([]any)) != 29 || feedByID(last, "stocks")["state"] != "done" || feedByID(last, "crypto")["state"] != "done" || feedByID(last, "usecon")["state"] != "done" || feedByID(last, "us")["state"] != "done" || feedByID(last, "fx")["state"] != "done" || feedByID(last, "ust")["state"] != "done" || feedByID(last, "nbu")["state"] != "done" || feedByID(last, "macro")["state"] != "done" {
+	if len(last["feeds"].([]any)) != 30 || feedByID(last, "stocks")["state"] != "done" || feedByID(last, "crypto")["state"] != "done" || feedByID(last, "usecon")["state"] != "done" || feedByID(last, "us")["state"] != "done" || feedByID(last, "fx")["state"] != "done" || feedByID(last, "ust")["state"] != "done" || feedByID(last, "nbu")["state"] != "done" || feedByID(last, "macro")["state"] != "done" {
 		t.Fatalf("все фиды должны отработать: %+v", last)
 	}
 	if m := feedByID(last, "macro"); m["unit"] != "точек" || m["fetched"].(float64) != 8 {

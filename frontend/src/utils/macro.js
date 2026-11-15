@@ -169,6 +169,23 @@ export const SERIES = {
   val_buffett: { label: 'Индекс Баффета: акции к ВВП США', color: '#fbbf24', step: false },
   val_cape: { label: 'CAPE S&P 500', color: '#a78bfa', step: false },
   val_divy: { label: 'Дивидендная доходность S&P 500', color: '#34d399', step: false },
+  p2p_ask: { label: 'P2P: купить USDT, ₴', color: '#f87171', step: false },
+  p2p_bid: { label: 'P2P: продать USDT, ₴', color: '#34d399', step: false },
+  p2p_spread: { label: 'P2P: спред покупки и продажи, %', color: '#fbbf24', step: false },
+  p2p_prem_ask: { label: 'Покупка USDT дороже курса НБУ, %', color: '#f87171', step: false },
+  p2p_prem_bid: { label: 'Продажа USDT к курсу НБУ, %', color: '#34d399', step: false },
+  fund_btc: { label: 'Фандинг BTC, % годовых', color: '#fb923c', step: false },
+  fund_eth: { label: 'Фандинг ETH, % годовых', color: '#a78bfa', step: false },
+  oi_btc: { label: 'Открытый интерес BTC, $ млрд', color: '#fb923c', step: false },
+  oi_eth: { label: 'Открытый интерес ETH, $ млрд', color: '#a78bfa', step: false },
+  stable_usdt: { label: 'USDT в обращении, $ млрд', color: '#34d399', step: false },
+  stable_usdc: { label: 'USDC в обращении, $ млрд', color: '#38bdf8', step: false },
+  fee_btc_sat: { label: 'Комиссия Bitcoin (медиана блоков), сат/vB', color: '#fb923c', step: false },
+  fee_btc_usd: { label: 'Перевод Bitcoin, $', color: '#fb923c', step: false },
+  fee_tron_usd: { label: 'Перевод USDT по TRON, $', color: '#f87171', step: false },
+  fee_eth_usd: { label: 'Перевод USDT по Ethereum, $', color: '#a78bfa', step: false },
+  dom_btc: { label: 'Доля Bitcoin в рынке, %', color: '#fb923c', step: false },
+  mcap_total: { label: 'Капитализация крипторынка, $ трлн', color: '#38bdf8', step: false },
   fx_dxy: { label: 'Индекс доллара (расчёт по курсам НБУ)', color: '#34d399', step: false },
   ua_reserves: { label: 'Резервы НБУ, млрд $', color: '#34d399', step: false },
   ua_m0: { label: 'Наличные вне банков (M0), млрд ₴', color: '#38bdf8', step: false },
@@ -409,7 +426,9 @@ export function buildMacroChart({ series, ids, view, yRange, todayIso, width = 1
     if (meta.step && pts.length) d += `H${X(Math.min(x1 + margin, 0)).toFixed(1)}`
     // градиент по значению: вектор от значения from до to в пикселях графика (userSpaceOnUse), поэтому цвет привязан к уровню, а не к положению на экране
     const g = meta.gradient ? { y1: Y(meta.gradient.from), y2: Y(meta.gradient.to), stops: meta.gradient.stops.map(([offset, color, opacity]) => ({ offset, color, opacity })) } : null
-    return { id, color: meta.color, label: meta.label, d, gradient: g && isFinite(g.y1) && isFinite(g.y2) && g.y1 !== g.y2 ? g : null }
+    // ряд из единственной точки (снимок, который только начал копиться) линией не нарисовать: рисуется маркер
+    const dot = series[id].length === 1 && pts.length === 1 ? { x: X(pts[0].t), y: Y(pts[0].v) } : null
+    return { id, color: meta.color, label: meta.label, d, dot, gradient: g && isFinite(g.y1) && isFinite(g.y2) && g.y1 !== g.y2 ? g : null }
   })
 
   return {
