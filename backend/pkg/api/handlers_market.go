@@ -192,7 +192,7 @@ func (s *Server) HandleMarketBonds(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, list)
 }
 
-// POST /api/market/sync[?source=nbu|ust|macro|fx|us|usecon|uscurve|usreal|usprices|usjobs|usact|usliq|uscredit|crypto|stocks] — запустить опрос отдельно от «Разведать». Ответ сразу, ход и итог —
+// POST /api/market/sync[?source=nbu|ust|macro|fx|us|usecon|uscurve|usreal|usprices|usjobs|usact|usliq|uscredit|ez|crypto|stocks] — запустить опрос отдельно от «Разведать». Ответ сразу, ход и итог —
 // в "market" из /api/sync/status. Уже идёт — 409.
 func (s *Server) HandleMarketSync(w http.ResponseWriter, r *http.Request) {
 	if !allow(w, r, http.MethodPost) {
@@ -204,7 +204,7 @@ func (s *Server) HandleMarketSync(w http.ResponseWriter, r *http.Request) {
 	}
 	src := strings.ToLower(r.URL.Query().Get("source"))
 	if src != "" && !market.IsSource(src) {
-		fail(w, http.StatusBadRequest, "source: nbu, ust, macro, fx, us, usecon, uscurve, usreal, usprices, usjobs, usact, usliq, uscredit, crypto или stocks")
+		fail(w, http.StatusBadRequest, "source: nbu, ust, macro, fx, us, usecon, uscurve, usreal, usprices, usjobs, usact, usliq, uscredit, ez, crypto или stocks")
 		return
 	}
 	s.syncMutex.Lock()
@@ -331,6 +331,7 @@ func (s *Server) HandleMacro(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/macro/catalog — какие ряды даёт каждый числовой источник: {"feeds":{"fx":["usd_uah","eur_uah","xau_uah"],…}}.
 // Список ведёт бэкенд (market.Feed.Provides): фронт берёт id оттуда, а не хранит свои копии.
+// В том же ответе "countries" — реестр стран (market.Countries): какой ряд отвечает за какой показатель карточки страны.
 func (s *Server) HandleMacroCatalog(w http.ResponseWriter, r *http.Request) {
 	if !allow(w, r, http.MethodGet) {
 		return
@@ -339,5 +340,5 @@ func (s *Server) HandleMacroCatalog(w http.ResponseWriter, r *http.Request) {
 	if c := s.mk.client; c != nil {
 		feeds = c.Catalog()
 	}
-	writeJSON(w, map[string]any{"feeds": feeds})
+	writeJSON(w, map[string]any{"feeds": feeds, "countries": market.Countries()})
 }

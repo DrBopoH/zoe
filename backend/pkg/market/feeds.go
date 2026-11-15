@@ -33,7 +33,7 @@ func (c *Client) Catalog() map[string][]string {
 // IsSource — известен ли такой источник (для ?source=… в маршрутах).
 func IsSource(id string) bool {
 	switch id {
-	case SourceNBU, SourceUST, SourceMacro, SourceFX, SourceUS, SourceUSEcon, SourceUSCurve, SourceUSReal, SourceUSPrices, SourceUSJobs, SourceUSAct, SourceUSLiq, SourceUSCredit, SourceCrypto, SourceStocks:
+	case SourceNBU, SourceUST, SourceMacro, SourceFX, SourceUS, SourceUSEcon, SourceUSCurve, SourceUSReal, SourceUSPrices, SourceUSJobs, SourceUSAct, SourceUSLiq, SourceUSCredit, SourceEZ, SourceCrypto, SourceStocks:
 		return true
 	}
 	return false
@@ -72,6 +72,7 @@ func (c *Client) Feeds() []Feed {
 		{ID: SourceUSAct, Title: "Активность США · FRED", Unit: "точек", Provides: []string{SerUSRetailYoY, SerUSIndproYoY, SerUSHousing, SerUSHomePriceYoY}, Series: c.USActivity},
 		{ID: SourceUSLiq, Title: "Ликвидность США · FRED", Unit: "точек", Provides: []string{SerUSM2, SerUSM2YoY, SerUSFedBS, SerUSRRP, SerUSTGA, SerUSNetLiq, SerUSSOFR}, Series: c.USLiquidity},
 		{ID: SourceUSCredit, Title: "Кредит и доллар США · FRED", Unit: "точек", Provides: []string{SerUSHY, SerUSIG, SerUSNFCI, SerUSUSD, SerUSDebtGDP}, Series: c.USCredit},
+		{ID: SourceEZ, Title: "Еврозона · ЕЦБ и Евростат", Unit: "точек", Provides: []string{SerEZPolicy, SerEZMRO, SerEZESTR, SerEZY2, SerEZY10, SerEZCPICore, SerEZUnrate, SerEZGDP}, Series: c.Eurozone},
 		{ID: SourceCrypto, Title: "Крипто · Binance", Unit: "точек", Provides: []string{SerCryptoBTC, SerCryptoETH, SerCryptoBNB, SerCryptoSOL, SerCryptoFNG}, Series: c.Crypto},
 		{ID: SourceStocks, Title: "Биржа США · FRED", Unit: "точек", Provides: []string{SerStockSP500, SerStockNasdaq, SerStockDow}, Series: c.Stocks},
 	}

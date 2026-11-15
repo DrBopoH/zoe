@@ -5,7 +5,7 @@ import { MARKET_TREE, MARKET_SECTIONS, leafKeys, groupOf, feedOf, isBondSection,
 import { macroWindow } from '../src/utils/macro.js'
 
 test('дерево рынка: листья и группы', () => {
-  assert.deepEqual(MARKET_SECTIONS, ['nbu', 'ust', 'rates', 'inflation', 'fx', 'fed', 'yields', 'real', 'prices', 'jobs', 'activity', 'liquidity', 'credit', 'usecon', 'stocks', 'crypto'])
+  assert.deepEqual(MARKET_SECTIONS, ['nbu', 'ust', 'rates', 'inflation', 'fx', 'countries', 'eurozone', 'fed', 'yields', 'real', 'prices', 'jobs', 'activity', 'liquidity', 'credit', 'usecon', 'stocks', 'crypto'])
   assert.deepEqual(leafKeys(MARKET_TREE), MARKET_SECTIONS)
   assert.equal(groupOf(MARKET_TREE, 'inflation'), 'macro')
   assert.equal(groupOf(MARKET_TREE, 'ust'), 'securities')
@@ -20,6 +20,8 @@ test('источник для «Обновить»: бумаги свой, ма�
   assert.equal(feedOf('rates'), 'macro')
   assert.equal(feedOf('inflation'), 'macro')
   assert.equal(feedOf('fx'), 'fx')
+  assert.equal(feedOf('countries'), 'ez')
+  assert.equal(feedOf('eurozone'), 'ez')
   assert.equal(feedOf('fed'), 'us')
   assert.equal(feedOf('yields'), 'uscurve')
   assert.equal(feedOf('real'), 'usreal')

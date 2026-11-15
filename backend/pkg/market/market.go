@@ -28,6 +28,7 @@ const (
 	DefaultFNGBase      = "https://api.alternative.me"
 	DefaultShillerBase  = "https://raw.githubusercontent.com"
 	DefaultEurostatBase = "https://ec.europa.eu"
+	DefaultECBBase      = "https://data-api.ecb.europa.eu"
 	DefaultUSTBase      = "https://api.fiscaldata.treasury.gov/services/api/fiscal_service"
 
 	maxBody = 32 << 20 // реестр ОВДП — единицы мегабайт; больше — это уже не он
@@ -71,7 +72,9 @@ type Client struct {
 	ShillerBase string
 	// EurostatBase — инфляция еврозоны (HICP, годовое изменение) из SDMX-CSV Евростата; пустая строка отключает опрос (тесты)
 	EurostatBase string
-	Now          func() time.Time
+	// ECBBase — SDMX-API ЕЦБ (ставки, €STR, кривая доходности); пустая строка отключает опрос (тесты)
+	ECBBase string
+	Now     func() time.Time
 	// LastDate — до какой даты ряд уже лежит в кеше (пусто — нет такого). По ней тяжёлые дневные ряды FRED докачиваются хвостом, а не целиком.
 	// nil — всегда качать всю историю.
 	LastDate func(series string) string
@@ -83,7 +86,7 @@ type Client struct {
 }
 
 func NewClient() *Client {
-	return &Client{HTTP: &http.Client{Timeout: 30 * time.Second}, NBUBase: DefaultNBUBase, USTBase: DefaultUSTBase, FREDBase: DefaultFREDBase, BinanceBase: DefaultBinanceBase, FNGBase: DefaultFNGBase, ShillerBase: DefaultShillerBase, EurostatBase: DefaultEurostatBase, Now: time.Now}
+	return &Client{HTTP: &http.Client{Timeout: 30 * time.Second}, NBUBase: DefaultNBUBase, USTBase: DefaultUSTBase, FREDBase: DefaultFREDBase, BinanceBase: DefaultBinanceBase, FNGBase: DefaultFNGBase, ShillerBase: DefaultShillerBase, EurostatBase: DefaultEurostatBase, ECBBase: DefaultECBBase, Now: time.Now}
 }
 
 func (c *Client) now() time.Time {
