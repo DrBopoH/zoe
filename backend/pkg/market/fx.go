@@ -17,6 +17,9 @@ const (
 	SerUSDUAH = "usd_uah" // гривен за 1 доллар США
 	SerEURUAH = "eur_uah" // гривен за 1 евро
 	SerXAUUAH = "xau_uah" // гривен за 1 тройскую унцию золота
+	SerXAGUAH = "xag_uah" // гривен за 1 тройскую унцию серебра
+	SerXPTUAH = "xpt_uah" // гривен за 1 тройскую унцию платины
+	SerXPDUAH = "xpd_uah" // гривен за 1 тройскую унцию палладия
 	SerGBPUAH = "gbp_uah" // гривен за 1 фунт стерлингов
 	SerCHFUAH = "chf_uah" // гривен за 1 швейцарский франк
 	SerJPYUAH = "jpy_uah" // гривен за 1 иену (НБУ отдаёт курс за 10 или 1000 иен, делится на номинал)
@@ -40,6 +43,9 @@ var fxCodes = []struct{ code, series string }{
 	{"usd", SerUSDUAH},
 	{"eur", SerEURUAH},
 	{"xau", SerXAUUAH},
+	{"xag", SerXAGUAH},
+	{"xpt", SerXPTUAH},
+	{"xpd", SerXPDUAH},
 	{"gbp", SerGBPUAH},
 	{"chf", SerCHFUAH},
 	{"jpy", SerJPYUAH},

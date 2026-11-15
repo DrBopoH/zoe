@@ -52,8 +52,8 @@ func TestFXNBUParsesKarbovanetsAndFallbacks(t *testing.T) {
 	if g := by[SerXAUUAH]; len(g) != 1 || g[0].Value != 183562.1 {
 		t.Fatalf("xau: %+v", g)
 	}
-	if res.Skipped != 13 {
-		t.Fatalf("skipped=%d, want 13 (нулевой курс у usd, eur и всех валют курсов стран, кроме золота)", res.Skipped)
+	if res.Skipped != 16 {
+		t.Fatalf("skipped=%d, want 16 (нулевой курс у usd, eur, всех валют курсов стран, серебра, платины и палладия — кроме золота)", res.Skipped)
 	}
 }
 
