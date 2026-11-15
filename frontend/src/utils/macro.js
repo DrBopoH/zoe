@@ -29,6 +29,24 @@ export const SERIES = {
   us_vix: { label: 'VIX (индекс страха)', color: '#94a3b8', step: false, gradient: { from: 10, to: 50, stops: [[0, '#fbbf24', 1], [0.25, '#94a3b8', 0.4], [0.75, '#38bdf8', 1], [1, '#38bdf8', 1]] } },
   // светофор: чем оптимистичнее люди, тем зеленее (от 50 красный, около 75 жёлтый, от 100 зелёный)
   us_sentiment: { label: 'Настроения потребителей', color: '#fbbf24', step: false, noLog: true, gradient: { from: 50, to: 100, stops: [[0, '#f87171', 1], [0.5, '#fbbf24', 1], [1, '#34d399', 1]] } },
+  ust_1m: { label: 'Treasury 1 мес.', color: '#64748b', step: false, thin: true },
+  ust_3m: { label: 'Treasury 3 мес.', color: '#fbbf24', step: false },
+  ust_6m: { label: 'Treasury 6 мес.', color: '#fb923c', step: false, thin: true },
+  ust_1y: { label: 'Treasury 1 г.', color: '#f472b6', step: false, thin: true },
+  ust_2y: { label: 'Treasury 2 г.', color: '#a78bfa', step: false },
+  ust_3y: { label: 'Treasury 3 г.', color: '#818cf8', step: false, thin: true },
+  ust_5y: { label: 'Treasury 5 л.', color: '#2dd4bf', step: false, thin: true },
+  ust_7y: { label: 'Treasury 7 л.', color: '#4ade80', step: false, thin: true },
+  ust_20y: { label: 'Treasury 20 л.', color: '#f87171', step: false, thin: true },
+  ust_30y: { label: 'Treasury 30 л.', color: '#34d399', step: false },
+  us_spread3m: { label: 'Кривая: 10 л. − 3 мес.', color: '#a78bfa', step: false },
+  us_real5: { label: 'Реальная доходность 5 л. (TIPS)', color: '#2dd4bf', step: false, thin: true },
+  us_real10: { label: 'Реальная доходность 10 л. (TIPS)', color: '#38bdf8', step: false },
+  us_be5: { label: 'Брейкивен 5 л.', color: '#fb923c', step: false, thin: true },
+  us_be10: { label: 'Брейкивен 10 л.', color: '#fbbf24', step: false },
+  us_fwd5y5y: { label: 'Инфляция 5y5y', color: '#a78bfa', step: false },
+  us_termprem: { label: 'Срочная премия 10 л.', color: '#f472b6', step: false },
+  us_mortgage: { label: 'Ипотека 30 л.', color: '#34d399', step: false },
   crypto_btc: { label: 'Bitcoin', color: '#fb923c', step: false },
   crypto_eth: { label: 'Ethereum', color: '#a78bfa', step: false },
   crypto_bnb: { label: 'BNB', color: '#fbbf24', step: false },
@@ -297,3 +315,56 @@ export function changeSince(points, todayIso, years) {
 
 /** Индекс страха и жадности словами: до 25 крайний страх, до 45 страх, до 55 нейтрально, до 75 жадность, выше крайняя жадность. */
 export const fearGreedLevel = (v) => (v === null || v === undefined || !isFinite(v) ? null : v < 25 ? 'extreme-fear' : v < 45 ? 'fear' : v <= 55 ? 'neutral' : v <= 75 ? 'greed' : 'extreme-greed')
+
+// Кривая доходности Treasury: сроки слева направо и ряды, из которых берётся точка кривой (10 лет лежит в источнике «us»)
+export const CURVE_TENORS = [
+  { id: 'ust_1m', label: '1м' }, { id: 'ust_3m', label: '3м' }, { id: 'ust_6m', label: '6м' }, { id: 'ust_1y', label: '1г' },
+  { id: 'ust_2y', label: '2г' }, { id: 'ust_3y', label: '3г' }, { id: 'ust_5y', label: '5л' }, { id: 'ust_7y', label: '7л' },
+  { id: 'ust_10y', label: '10л' }, { id: 'ust_20y', label: '20л' }, { id: 'ust_30y', label: '30л' }
+]
+
+/** Снимок кривой на дату: по точке на срок. yearsAgo = 0 — последние значения, иначе значение на дату «столько лет назад» (последнее не позже неё). Нет данных — v: null. */
+export function curveSnapshot(series, todayIso, yearsAgo = 0) {
+  return CURVE_TENORS.map(({ id, label }) => {
+    const pts = (series && series[id]) || []
+    const v = yearsAgo > 0 ? valueAt(pts, isoAt(-yearsAgo, todayIso)) : (lastPoint(pts)?.v ?? null)
+    return { id, label, v }
+  })
+}
+
+// Шаг сетки «круглый»: 1, 2, 2.5 или 5 на степень десяти
+function niceStep(raw) {
+  const k = Math.pow(10, Math.floor(Math.log10(raw)))
+  for (const m of [1, 2, 2.5, 5, 10]) if (m * k >= raw) return m * k
+  return 10 * k
+}
+
+/**
+ * График снимков кривой: сроки равномерно по горизонтали, доходность по вертикали. snaps — [{ key, color, points: curveSnapshot(...) }].
+ * Возвращает { empty, xs: [{ x, label }], yTicks: [{ y, v }], lines: [{ key, color, d }], width, height, pad }. Пропуски (v: null) рвут линию.
+ */
+export function curveChart(snaps, { width = 1000, height = 220, pad = MACRO_PAD } = {}) {
+  const vals = snaps.flatMap((s) => s.points.map((p) => p.v)).filter((v) => typeof v === 'number' && isFinite(v))
+  const base = { width, height, pad, xs: [], yTicks: [], lines: [] }
+  if (!vals.length) return { ...base, empty: true }
+  let lo = Math.min(...vals), hi = Math.max(...vals)
+  if (!(hi > lo)) { lo -= 0.5; hi += 0.5 }
+  const margin = (hi - lo) * 0.08
+  lo -= margin; hi += margin
+  const step = niceStep((hi - lo) / 4)
+  const yOf = (v) => pad.t + (1 - (v - lo) / (hi - lo)) * (height - pad.t - pad.b)
+  const n = snaps[0].points.length
+  const xOf = (i) => pad.l + (n > 1 ? (i / (n - 1)) * (width - pad.l - pad.r) : 0)
+  const yTicks = []
+  for (let t = Math.ceil(lo / step) * step; t <= hi + 1e-9; t += step) yTicks.push({ y: yOf(t), v: Math.round(t * 1000) / 1000 })
+  const lines = snaps.map((s) => {
+    let d = '', pen = false
+    s.points.forEach((p, i) => {
+      if (typeof p.v !== 'number' || !isFinite(p.v)) { pen = false; return }
+      d += `${pen ? 'L' : 'M'}${xOf(i).toFixed(1)} ${yOf(p.v).toFixed(1)} `
+      pen = true
+    })
+    return { key: s.key, color: s.color, d: d.trim() }
+  })
+  return { ...base, empty: false, xs: snaps[0].points.map((p, i) => ({ x: xOf(i), label: p.label })), yTicks, lines }
+}
