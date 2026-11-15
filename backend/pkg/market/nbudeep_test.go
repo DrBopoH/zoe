@@ -102,7 +102,7 @@ func TestMacroAllMergesCoreAndDeep(t *testing.T) {
 		}
 		resp, err := http.Get(target + r.URL.Path + "?" + r.URL.RawQuery)
 		if err != nil {
-			http.Error(w, err.Error(), 502)
+			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
 		defer resp.Body.Close()
