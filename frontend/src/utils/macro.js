@@ -63,6 +63,18 @@ export const SERIES = {
   us_indpro_yoy: { label: 'Промышленность г/г', color: '#fbbf24', step: false },
   us_housing: { label: 'Начато строительство жилья', color: '#a78bfa', step: false },
   us_homeprice_yoy: { label: 'Цены на дома г/г', color: '#34d399', step: false },
+  us_m2: { label: 'Денежная масса M2', color: '#38bdf8', step: false },
+  us_m2_yoy: { label: 'M2 г/г', color: '#38bdf8', step: false },
+  us_fedbs: { label: 'Баланс ФРС', color: '#a78bfa', step: false },
+  us_rrp: { label: 'Обратное РЕПО', color: '#fbbf24', step: false, thin: true },
+  us_tga: { label: 'Счёт Казначейства', color: '#f472b6', step: false, thin: true },
+  us_netliq: { label: 'Чистая ликвидность', color: '#34d399', step: false },
+  us_sofr: { label: 'SOFR', color: '#38bdf8', step: false },
+  us_hy: { label: 'Спред HY (высокий доход)', color: '#f87171', step: false },
+  us_ig: { label: 'Спред IG (инвест. рейтинг)', color: '#38bdf8', step: false },
+  us_nfci: { label: 'Финансовые условия (NFCI)', color: '#a78bfa', step: false },
+  us_usd: { label: 'Индекс доллара (широкий)', color: '#fbbf24', step: false },
+  us_debt_gdp: { label: 'Госдолг к ВВП', color: '#fb923c', step: false },
   crypto_btc: { label: 'Bitcoin', color: '#fb923c', step: false },
   crypto_eth: { label: 'Ethereum', color: '#a78bfa', step: false },
   crypto_bnb: { label: 'BNB', color: '#fbbf24', step: false },
@@ -395,3 +407,13 @@ export function realWageGrowth(wagesYoY, cpiYoY) {
 
 /** Цель ФРС по инфляции PCE, % годовых */
 export const FED_INFLATION_TARGET = 2
+
+/** Млрд долларов словами крупно: 5900 → «5,9 трлн $», 480 → «480 млрд $». Нет значения — «—». */
+export function billionsText(v) {
+  if (v === null || v === undefined || !isFinite(v)) return '—'
+  const a = Math.abs(v)
+  return a >= 1000 ? `${String(Math.round((v / 1000) * 100) / 100).replace('.', ',')} трлн $` : `${String(Math.round(v)).replace('.', ',')} млрд $`
+}
+
+/** Спред высокодоходных облигаций к Treasury (п. п.) словами: до 4 — спокойно, до 6 — настороженно, выше — стресс. null — нет данных. */
+export const creditLevel = (hy) => (hy === null || hy === undefined || !isFinite(hy) ? null : hy < 4 ? 'calm' : hy <= 6 ? 'wary' : 'stress')
