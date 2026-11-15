@@ -15,16 +15,16 @@ const props = defineProps({
   today: { type: String, required: true },
   running: { type: Boolean, default: false }
 })
-const { refresh } = useMarketRefresh(() => 'countries')
 const KEY = 'economic_market_country'
 const cc = ref(storageGet(KEY))
 const country = computed(() => props.countries.find((c) => c.cc === cc.value) || props.countries[0] || null)
+const { refresh } = useMarketRefresh(() => 'countries', () => country.value?.source)
 watch(country, (c) => { if (c) storageSet(KEY, c.cc) })
 const rows = computed(() => countryRows(country.value, props.series))
 const pick = ref('')
 const chosen = computed(() => rows.value.find((r) => r.key === pick.value) || rows.value.find((r) => r.last) || rows.value[0] || null)
 const has = computed(() => hasPoints(props.series))
-const EMPTY = 'Нет данных. Нажми «Обновить»: подтянутся ставки и показатели еврозоны; остальные страны обновляются в своих разделах'
+const EMPTY = 'Нет данных. Нажми «Обновить»: подтянутся показатели выбранной страны'
 </script>
 
 <template>
