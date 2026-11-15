@@ -386,3 +386,53 @@ func TestP2PTimeAlignedToLedger(t *testing.T) {
 		t.Fatal("в базе время остаётся как в файле")
 	}
 }
+
+// В окне «Выписки» у брокерского счёта и Binance в поле номера — настоящий идентификатор, а не служебное «icu» / «binance»:
+// у Binance идентификатор профиля из выписки, у брокерского — номер договора, а привязанный к нему IBAN его заменяет.
+func TestSourcesLabelsAreIdentifiersNotServiceWords(t *testing.T) {
+	t.Setenv("ECONOMIC_SOURCES_DIR", t.TempDir())
+	s := newICUServer(t)
+	icuF := icuFile("ОВГЗ Тест.pdf", fixtureReport(t))
+	now := time.Now().UTC().Truncate(time.Minute)
+	bnF, err := parseSource(stmtName, []byte(stmtFor(now.Add(-3*time.Hour), now.Add(-2*time.Hour))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []*source.File{icuF, bnF} {
+		if _, _, err := store().Put(f); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.applySource(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	labels := func() map[string]string {
+		_, body := call(t, s.HandleSources, http.MethodGet, "/api/sources", "")
+		var out struct {
+			Accounts []struct{ ID, Label string }
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatal(err)
+		}
+		m := map[string]string{}
+		for _, a := range out.Accounts {
+			m[a.ID] = a.Label
+		}
+		return m
+	}
+	m := labels()
+	if m[db.BinanceAccountID] != "BN7" {
+		t.Fatalf("Binance: ждали идентификатор профиля BN7, получили %q", m[db.BinanceAccountID])
+	}
+	if m[icuF.AccountID] != icuF.Contract || icuF.Contract == "" {
+		t.Fatalf("брокерский: ждали номер договора %q, получили %q", icuF.Contract, m[icuF.AccountID])
+	}
+	// после сброса кеша файлы остаются: подпись не превращается в «icu» / «binance»
+	if err := s.storage.WipeCache(); err != nil {
+		t.Fatal(err)
+	}
+	m = labels()
+	if m[db.BinanceAccountID] != "BN7" || m[icuF.AccountID] != icuF.Contract {
+		t.Fatalf("после сброса: %v", m)
+	}
+}
