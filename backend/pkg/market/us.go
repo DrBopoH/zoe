@@ -114,6 +114,12 @@ func weekly(pts []SeriesPoint) []SeriesPoint {
 
 // cpiChanges считает инфляцию США из индекса: к тому же месяцу прошлого года и к предыдущему месяцу, %.
 func cpiChanges(obs []fredObs) (yoy, mom []SeriesPoint) {
+	return indexChanges(obs, SerUSCPIYoY, SerUSCPIMoM)
+}
+
+// indexChanges — изменение индекса к той же дате прошлого года (yoyID) и к предыдущему месяцу (momID), %. Пустой id — этот ряд не считается.
+// Работает и на квартальных индексах: год назад — то же число месяцев, месячное изменение там просто не находит пару.
+func indexChanges(obs []fredObs, yoyID, momID string) (yoy, mom []SeriesPoint) {
 	idx := map[string]float64{}
 	for _, o := range obs {
 		idx[o.Date[:7]] = o.Value
@@ -125,12 +131,22 @@ func cpiChanges(obs []fredObs) (yoy, mom []SeriesPoint) {
 			continue
 		}
 		d := t.Format("2006-01") + "-01"
-		if prev, ok := idx[t.AddDate(-1, 0, 0).Format("2006-01")]; ok && prev > 0 {
-			yoy = append(yoy, SeriesPoint{Series: SerUSCPIYoY, Date: d, Value: (o.Value/prev - 1) * 100})
+		if prev, ok := idx[t.AddDate(-1, 0, 0).Format("2006-01")]; ok && prev > 0 && yoyID != "" {
+			yoy = append(yoy, SeriesPoint{Series: yoyID, Date: d, Value: (o.Value/prev - 1) * 100})
 		}
-		if prev, ok := idx[time.Date(t.Year(), t.Month()-1, 1, 0, 0, 0, 0, time.UTC).Format("2006-01")]; ok && prev > 0 {
-			mom = append(mom, SeriesPoint{Series: SerUSCPIMoM, Date: d, Value: (o.Value/prev - 1) * 100})
+		if prev, ok := idx[time.Date(t.Year(), t.Month()-1, 1, 0, 0, 0, 0, time.UTC).Format("2006-01")]; ok && prev > 0 && momID != "" {
+			mom = append(mom, SeriesPoint{Series: momID, Date: d, Value: (o.Value/prev - 1) * 100})
 		}
 	}
 	return yoy, mom
+}
+
+// levelChanges — разность соседних значений (прирост за период, в единицах ряда): занятость PAYEMS в тысячах человек за месяц.
+func levelChanges(obs []fredObs, id string) []SeriesPoint {
+	sort.Slice(obs, func(i, j int) bool { return obs[i].Date < obs[j].Date })
+	var out []SeriesPoint
+	for i := 1; i < len(obs); i++ {
+		out = append(out, SeriesPoint{Series: id, Date: obs[i].Date, Value: obs[i].Value - obs[i-1].Value})
+	}
+	return out
 }

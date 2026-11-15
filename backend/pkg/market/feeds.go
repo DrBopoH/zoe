@@ -33,7 +33,7 @@ func (c *Client) Catalog() map[string][]string {
 // IsSource — известен ли такой источник (для ?source=… в маршрутах).
 func IsSource(id string) bool {
 	switch id {
-	case SourceNBU, SourceUST, SourceMacro, SourceFX, SourceUS, SourceUSEcon, SourceUSCurve, SourceUSReal, SourceCrypto, SourceStocks:
+	case SourceNBU, SourceUST, SourceMacro, SourceFX, SourceUS, SourceUSEcon, SourceUSCurve, SourceUSReal, SourceUSPrices, SourceUSJobs, SourceUSAct, SourceCrypto, SourceStocks:
 		return true
 	}
 	return false
@@ -67,6 +67,9 @@ func (c *Client) Feeds() []Feed {
 		{ID: SourceUSEcon, Title: "Экономика США · FRED", Unit: "точек", Provides: []string{SerUSUnrate, SerUSGDP, SerUSSpread, SerUSVIX, SerUSSentiment}, Series: c.USEcon},
 		{ID: SourceUSCurve, Title: "Кривая доходности США · FRED", Unit: "точек", Provides: []string{SerUST1M, SerUST3M, SerUST6M, SerUST1Y, SerUST2Y, SerUST3Y, SerUST5Y, SerUST7Y, SerUST20Y, SerUST30Y, SerUSSpread3M}, Series: c.USCurve},
 		{ID: SourceUSReal, Title: "Реальные ставки и ожидаемая инфляция США · FRED", Unit: "точек", Provides: []string{SerUSReal5, SerUSReal10, SerUSBE5, SerUSBE10, SerUSFwd5y5y, SerUSTermPrem, SerUSMortgage}, Series: c.USReal},
+		{ID: SourceUSPrices, Title: "Цены США · FRED", Unit: "точек", Provides: []string{SerUSCoreCPIYoY, SerUSCoreCPIMoM, SerUSPCEYoY, SerUSCorePCEYoY, SerUSPPIYoY, SerUSShelterYoY}, Series: c.USPrices},
+		{ID: SourceUSJobs, Title: "Рынок труда США · FRED", Unit: "точек", Provides: []string{SerUSNFP, SerUSClaims, SerUSJOLTS, SerUSWages, SerUSU6, SerUSECIYoY}, Series: c.USJobs},
+		{ID: SourceUSAct, Title: "Активность США · FRED", Unit: "точек", Provides: []string{SerUSRetailYoY, SerUSIndproYoY, SerUSHousing, SerUSHomePriceYoY}, Series: c.USActivity},
 		{ID: SourceCrypto, Title: "Крипто · Binance", Unit: "точек", Provides: []string{SerCryptoBTC, SerCryptoETH, SerCryptoBNB, SerCryptoSOL, SerCryptoFNG}, Series: c.Crypto},
 		{ID: SourceStocks, Title: "Биржа США · FRED", Unit: "точек", Provides: []string{SerStockSP500, SerStockNasdaq, SerStockDow}, Series: c.Stocks},
 	}
