@@ -4,10 +4,10 @@ import { apiGetJson } from '../utils/api.js'
 // Какие ряды даёт каждый источник, знает сервер (GET /api/macro/catalog): фронт свои списки id не держит. Спрашиваем один раз на все экраны.
 let catalog = null
 export const resetCatalog = () => { catalog = null }
-export function feedSeries(feed, get = apiGetJson) {
-  catalog ||= get('/macro/catalog').then((r) => r?.feeds || {}).catch((e) => { catalog = null; throw e })
-  return catalog.then((feeds) => feeds[feed] || [])
-}
+const loadCatalog = (get) => (catalog ||= get('/macro/catalog').then((r) => ({ feeds: r?.feeds || {}, countries: r?.countries || [] })).catch((e) => { catalog = null; throw e }))
+export const feedSeries = (feed, get = apiGetJson) => loadCatalog(get).then((c) => c.feeds[feed] || [])
+// Реестр стран с сервера: [{cc, name, currency, metrics: {policy: 'fed_funds', …}}] — какой ряд отвечает за какой показатель карточки
+export const countryList = (get = apiGetJson) => loadCatalog(get).then((c) => c.countries)
 
 // Ряды источника (ставки и инфляция — 'macro', курсы — 'fx', США — 'us', …) из кеша сервера: GET /api/macro. Заполняются «Обновить»/«Разведать».
 // extra — ряды сверх источника (например инфляция США рядом с курсами). Курсы и США тяжёлые, поэтому у каждого экрана свой вызов.
