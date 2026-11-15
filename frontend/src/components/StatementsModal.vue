@@ -5,11 +5,13 @@ import UiButton from './ui/UiButton.vue'
 import UiIconButton from './ui/UiIconButton.vue'
 import UiIcon from './ui/UiIcon.vue'
 import CoverBar from './CoverBar.vue'
+import CoverSummary from './CoverSummary.vue'
 import ImportCsvModal from './ImportCsvModal.vue'
 import SyncButton from './SyncButton.vue'
 import { apiGetJson, apiSend, q } from '../utils/api.js'
 import { autoSave, setAutoSave } from '../composables/useSync.js'
 import { formatRuDate, formatMaskedIBAN, plural, fmtN, formatPeriod } from '../utils/formatters.js'
+import { groupAccounts, groupBadges, accountLook } from '../utils/statements.js'
 
 // Окно «ВЫПИСКИ»: всё, что известно об источниках данных (файлы выписок, снимки API) и об их присутствии в кеш-базе.
 // У каждого счёта бит: 1 — данные в кеше, 0 — нет. «Сбросить» зануляет биты, «Загрузить» взводит их из файлов-источников.
@@ -112,8 +114,37 @@ const originLabel = (f) => (f.kind === 'binance-series' ? 'РЯД API' : f.kind 
 const originTone = (f) => (f.origin === 'api' ? 'text-sky-300 border-sky-500/40' : 'text-slate-300 border-slate-600')
 
 const period = (f) => formatPeriod(f.from, f.to)
-const label = (a) => (/^[A-Z]{2}\d{2}/.test(a.label || '') && a.label.length > 12 ? formatMaskedIBAN(a.label) : a.label)
+// IBAN и идентификатор профиля Binance (BN…) показываем маскированными
+const label = (a) => ((a.type === 'binance' || /^[A-Z]{2}\d{2}/.test(a.label || '') && a.label.length > 12) ? formatMaskedIBAN(a.label) : a.label)
 const hasApiFile = (a) => a.files.some(f => f.origin === 'api')
+
+// Группы по имени файла и вид каждого счёта (цвет банка, значок OVDP/HOT)
+const groups = computed(() => groupAccounts(accounts.value))
+const looks = computed(() => new Map(accounts.value.map(a => [a.id, accountLook(a)])))
+// Что рисуем в сводке: отмеченные счета, а если ничего не отмечено — все
+const drawn = computed(() => (picked.value.size ? accounts.value.filter(a => picked.value.has(a.id)) : accounts.value))
+const look = (a) => looks.value.get(a.id) || accountLook(a)
+const title = (a) => label(a) || a.id // подпись счёта: IBAN, договор или идентификатор профиля
+
+// Свёрнутые группы (по имени файла)
+const folded = ref(new Set())
+const toggleFold = (name) => {
+  const s = new Set(folded.value)
+  s.has(name) ? s.delete(name) : s.add(name)
+  folded.value = s
+}
+
+// Отметка группы целиком: все счета группы отмечены / часть / ни одного
+const groupState = (g) => {
+  const n = g.accounts.filter(a => picked.value.has(a.id)).length
+  return n === 0 ? 'none' : n === g.accounts.length ? 'all' : 'some'
+}
+const toggleGroup = (g) => {
+  const s = new Set(picked.value)
+  if (groupState(g) === 'all') g.accounts.forEach(a => s.delete(a.id))
+  else g.accounts.forEach(a => s.add(a.id))
+  picked.value = s
+}
 
 </script>
 
@@ -138,53 +169,81 @@ const hasApiFile = (a) => a.files.some(f => f.origin === 'api')
     <div class="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
       <p v-if="!accounts.length && !loading" class="text-center text-slate-500 py-8">Источников пока нет. Нажми «Добавить» и выбери выписку.</p>
 
-      <div v-for="a in accounts" :key="a.id" class="rounded border p-3 space-y-2 transition-colors" :class="picked.has(a.id) ? 'border-emerald-500/50 bg-emerald-950/10' : 'border-slate-800 bg-slate-950/30'">
-        <div class="flex items-start gap-3">
-          <input type="checkbox" class="accent-emerald-500 mt-1" :checked="picked.has(a.id)" @change="toggle(a.id)" />
-          <div class="min-w-0 flex-1 space-y-1">
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="font-bold text-slate-100 truncate">{{ a.name || a.id }}</span>
-              <span class="text-[9px] font-bold px-1.5 py-0.5 rounded border border-slate-600 text-slate-300 uppercase">{{ a.type }}</span>
-              <span v-if="label(a)" class="text-[10px] text-slate-500">{{ label(a) }}</span>
-            </div>
-            <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px]">
-              <span :class="a.loaded ? 'text-emerald-400' : 'text-slate-500'">{{ a.loaded ? `● в кэше · ${fmtN(a.cached)}` : '○ нет в кэше' }}</span>
-              <span class="text-slate-500">{{ a.files.length ? `${a.files.length} ${plural(a.files.length, 'источник', 'источника', 'источников')} · ${fmtN(a.records)} ${plural(a.records, 'запись', 'записи', 'записей')}` : 'нет файла-источника' }}</span>
-            </div>
-          </div>
-          <div class="flex items-center gap-2 shrink-0">
-            <button v-if="a.files.length" type="button" class="text-[10px] text-slate-400 hover:text-slate-200" @click="toggleOpen(a.id)">
-              {{ opened.has(a.id) ? '▾ Скрыть' : '▸ Источники' }}
-            </button>
-            <UiButton variant="primary" size="sm" :disabled="!!busy" @click="updateFor = { id: a.id, name: a.name }">Обновить</UiButton>
-          </div>
+      <section v-for="g in groups" :key="g.name" class="space-y-2">
+        <!-- Заголовок группы: имя файла (без тега), отметка всей группы -->
+        <div class="flex items-center gap-2 px-1 pt-1">
+          <button
+            type="button"
+            class="text-slate-500 hover:text-slate-200 shrink-0 inline-flex"
+            :title="folded.has(g.name) ? 'Развернуть группу' : 'Свернуть группу'"
+            @click="toggleFold(g.name)"
+          ><UiIcon name="chevron" size="sm" class="transition-transform" :class="folded.has(g.name) ? '' : 'rotate-90'" /></button>
+          <input
+            type="checkbox"
+            class="accent-emerald-500"
+            :checked="groupState(g) === 'all'"
+            :indeterminate.prop="groupState(g) === 'some'"
+            :title="'Отметить все счета группы'"
+            @change="toggleGroup(g)"
+          />
+          <span class="font-bold text-slate-100 truncate min-w-0 cursor-pointer select-none" :title="g.name" @click="toggleFold(g.name)">{{ g.name }}</span>
+          <span v-for="b in groupBadges(g)" :key="b.tag" class="text-[9px] font-bold px-1.5 py-0.5 rounded border shrink-0" :class="b.style">{{ b.tag }}</span>
+          <span class="text-[10px] text-slate-500 shrink-0">{{ g.accounts.length }} {{ plural(g.accounts.length, 'счёт', 'счёта', 'счетов') }}</span>
         </div>
 
-        <CoverBar :cells="a.cells" :from="a.axis_from" :to="a.axis_to" />
-
-        <!-- Файлы-источники -->
-        <div v-if="opened.has(a.id)" class="space-y-1 pt-1 border-t border-slate-800">
-          <div v-for="f in a.files" :key="f.id" class="flex items-center gap-2 text-[10px] py-1">
-            <span class="font-bold px-1.5 py-0.5 rounded border shrink-0" :class="originTone(f)">{{ originLabel(f) }}</span>
-            <span class="text-slate-200 truncate min-w-0 flex-1" :title="f.name">{{ f.name }}</span>
-            <span class="text-slate-400 whitespace-nowrap w-60 text-right">{{ period(f) }}</span>
-            <span class="text-slate-500 whitespace-nowrap w-20 text-right">{{ fmtN(f.count) }}</span>
-            <span class="text-slate-600 whitespace-nowrap hidden sm:inline" :title="'Создан ' + formatRuDate(f.created)">{{ formatRuDate(f.created) }}</span>
-            <button
-              type="button"
-              class="shrink-0 px-1.5 py-0.5 rounded border transition-colors"
-              :class="armed('del' + f.id) ? 'border-rose-400 text-rose-300 bg-rose-950/40' : 'border-transparent text-slate-500 hover:text-rose-400'"
-              :disabled="!!busy"
-              :title="f.origin === 'api' ? 'Снести снимок API: следующая синхронизация стянет всё заново' : 'Удалить файл-источник'"
-              @click="confirm('del' + f.id, () => doDelete(a, f))"
-            >
-              <span v-if="armed('del' + f.id)">Точно?</span>
-              <UiIcon v-else name="trash" size="sm" />
-            </button>
+        <div v-show="!folded.has(g.name)" class="ml-5 pl-3 border-l border-slate-800 space-y-2">
+        <div v-for="a in g.accounts" :key="a.id" class="rounded border p-3 space-y-2 transition-colors" :class="picked.has(a.id) ? 'border-emerald-500/50 bg-emerald-950/10' : 'border-slate-800 bg-slate-950/30'">
+          <div class="flex items-start gap-3">
+            <input type="checkbox" class="accent-emerald-500 mt-1" :checked="picked.has(a.id)" @change="toggle(a.id)" />
+            <div class="min-w-0 flex-1 space-y-1">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="font-bold text-slate-100 truncate font-mono text-xs">{{ title(a) }}</span>
+              </div>
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px]">
+                <span :class="a.loaded ? 'text-emerald-400' : 'text-slate-500'">{{ a.loaded ? `● в кэше · ${fmtN(a.cached)}` : '○ нет в кэше' }}</span>
+                <span class="text-slate-500">{{ a.files.length ? `${a.files.length} ${plural(a.files.length, 'источник', 'источника', 'источников')} · ${fmtN(a.records)} ${plural(a.records, 'запись', 'записи', 'записей')}` : 'нет файла-источника' }}</span>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <button v-if="a.files.length" type="button" class="text-[10px] text-slate-400 hover:text-slate-200 inline-flex items-center gap-1" @click="toggleOpen(a.id)">
+                <UiIcon name="chevron" size="sm" class="transition-transform" :class="opened.has(a.id) ? 'rotate-90' : ''" />Источники
+              </button>
+              <UiButton variant="primary" size="sm" :disabled="!!busy" @click="updateFor = { id: a.id, name: g.name }">Обновить</UiButton>
+            </div>
           </div>
-          <p v-if="hasApiFile(a)" class="text-[9px] text-slate-600">API-снимок хранит и снятые периоды: пока он на месте, они заново не качаются.</p>
+
+          <CoverBar :cells="a.cells" :from="a.axis_from" :to="a.axis_to" :color="look(a).color" />
+
+          <!-- Файлы-источники -->
+          <div v-if="opened.has(a.id)" class="space-y-1 pt-1 border-t border-slate-800">
+            <div v-for="f in a.files" :key="f.id" class="flex items-center gap-2 text-[10px] py-1">
+              <span class="font-bold px-1.5 py-0.5 rounded border shrink-0" :class="originTone(f)">{{ originLabel(f) }}</span>
+              <span class="text-slate-200 truncate min-w-0 flex-1" :title="f.name">{{ f.name }}</span>
+              <span class="text-slate-400 whitespace-nowrap w-60 text-right">{{ period(f) }}</span>
+              <span class="text-slate-500 whitespace-nowrap w-20 text-right">{{ fmtN(f.count) }}</span>
+              <span class="text-slate-600 whitespace-nowrap hidden sm:inline" :title="'Создан ' + formatRuDate(f.created)">{{ formatRuDate(f.created) }}</span>
+              <button
+                type="button"
+                class="shrink-0 px-1.5 py-0.5 rounded border transition-colors"
+                :class="armed('del' + f.id) ? 'border-rose-400 text-rose-300 bg-rose-950/40' : 'border-transparent text-slate-500 hover:text-rose-400'"
+                :disabled="!!busy"
+                :title="f.origin === 'api' ? 'Снести снимок API: следующая синхронизация стянет всё заново' : 'Удалить файл-источник'"
+                @click="confirm('del' + f.id, () => doDelete(a, f))"
+              >
+                <span v-if="armed('del' + f.id)">Точно?</span>
+                <UiIcon v-else name="trash" size="sm" />
+              </button>
+            </div>
+            <p v-if="hasApiFile(a)" class="text-[9px] text-slate-600">API-снимок хранит и снятые периоды: пока он на месте, они заново не качаются.</p>
+          </div>
         </div>
-      </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Сводка покрытия: отдельно от списка, не скроллится вместе с ним -->
+    <div v-if="accounts.length" class="pt-3 mt-1 border-t border-slate-800">
+      <CoverSummary :accounts="accounts" :drawn="drawn" />
     </div>
 
     <!-- Действия: без выбора — на все счета, с выбором — на отмеченные (число в скобках) -->

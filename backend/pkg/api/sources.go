@@ -252,6 +252,20 @@ func mergeSpans(in []db.Span) []db.Span {
 	return out
 }
 
+// fallbackLabel — чем опознать счёт, когда в кеше у него нет IBAN: у банков маска карты из файла, у брокерского счёта номер
+// договора, у Binance идентификатор профиля из выписки. Служебное слово Card («icu», «binance») подписью не служит.
+func fallbackLabel(f *source.File) string {
+	switch f.Kind {
+	case source.KindICU:
+		return f.Contract
+	case source.KindBinance:
+		return f.Profile
+	case source.KindP2P, source.KindSeries:
+		return ""
+	}
+	return f.Card
+}
+
 // HandleSources — GET /api/sources: все счета, у которых есть источник или данные в кеше, со сведениями о файлах и таймлайном.
 func (s *Server) HandleSources(w http.ResponseWriter, r *http.Request) {
 	if !allow(w, r, http.MethodGet) {
@@ -263,7 +277,7 @@ func (s *Server) HandleSources(w http.ResponseWriter, r *http.Request) {
 		failed = append(failed, loadFailure{filepath.Base(p), why})
 	}
 	counts, _ := s.storage.CacheCounts()
-	cached, _ := s.storage.GetAccounts()
+	cached, _ := s.storage.GetAllAccounts() // у Binance здесь идентификатор профиля из выписки, у брокерского — IBAN, привязанный к договору
 
 	byID := map[string]*invAccount{}
 	order := []string{}
@@ -297,7 +311,7 @@ func (s *Server) HandleSources(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if a.Label == "" {
-			a.Label = f.Card
+			a.Label = fallbackLabel(f)
 		}
 		a.Files = append(a.Files, invFile{ID: f.Hash, Kind: f.Kind, Name: f.Name, Created: f.Created, Origin: f.Origin, From: f.From, To: f.To, Count: f.Count()})
 		a.Records += f.Count()
