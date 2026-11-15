@@ -21,6 +21,8 @@ const (
 	SerCHFUAH = "chf_uah" // гривен за 1 швейцарский франк
 	SerJPYUAH = "jpy_uah" // гривен за 1 иену (НБУ отдаёт курс за 10 или 1000 иен, делится на номинал)
 	SerCNYUAH = "cny_uah" // гривен за 1 юань
+	SerRUBUAH = "rub_uah" // гривен за 1 российский рубль (НБУ отдаёт за 10 или 100, делится на номинал)
+	SerEGPUAH = "egp_uah" // гривен за 1 египетский фунт
 
 	fxFirstYear = 1996
 	fxWindow    = 10
@@ -37,6 +39,8 @@ var fxCodes = []struct{ code, series string }{
 	{"chf", SerCHFUAH},
 	{"jpy", SerJPYUAH},
 	{"cny", SerCNYUAH},
+	{"rub", SerRUBUAH},
+	{"egp", SerEGPUAH},
 }
 
 // FXNBU — курсы USD, EUR и золота к гривне за всю историю. Сбой одного ряда не убивает остальные: что скачалось — возвращается.

@@ -151,11 +151,11 @@ func TestPacksSkipDisabledBases(t *testing.T) {
 }
 
 func TestPacksRegisteredWithSources(t *testing.T) {
-	if !IsSource(SourceGB) || !IsSource(SourceCH) || !IsSource(SourceJP) || !IsSource(SourceCN) {
+	if !IsSource(SourceGB) || !IsSource(SourceCH) || !IsSource(SourceJP) || !IsSource(SourceCN) || !IsSource(SourceRU) || !IsSource(SourceEG) {
 		t.Fatal("gb/ch не зарегистрированы")
 	}
 	cat := NewClient().Catalog()
-	if len(cat[SourceGB]) != 6 || len(cat[SourceCH]) != 4 || len(cat[SourceJP]) != 5 || len(cat[SourceCN]) != 2 {
+	if len(cat[SourceGB]) != 6 || len(cat[SourceCH]) != 4 || len(cat[SourceJP]) != 5 || len(cat[SourceCN]) != 2 || len(cat[SourceRU]) != 2 || len(cat[SourceEG]) != 1 {
 		t.Fatalf("%v", cat)
 	}
 	for _, c := range Countries() {

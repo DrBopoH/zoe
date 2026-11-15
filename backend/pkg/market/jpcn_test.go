@@ -47,6 +47,8 @@ func jpServer(t *testing.T, failSub string) *httptest.Server {
 			w.Write([]byte("observation_date,IRLTLT01JPM156N\n2026-09-01,3.05\n"))
 		case strings.Contains(p, "NIKKEI225"):
 			w.Write([]byte("observation_date,NIKKEI225\n2026-11-05,60000\n2026-11-10,.\n2026-11-12,61000\n2026-11-13,61142.35\n"))
+		case strings.Contains(p, "FP.CPI.TOTL.ZG"):
+			w.Write([]byte(`[{"page":1,"pages":1,"per_page":200,"total":3},[{"date":"2024","value":28.27},{"date":"2023","value":33.88},{"date":"2022","value":null},{"date":"2021","value":5.2}]]`))
 		case strings.Contains(p, "WS_CBPOL"):
 			w.Write([]byte(ezCSV + "x,M,2026-08,1.0,A\nx,M,2026-09,1.0,A\nx,M,2026-10,1.25,A\n"))
 		case strings.Contains(p, "WS_LONG_CPI"):
