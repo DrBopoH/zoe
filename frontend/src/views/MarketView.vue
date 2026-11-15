@@ -19,6 +19,7 @@ import MacroUsCreditView from './MacroUsCreditView.vue'
 import MacroCryptoView from './MacroCryptoView.vue'
 import MacroStocksView from './MacroStocksView.vue'
 import MacroCommoditiesView from './MacroCommoditiesView.vue'
+import MacroWorldView from './MacroWorldView.vue'
 import { useSection } from '../composables/useSection.js'
 import { useMacro } from '../composables/useMacro.js'
 import { useCountries } from '../composables/useCountries.js'
@@ -54,10 +55,11 @@ const countries = useCountries()
 const crypto = useMacro('crypto')
 const stocks = useMacro('stocks')
 // Сырьё: цены лежат в источнике «commodities», металлы и курс доллара — в «fx», поэтому берутся сверх рядов источника
+const world = useMacro('world')
 const commodities = useMacro('commodities', ['usd_uah', 'xau_uah', 'xag_uah', 'xpt_uah', 'xpd_uah'])
 // «Курсы» читают ещё и реестр стран (ставки и реальные курсы в таблице мировых валют)
 const fxScreen = { series: fx.series, load: () => Promise.all([fx.load(), countries.load()]) }
-const heavy = { countries, eurozone: ez, fx: fxScreen, fed: us, yields: curve, real, prices, jobs, activity, liquidity, credit, usecon: econ, crypto, stocks, commodities }
+const heavy = { countries, eurozone: ez, fx: fxScreen, fed: us, yields: curve, real, prices, jobs, activity, liquidity, credit, usecon: econ, crypto, stocks, commodities, world }
 // Таблицы облигаций считают доходность в долларах: нужны курсы и инфляция США (тяжёлые ряды, поэтому только на этих экранах)
 const dollar = computed(() => ({ ...fx.series.value, ...us.series.value }))
 const loadBond = () => { if (!bondSection.value) return; for (const h of [fx, us]) if (!Object.keys(h.series.value).length) h.load() }
@@ -90,6 +92,7 @@ const bondSection = computed(() => (isBondSection(section.value) ? section.value
     <MacroUsEconView v-else-if="section === 'usecon'" :econ="econ.series.value" :today="today" :running="running" />
     <MacroStocksView v-else-if="section === 'stocks'" :stocks="stocks.series.value" :today="today" :running="running" />
     <MacroCommoditiesView v-else-if="section === 'commodities'" :com="commodities.series.value" :today="today" :running="running" />
+    <MacroWorldView v-else-if="section === 'world'" :world="world.series.value" :today="today" :running="running" />
     <MacroCryptoView v-else-if="section === 'crypto'" :crypto="crypto.series.value" :today="today" :running="running" />
   </div>
 </template>
