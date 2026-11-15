@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { stripTag, groupAccounts, bankKeyOf, accountLook } from '../src/utils/statements.js'
+import { stripTag, groupAccounts, groupBadges, bankKeyOf, accountLook } from '../src/utils/statements.js'
 
 test('stripTag: хвост-тег срезается только если он равен типу счёта', () => {
   assert.equal(stripTag('Volunets Taras.pdf (privat)', 'privat'), 'Volunets Taras.pdf')
@@ -20,11 +20,18 @@ test('groupAccounts: один файл — одна группа, группы �
   assert.equal(g[1].accounts.length, 3)
 })
 
-test('bankKeyOf / accountLook: значок только у ICU и Binance, у банков цвет', () => {
+test('bankKeyOf / accountLook: у каждого счёта значок и цвет банка', () => {
   assert.equal(bankKeyOf({ type: 'binance' }), 'binance')
   assert.equal(accountLook({ type: 'binance' }).tag, 'HOT')
   assert.equal(accountLook({ type: 'icu' }).tag, 'OVDP')
   const p = accountLook({ type: 'privat' })
-  assert.equal(p.tag, '')
+  assert.ok(p.tag)
   assert.match(p.color, /^#|^rgb|^hsl/)
+})
+
+test('groupBadges: значки группы без повторов', () => {
+  const g = { accounts: [{ type: 'privat' }, { type: 'privat' }, { type: 'binance' }] }
+  const tags = groupBadges(g).map(b => b.tag)
+  assert.equal(tags.length, 2)
+  assert.ok(tags.includes('HOT'))
 })

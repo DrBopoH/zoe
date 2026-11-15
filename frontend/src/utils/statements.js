@@ -19,13 +19,21 @@ export const bankKeyOf = (a) => {
   return detectBankKey(a.label || '', { type }, [])
 }
 
-// Цвет и значок счёта. Значок (тег) нужен там, где счёт — не банк: брокерский (OVDP) и Binance (HOT);
-// у банков их роль играет цвет таймлайна покрытия.
+// Цвет и значок счёта: цвет красит таймлайн покрытия, значок (PRIVAT, RAIF, OVDP, HOT …) — заголовок группы
 export const accountLook = (a) => {
   const key = bankKeyOf(a)
   const theme = bankTheme(key, a.type)
-  const service = key === 'icu' || key === 'binance'
-  return { key, color: theme.color, tag: service ? theme.tag : '', tagStyle: theme.tagStyle }
+  return { key, color: theme.color, tag: theme.tag, tagStyle: theme.tagStyle }
+}
+
+// Значки группы: один файл выписки — как правило один банк, но если типы разные, покажем каждый один раз
+export const groupBadges = (g) => {
+  const seen = new Map()
+  for (const a of g.accounts) {
+    const l = accountLook(a)
+    if (l.tag && !seen.has(l.tag)) seen.set(l.tag, { tag: l.tag, style: l.tagStyle })
+  }
+  return [...seen.values()]
 }
 
 // Группы по имени файла (без хвоста-тега): один файл выписки с несколькими счетами — одна группа.

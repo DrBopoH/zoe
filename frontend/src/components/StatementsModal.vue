@@ -10,7 +10,7 @@ import SyncButton from './SyncButton.vue'
 import { apiGetJson, apiSend, q } from '../utils/api.js'
 import { autoSave, setAutoSave } from '../composables/useSync.js'
 import { formatRuDate, formatMaskedIBAN, plural, fmtN, formatPeriod } from '../utils/formatters.js'
-import { groupAccounts, accountLook } from '../utils/statements.js'
+import { groupAccounts, groupBadges, accountLook } from '../utils/statements.js'
 
 // Окно «ВЫПИСКИ»: всё, что известно об источниках данных (файлы выписок, снимки API) и об их присутствии в кеш-базе.
 // У каждого счёта бит: 1 — данные в кеше, 0 — нет. «Сбросить» зануляет биты, «Загрузить» взводит их из файлов-источников.
@@ -171,10 +171,10 @@ const toggleGroup = (g) => {
         <div class="flex items-center gap-2 px-1 pt-1">
           <button
             type="button"
-            class="text-slate-500 hover:text-slate-200 w-4 shrink-0 text-xs"
+            class="text-slate-500 hover:text-slate-200 shrink-0 inline-flex"
             :title="folded.has(g.name) ? 'Развернуть группу' : 'Свернуть группу'"
             @click="toggleFold(g.name)"
-          >{{ folded.has(g.name) ? '▸' : '▾' }}</button>
+          ><UiIcon name="chevron" size="sm" class="transition-transform" :class="folded.has(g.name) ? '' : 'rotate-90'" /></button>
           <input
             type="checkbox"
             class="accent-emerald-500"
@@ -184,6 +184,7 @@ const toggleGroup = (g) => {
             @change="toggleGroup(g)"
           />
           <span class="font-bold text-slate-100 truncate min-w-0 cursor-pointer select-none" :title="g.name" @click="toggleFold(g.name)">{{ g.name }}</span>
+          <span v-for="b in groupBadges(g)" :key="b.tag" class="text-[9px] font-bold px-1.5 py-0.5 rounded border shrink-0" :class="b.style">{{ b.tag }}</span>
           <span class="text-[10px] text-slate-500 shrink-0">{{ g.accounts.length }} {{ plural(g.accounts.length, 'счёт', 'счёта', 'счетов') }}</span>
         </div>
 
@@ -193,7 +194,6 @@ const toggleGroup = (g) => {
             <input type="checkbox" class="accent-emerald-500 mt-1" :checked="picked.has(a.id)" @change="toggle(a.id)" />
             <div class="min-w-0 flex-1 space-y-1">
               <div class="flex flex-wrap items-center gap-2">
-                <span v-if="look(a).tag" class="text-[9px] font-bold px-1.5 py-0.5 rounded border" :class="look(a).tagStyle">{{ look(a).tag }}</span>
                 <span class="font-bold text-slate-100 truncate font-mono text-xs">{{ title(a) }}</span>
               </div>
               <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px]">
@@ -202,8 +202,8 @@ const toggleGroup = (g) => {
               </div>
             </div>
             <div class="flex items-center gap-2 shrink-0">
-              <button v-if="a.files.length" type="button" class="text-[10px] text-slate-400 hover:text-slate-200" @click="toggleOpen(a.id)">
-                {{ opened.has(a.id) ? '▾ Скрыть' : '▸ Источники' }}
+              <button v-if="a.files.length" type="button" class="text-[10px] text-slate-400 hover:text-slate-200 inline-flex items-center gap-1" @click="toggleOpen(a.id)">
+                <UiIcon name="chevron" size="sm" class="transition-transform" :class="opened.has(a.id) ? 'rotate-90' : ''" />Источники
               </button>
               <UiButton variant="primary" size="sm" :disabled="!!busy" @click="updateFor = { id: a.id, name: g.name }">Обновить</UiButton>
             </div>
