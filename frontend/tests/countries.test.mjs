@@ -60,6 +60,16 @@ test('у рядов России и Египта и курсов рубля и �
   for (const id of ['ru_policy', 'ru_cpi', 'eg_cpi', 'rub_uah', 'egp_uah']) assert.ok(SERIES[id]?.label && SERIES[id]?.color, id)
 })
 
+test('у рядов Польши и Турции и курсов злотого и лиры есть подпись и цвет', () => {
+  for (const id of ['pl_policy', 'pl_cpi', 'pl_u', 'pl_y10', 'pln_uah', 'tr_policy', 'tr_cpi', 'tr_u', 'try_uah']) assert.ok(SERIES[id]?.label && SERIES[id]?.color, id)
+})
+
+test('карточка Турции без доходности 10 лет: строки только по имеющимся показателям', () => {
+  const tr = { cc: 'tr', name: 'Турция', metrics: { policy: 'tr_policy', cpi: 'tr_cpi', u: 'tr_u', fx: 'try_uah' } }
+  assert.deepEqual(countryRows(tr, {}).map((r) => r.key), ['policy', 'cpi', 'u', 'fx'])
+  assert.equal(countryRows(tr, { tr_cpi: [{ d: '2026-10-01', v: 31.2 }] })[1].text, '31,2 %')
+})
+
 test('высокая инфляция в карточке: без сокращений и потери знаков', () => {
   const eg = { cc: 'eg', name: 'Египет', metrics: { cpi: 'eg_cpi' } }
   assert.equal(countryRows(eg, { eg_cpi: [{ d: '2026-09-01', v: 165.2 }] })[0].text, '165,2 %')

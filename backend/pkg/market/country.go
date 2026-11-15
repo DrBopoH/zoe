@@ -34,5 +34,9 @@ func Countries() []Country {
 			"policy": SerRUPolicy, "cpi": SerRUCPI, "fx": SerRUBUAH}},
 		{CC: "eg", Name: "Египет", Currency: "EGP", Source: SourceEG, Metrics: map[string]string{
 			"cpi": SerEGCPI, "fx": SerEGPUAH}},
+		{CC: "pl", Name: "Польша", Currency: "PLN", Source: SourcePL, Metrics: map[string]string{
+			"policy": SerPLPolicy, "cpi": SerPLCPI, "u": SerPLUnrate, "y10": SerPLY10, "fx": SerPLNUAH}},
+		{CC: "tr", Name: "Турция", Currency: "TRY", Source: SourceTR, Metrics: map[string]string{
+			"policy": SerTRPolicy, "cpi": SerTRCPI, "u": SerTRUnrate, "fx": SerTRYUAH}},
 	}
 }
