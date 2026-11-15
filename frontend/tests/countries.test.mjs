@@ -57,7 +57,7 @@ test('карточка Китая: ставка, инфляция и курс; �
 })
 
 test('у рядов России и Египта и курсов рубля и египетского фунта есть подпись и цвет', () => {
-  for (const id of ['ru_policy', 'ru_cpi', 'eg_policy', 'eg_cpi', 'rub_uah', 'egp_uah']) assert.ok(SERIES[id]?.label && SERIES[id]?.color, id)
+  for (const id of ['ru_policy', 'ru_cpi', 'eg_cpi', 'rub_uah', 'egp_uah']) assert.ok(SERIES[id]?.label && SERIES[id]?.color, id)
 })
 
 test('высокая инфляция в карточке: без сокращений и потери знаков', () => {

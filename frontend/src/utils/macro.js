@@ -118,7 +118,6 @@ export const SERIES = {
   cny_uah: { label: 'Юань', color: '#f87171', step: false },
   ru_policy: { label: 'Банк России: ключевая ставка', color: '#a78bfa', step: true },
   ru_cpi: { label: 'Инфляция России г/г', color: '#fb923c', step: false },
-  eg_policy: { label: 'ЦБ Египта: ставка', color: '#a78bfa', step: true },
   eg_cpi: { label: 'Инфляция Египта г/г', color: '#fb923c', step: false },
   rub_uah: { label: 'Российский рубль', color: '#f87171', step: false },
   egp_uah: { label: 'Египетский фунт', color: '#fbbf24', step: false },
