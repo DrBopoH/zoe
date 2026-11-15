@@ -10,6 +10,7 @@ export const COUNTRY_METRICS = [
   { key: 'gdp', label: 'Рост ВВП', unit: '%' },
   { key: 'y10', label: 'Доходность 10 лет', unit: '%' },
   { key: 'fx', label: 'Курс к гривне', unit: '₴' },
+  { key: 'reer', label: 'Реальный курс (REER, индекс)', unit: 'п.' },
   { key: 'ppi', label: 'Цены производителей г/г', unit: '%' },
   { key: 'reserves', label: 'Резервы НБУ', unit: 'млрд $' },
   { key: 'm3', label: 'Денежная масса M3 г/г', unit: '%' },

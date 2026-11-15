@@ -52,7 +52,9 @@ const ez = useMacro('ez', ['eu_cpi_yoy'])
 const countries = useCountries()
 const crypto = useMacro('crypto')
 const stocks = useMacro('stocks')
-const heavy = { countries, eurozone: ez, fx, fed: us, yields: curve, real, prices, jobs, activity, liquidity, credit, usecon: econ, crypto, stocks }
+// «Курсы» читают ещё и реестр стран (ставки и реальные курсы в таблице мировых валют)
+const fxScreen = { series: fx.series, load: () => Promise.all([fx.load(), countries.load()]) }
+const heavy = { countries, eurozone: ez, fx: fxScreen, fed: us, yields: curve, real, prices, jobs, activity, liquidity, credit, usecon: econ, crypto, stocks }
 // Таблицы облигаций считают доходность в долларах: нужны курсы и инфляция США (тяжёлые ряды, поэтому только на этих экранах)
 const dollar = computed(() => ({ ...fx.series.value, ...us.series.value }))
 const loadBond = () => { if (!bondSection.value) return; for (const h of [fx, us]) if (!Object.keys(h.series.value).length) h.load() }
@@ -71,7 +73,7 @@ const bondSection = computed(() => (isBondSection(section.value) ? section.value
     </KeepAlive>
     <MacroRatesView v-if="section === 'rates'" :series="macro.series.value" :today="today" :running="running" />
     <MacroInflationView v-else-if="section === 'inflation'" :series="macro.series.value" :today="today" :running="running" />
-    <MacroFxView v-else-if="section === 'fx'" :fx="fx.series.value" :macro="macro.series.value" :today="today" :running="running" />
+    <MacroFxView v-else-if="section === 'fx'" :fx="fx.series.value" :macro="macro.series.value" :countries="countries.countries.value" :cseries="countries.series.value" :today="today" :running="running" />
     <MacroCountriesView v-else-if="section === 'countries'" :countries="countries.countries.value" :series="countries.series.value" :today="today" :running="running" />
     <MacroEurozoneView v-else-if="section === 'eurozone'" :ez="ez.series.value" :today="today" :running="running" />
     <MacroUsView v-else-if="section === 'fed'" :us="us.series.value" :macro="macro.series.value" :today="today" :running="running" />
