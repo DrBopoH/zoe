@@ -13,7 +13,7 @@ const emit = defineEmits(['refresh'])
 
 // Статус опроса приходит раз в несколько секунд, а быстрый источник отрабатывает за одну: без этого кнопка не успевала бы ни провернуться, ни стать серой.
 // Поэтому после нажатия она занята сама минимум KICK_MS, а дальше — пока статус говорит «идёт».
-const KICK_MS = 1500
+const KICK_MS = 3000
 const kicked = ref(false)
 let kickTimer = null
 const busy = computed(() => props.running || kicked.value)

@@ -31,7 +31,7 @@ describe('MarketHeader', () => {
   describe('сразу после нажатия', () => {
     afterEach(() => vi.useRealTimers())
 
-    it('кнопка занята и крутится минимум 1,5 с, даже если статус опроса ещё не пришёл', async () => {
+    it('кнопка занята и крутится минимум 3 с, даже если статус опроса ещё не пришёл', async () => {
       vi.useFakeTimers()
       const w = mount(MarketHeader, { props: { title: 'X' } })
       await w.find('button').trigger('click')
@@ -40,15 +40,15 @@ describe('MarketHeader', () => {
       expect(w.find('svg').classes()).toContain('animate-spin')
       await w.find('button').trigger('click')
       expect(w.emitted('refresh')).toHaveLength(1) // второй клик за это время не уходит
-      await vi.advanceTimersByTimeAsync(1600)
+      await vi.advanceTimersByTimeAsync(3100)
       expect(w.find('button').attributes('aria-busy')).toBe('false')
       expect(w.find('svg').classes()).not.toContain('animate-spin')
     })
 
-    it('пока статус говорит «идёт», остаётся занятой и после 1,5 с', async () => {
+    it('пока статус говорит «идёт», остаётся занятой и после 3 с', async () => {
       vi.useFakeTimers()
       const w = mount(MarketHeader, { props: { title: 'X', running: true } })
-      await vi.advanceTimersByTimeAsync(1600)
+      await vi.advanceTimersByTimeAsync(3100)
       expect(w.find('button').attributes('aria-busy')).toBe('true')
     })
   })
