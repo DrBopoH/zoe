@@ -49,34 +49,65 @@ export const groupAccounts = (accounts) => {
 }
 
 // Сводный таймлайн: общая ось от самой старой даты среди ВСЕХ счетов до now, чтобы выбор счетов её не двигал.
-// Каждый счёт кладёт на ось свои отрезки (cells: '1' данные, '2' снято без операций, '0' нет данных) прозрачностью 1/n,
-// где n — число рисуемых счетов; штриховка (kind '2') идёт отдельным слоем поверх всех заливок.
-// all — все счета; drawn — те, что рисуем (выбранные или все, если ничего не выбрано).
+// Ось режется на отрезки по границам всех периодов. На каждом отрезке цвет — среднее цветов счетов, у которых там есть
+// данные, а непрозрачность растёт с долей таких счетов (MIN_ALPHA..1): при десятках счетов бар остаётся читаемым.
+// Штриховка (период снят, операций нет) — отдельные отрезки по тому же правилу, рисуются поверх заливок.
+// all — все счета; drawn — рисуемые (выбранные или все, если ничего не выбрано).
+const MIN_ALPHA = 0.35
+
+const hexRgb = (h) => {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(h || ''))
+  if (!m) return [100, 116, 139]
+  const n = parseInt(m[1], 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+const meanColor = (colors) => {
+  const sum = colors.map(hexRgb).reduce((a, c) => [a[0] + c[0], a[1] + c[1], a[2] + c[2]], [0, 0, 0])
+  return `rgb(${sum.map(v => Math.round(v / colors.length)).join(' ')})`
+}
+
 export const summaryLayers = (all, drawn, now = 0) => {
-  const withAxis = (all || []).filter(a => a.axis_to > a.axis_from && a.cells)
-  if (!withAxis.length) return { from: 0, to: 0, fills: [], hatches: [] }
-  const from = Math.min(...withAxis.map(a => a.axis_from))
-  const to = Math.max(now || 0, ...withAxis.map(a => a.axis_to))
+  const ok = (a) => a.axis_to > a.axis_from && a.cells
+  const axis = (all || []).filter(ok)
+  if (!axis.length) return { from: 0, to: 0, fills: [], hatches: [] }
+  const from = Math.min(...axis.map(a => a.axis_from))
+  const to = Math.max(now || 0, ...axis.map(a => a.axis_to))
   const span = to - from || 1
-  const list = (drawn || []).filter(a => a.axis_to > a.axis_from && a.cells)
-  const alpha = list.length ? 1 / list.length : 1
+  const list = (drawn || []).filter(ok).map(a => ({ a, color: accountLook(a).color }))
+  const n = list.length
+  if (!n) return { from, to, fills: [], hatches: [] }
+
+  // Границы отрезков в долях оси
+  const cuts = new Set([0, 1])
+  for (const { a } of list) {
+    for (let i = 0; i <= a.cells.length; i++) {
+      const x = (a.axis_from + (i / a.cells.length) * (a.axis_to - a.axis_from) - from) / span
+      if (x >= 0 && x <= 1) cuts.add(x)
+    }
+  }
+  const xs = [...cuts].sort((p, q) => p - q)
+
   const fills = []
   const hatches = []
-  for (const a of list) {
-    const color = accountLook(a).color
-    const len = a.cells.length
-    const t = (i) => (a.axis_from + (i / len) * (a.axis_to - a.axis_from) - from) / span * 100
-    let i = 0
-    while (i < len) {
-      let j = i
-      while (j < len && a.cells[j] === a.cells[i]) j++
-      const kind = a.cells[i]
-      if (kind === '1' || kind === '2') {
-        const run = { left: t(i), width: t(j) - t(i), color, alpha }
-        ;(kind === '1' ? fills : hatches).push(run)
-      }
-      i = j
+  const push = (arr, x0, x1, color, alpha) => {
+    const last = arr[arr.length - 1]
+    const w = (x1 - x0) * 100
+    if (last && last.color === color && last.alpha === alpha && Math.abs(last.left + last.width - x0 * 100) < 1e-9) last.width += w
+    else arr.push({ left: x0 * 100, width: w, color, alpha })
+  }
+  for (let k = 0; k + 1 < xs.length; k++) {
+    const mid = from + ((xs[k] + xs[k + 1]) / 2) * span
+    const data = []
+    const empty = []
+    for (const { a, color } of list) {
+      if (mid < a.axis_from || mid >= a.axis_to) continue
+      const kind = a.cells[Math.floor(((mid - a.axis_from) / (a.axis_to - a.axis_from)) * a.cells.length)]
+      if (kind === '1') data.push(color)
+      else if (kind === '2') empty.push(color)
     }
+    const alphaOf = (c) => Math.round((MIN_ALPHA + (1 - MIN_ALPHA) * (c.length / n)) * 1000) / 1000
+    if (data.length) push(fills, xs[k], xs[k + 1], meanColor(data), alphaOf(data))
+    if (empty.length) push(hatches, xs[k], xs[k + 1], meanColor(empty), alphaOf(empty))
   }
   return { from, to, fills, hatches }
 }

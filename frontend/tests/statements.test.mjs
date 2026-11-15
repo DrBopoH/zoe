@@ -38,22 +38,34 @@ test('groupBadges: значки группы без повторов', () => {
 
 import { summaryLayers } from '../src/utils/statements.js'
 
-test('summaryLayers: общая ось по всем счетам, прозрачность 1/n, штриховка отдельно', () => {
+test('summaryLayers: общая ось по всем счетам, штриховка отдельно, непрозрачность по доле счетов', () => {
   const a = { id: 'a', type: 'privat', axis_from: 0, axis_to: 100, cells: '1122' }
   const b = { id: 'b', type: 'raif', axis_from: 50, axis_to: 100, cells: '11' }
   const all = summaryLayers([a, b], [a, b], 100)
   assert.equal(all.from, 0)
   assert.equal(all.to, 100)
-  assert.equal(all.fills.length, 2)
-  assert.equal(all.hatches.length, 1)
-  assert.equal(all.fills[0].alpha, 0.5)
+  assert.equal(all.fills.length, 2) // [0..50] счёт a, [50..100] счёт b
+  assert.equal(all.hatches.length, 1) // [50..100] штриховка a
   assert.equal(all.fills[0].width, 50)
-  assert.equal(all.fills[1].left, 50) // b начинается с середины общей оси
-  // выбор одного счёта ось не двигает
+  assert.equal(all.fills[1].left, 50)
+  assert.equal(all.fills[0].alpha, 0.675) // 0.35 + 0.65 * 1/2
+  // выбор одного счёта ось не двигает, непрозрачность полная
   const one = summaryLayers([a, b], [b], 100)
   assert.equal(one.from, 0)
   assert.equal(one.fills[0].alpha, 1)
   assert.equal(one.fills[0].left, 50)
+})
+
+test('summaryLayers: пересечение смешивает цвета и не бледнеет при многих счетах', () => {
+  const accs = Array.from({ length: 14 }, (_, i) => ({ id: String(i), type: i % 2 ? 'privat' : 'raif', axis_from: 0, axis_to: 100, cells: '11' }))
+  const r = summaryLayers(accs, accs, 100)
+  assert.equal(r.fills.length, 1)
+  assert.equal(r.fills[0].alpha, 1)
+  assert.match(r.fills[0].color, /^rgb\(\d+ \d+ \d+\)$/)
+  const some = summaryLayers(accs, accs.slice(0, 1), 100)
+  assert.equal(some.fills[0].alpha, 1)
+  const sparse = summaryLayers(accs, [...accs.slice(0, 1), { ...accs[1], cells: '00' }], 100)
+  assert.equal(sparse.fills[0].alpha, 0.675)
 })
 
 test('summaryLayers: ось тянется до now, пустой ввод безопасен', () => {
