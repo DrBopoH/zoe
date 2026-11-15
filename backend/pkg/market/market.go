@@ -93,6 +93,8 @@ type Client struct {
 	// Крипто-контур (источник «chain»): P2P Binance, фьючерсы Binance, DefiLlama, mempool.space, TronGrid, публичный RPC Ethereum, CoinGecko; пустая строка отключает часть (тесты)
 	P2PBase, FuturesBase, LlamaBase, MempoolBase, TronBase, EthRPCBase, GeckoBase string
 	Now                                                                           func() time.Time
+	// Limiter — паузы между запросами к одному хосту (nil — без пауз)
+	Limiter *HostLimiter
 	// LastDate — до какой даты ряд уже лежит в кеше (пусто — нет такого). По ней тяжёлые дневные ряды FRED докачиваются хвостом, а не целиком.
 	// nil — всегда качать всю историю.
 	LastDate func(series string) string
@@ -104,7 +106,7 @@ type Client struct {
 }
 
 func NewClient() *Client {
-	return &Client{HTTP: &http.Client{Timeout: 30 * time.Second}, NBUBase: DefaultNBUBase, USTBase: DefaultUSTBase, FREDBase: DefaultFREDBase, BinanceBase: DefaultBinanceBase, FNGBase: DefaultFNGBase, ShillerBase: DefaultShillerBase, EurostatBase: DefaultEurostatBase, ECBBase: DefaultECBBase, BoEBase: DefaultBoEBase, ONSBase: DefaultONSBase, BISBase: DefaultBISBase, WBBase: DefaultWBBase, P2PBase: DefaultP2PBase, FuturesBase: DefaultFuturesBase, LlamaBase: DefaultLlamaBase, MempoolBase: DefaultMempoolBase, TronBase: DefaultTronBase, EthRPCBase: DefaultEthRPCBase, GeckoBase: DefaultGeckoBase, Now: time.Now}
+	return &Client{HTTP: &http.Client{Timeout: 30 * time.Second}, NBUBase: DefaultNBUBase, USTBase: DefaultUSTBase, FREDBase: DefaultFREDBase, BinanceBase: DefaultBinanceBase, FNGBase: DefaultFNGBase, ShillerBase: DefaultShillerBase, EurostatBase: DefaultEurostatBase, ECBBase: DefaultECBBase, BoEBase: DefaultBoEBase, ONSBase: DefaultONSBase, BISBase: DefaultBISBase, WBBase: DefaultWBBase, P2PBase: DefaultP2PBase, FuturesBase: DefaultFuturesBase, LlamaBase: DefaultLlamaBase, MempoolBase: DefaultMempoolBase, TronBase: DefaultTronBase, EthRPCBase: DefaultEthRPCBase, GeckoBase: DefaultGeckoBase, Now: time.Now, Limiter: NewHostLimiter(DefaultHostGaps())}
 }
 
 func (c *Client) now() time.Time {
@@ -139,6 +141,9 @@ func (c *Client) do(ctx context.Context, method, url string, payload []byte, hea
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
+	}
+	if err := c.Limiter.Wait(ctx, req.URL.Host); err != nil {
+		return nil, err
 	}
 	h := c.HTTP
 	if h == nil {

@@ -131,3 +131,28 @@ func TestSaveMacroSeriesTailKeepsHistory(t *testing.T) {
 		t.Fatalf("MacroLastDate: %q", d)
 	}
 }
+
+func TestMacroStats(t *testing.T) {
+	d := t.TempDir()
+	s, err := NewStorage(filepath.Join(d, "c.db"), filepath.Join(d, "k.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if st, err := s.MacroStats(); err != nil || len(st) != 0 {
+		t.Fatalf("пустой кеш: %+v %v", st, err)
+	}
+	if err := s.SaveMacroSeries([]market.SeriesPoint{
+		{Series: "b", Date: "2026-01-01", Value: 1}, {Series: "b", Date: "2026-03-01", Value: 2},
+		{Series: "a", Date: "2026-05-05", Value: 3},
+	}, 77); err != nil {
+		t.Fatal(err)
+	}
+	st, err := s.MacroStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st) != 2 || st[0].ID != "a" || st[0].Points != 1 || st[1].ID != "b" || st[1].Points != 2 || st[1].From != "2026-01-01" || st[1].To != "2026-03-01" || st[1].UpdatedAt != 77 {
+		t.Fatalf("статистика: %+v", st)
+	}
+}

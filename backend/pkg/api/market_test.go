@@ -269,3 +269,43 @@ func TestMacroCatalog(t *testing.T) {
 		t.Fatalf("без клиента: %d %s", code, body)
 	}
 }
+
+func TestMacroSourcesHealth(t *testing.T) {
+	s := newMarketServer(t, true)
+	if code, _ := call(t, s.HandleMacroSources, http.MethodPost, "/api/macro/sources", ""); code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST: %d", code)
+	}
+	if err := s.storage.SaveMacroSeries([]market.SeriesPoint{{Series: "fed_funds", Date: "2000-01-01", Value: 5}, {Series: "fed_funds", Date: "2000-02-01", Value: 5}}, 1); err != nil {
+		t.Fatal(err)
+	}
+	code, body := call(t, s.HandleMacroSources, http.MethodGet, "/api/macro/sources", "")
+	var r struct {
+		Feeds []struct {
+			ID     string `json:"id"`
+			Cached int    `json:"cached"`
+			Stale  int    `json:"stale"`
+		} `json:"feeds"`
+		Series []struct {
+			ID    string `json:"id"`
+			Feed  string `json:"feed"`
+			Freq  string `json:"freq"`
+			Stale bool   `json:"stale"`
+		} `json:"series"`
+	}
+	if code != 200 || json.Unmarshal(body, &r) != nil || len(r.Series) != 1 || r.Series[0].ID != "fed_funds" || r.Series[0].Feed != "us" || r.Series[0].Freq != "месяц" || !r.Series[0].Stale {
+		t.Fatalf("ряд: %d %s", code, body)
+	}
+	found := false
+	for _, f := range r.Feeds {
+		if f.ID == "us" {
+			found = f.Cached == 1 && f.Stale == 1
+		}
+	}
+	if !found {
+		t.Fatalf("источник us: %s", body)
+	}
+	s.SetMarket(nil)
+	if code, body := call(t, s.HandleMacroSources, http.MethodGet, "/api/macro/sources", ""); code != 200 || !strings.Contains(string(body), `"feeds":[]`) {
+		t.Fatalf("без клиента: %d %s", code, body)
+	}
+}

@@ -139,3 +139,21 @@ func (s *Storage) MacroSeries(ids []string) (map[string][]MacroPoint, int64, err
 	}
 	return out, updated, rows.Err()
 }
+
+// MacroStats — что лежит в кеше по каждому ряду: число точек, первая и последняя дата, когда обновлялся (для страницы «Источники»).
+func (s *Storage) MacroStats() ([]market.SeriesStat, error) {
+	rows, err := s.cacheDB.Query(`SELECT series, COUNT(*), MIN(dt), MAX(dt), MAX(updated_at) FROM macro_series GROUP BY series ORDER BY series`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []market.SeriesStat{}
+	for rows.Next() {
+		var st market.SeriesStat
+		if err := rows.Scan(&st.ID, &st.Points, &st.From, &st.To, &st.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, st)
+	}
+	return out, rows.Err()
+}
