@@ -21,7 +21,8 @@ export const MACRO_SECTIONS = [
   { key: 'stocks', label: 'Биржа США', icon: 'stocks', feed: 'stocks' },
   { key: 'world', label: 'Мировые акции', icon: 'stocks', feed: 'world' },
   { key: 'crypto', label: 'Крипто', icon: 'crypto', feed: 'crypto' },
-  { key: 'chain', label: 'Крипто-контур', icon: 'crypto', feed: 'chain' }
+  { key: 'chain', label: 'Крипто-контур', icon: 'crypto', feed: 'chain' },
+  { key: 'ppp', label: 'Покупательная способность', icon: 'inflation', feed: 'ppp' }
 ]
 
 export const MARKET_TREE = [
