@@ -47,6 +47,22 @@ export const SERIES = {
   us_fwd5y5y: { label: 'Инфляция 5y5y', color: '#a78bfa', step: false },
   us_termprem: { label: 'Срочная премия 10 л.', color: '#f472b6', step: false },
   us_mortgage: { label: 'Ипотека 30 л.', color: '#34d399', step: false },
+  us_corecpi_yoy: { label: 'Базовый CPI г/г', color: '#fb923c', step: false },
+  us_corecpi_mom: { label: 'Базовый CPI м/м', color: '#fb923c', step: false },
+  us_pce_yoy: { label: 'PCE г/г', color: '#a78bfa', step: false, thin: true },
+  us_corepce_yoy: { label: 'Базовый PCE г/г', color: '#34d399', step: false },
+  us_ppi_yoy: { label: 'Цены производителей г/г', color: '#f472b6', step: false },
+  us_shelter_yoy: { label: 'Жильё в CPI г/г', color: '#38bdf8', step: false },
+  us_nfp: { label: 'Прирост занятых за месяц', color: '#34d399', step: false, noLog: true },
+  us_claims: { label: 'Заявки на пособие (неделя)', color: '#fbbf24', step: false },
+  us_jolts: { label: 'Открытые вакансии', color: '#38bdf8', step: false },
+  us_wages_yoy: { label: 'Зарплаты г/г', color: '#34d399', step: false },
+  us_u6: { label: 'Безработица U-6', color: '#fb923c', step: false },
+  us_eci_yoy: { label: 'Стоимость рабочей силы г/г', color: '#a78bfa', step: false, thin: true },
+  us_retail_yoy: { label: 'Розничные продажи г/г', color: '#38bdf8', step: false },
+  us_indpro_yoy: { label: 'Промышленность г/г', color: '#fbbf24', step: false },
+  us_housing: { label: 'Начато строительство жилья', color: '#a78bfa', step: false },
+  us_homeprice_yoy: { label: 'Цены на дома г/г', color: '#34d399', step: false },
   crypto_btc: { label: 'Bitcoin', color: '#fb923c', step: false },
   crypto_eth: { label: 'Ethereum', color: '#a78bfa', step: false },
   crypto_bnb: { label: 'BNB', color: '#fbbf24', step: false },
@@ -368,3 +384,14 @@ export function curveChart(snaps, { width = 1000, height = 220, pad = MACRO_PAD 
   })
   return { ...base, empty: false, xs: snaps[0].points.map((p, i) => ({ x: xOf(i), label: p.label })), yTicks, lines }
 }
+
+/** Рост реальных зарплат: годовой рост заработка минус годовая инфляция на тот же месяц (п. п.). Нет пары — null. */
+export function realWageGrowth(wagesYoY, cpiYoY) {
+  const w = lastPoint(wagesYoY)
+  if (!w) return null
+  const c = valueAt(cpiYoY, w.d)
+  return c === null ? null : { d: w.d, v: Math.round((w.v - c) * 100) / 100 }
+}
+
+/** Цель ФРС по инфляции PCE, % годовых */
+export const FED_INFLATION_TARGET = 2
