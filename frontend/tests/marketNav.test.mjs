@@ -5,7 +5,7 @@ import { MARKET_TREE, MARKET_SECTIONS, leafKeys, groupOf, feedOf, isBondSection,
 import { macroWindow } from '../src/utils/macro.js'
 
 test('дерево рынка: листья и группы', () => {
-  assert.deepEqual(MARKET_SECTIONS, ['nbu', 'ust', 'rates', 'inflation', 'fx', 'fed', 'yields', 'real', 'usecon', 'stocks', 'crypto'])
+  assert.deepEqual(MARKET_SECTIONS, ['nbu', 'ust', 'rates', 'inflation', 'fx', 'fed', 'yields', 'real', 'prices', 'jobs', 'activity', 'usecon', 'stocks', 'crypto'])
   assert.deepEqual(leafKeys(MARKET_TREE), MARKET_SECTIONS)
   assert.equal(groupOf(MARKET_TREE, 'inflation'), 'macro')
   assert.equal(groupOf(MARKET_TREE, 'ust'), 'securities')
@@ -23,6 +23,9 @@ test('источник для «Обновить»: бумаги свой, ма�
   assert.equal(feedOf('fed'), 'us')
   assert.equal(feedOf('yields'), 'uscurve')
   assert.equal(feedOf('real'), 'usreal')
+  assert.equal(feedOf('prices'), 'usprices')
+  assert.equal(feedOf('jobs'), 'usjobs')
+  assert.equal(feedOf('activity'), 'usact')
   assert.equal(feedOf('usecon'), 'usecon')
   assert.equal(feedOf('crypto'), 'crypto')
   assert.equal(feedOf('stocks'), 'stocks')
@@ -38,7 +41,7 @@ test('окно по умолчанию — весь период данных, �
 
 // Каждый @click="имя" в шаблоне должен быть объявлен в script setup (потерянный refresh делал кнопку мёртвой)
 test('обработчики шаблонов объявлены', () => {
-  for (const f of ['MarketView', 'BondsView', 'MacroRatesView', 'MacroInflationView', 'MacroFxView', 'MacroUsView', 'MacroUsEconView', 'MacroUsYieldsView', 'MacroUsRealView', 'MacroCryptoView', 'MacroPanel']) {
+  for (const f of ['MarketView', 'BondsView', 'MacroRatesView', 'MacroInflationView', 'MacroFxView', 'MacroUsView', 'MacroUsEconView', 'MacroUsYieldsView', 'MacroUsRealView', 'MacroUsPricesView', 'MacroUsJobsView', 'MacroUsActivityView', 'MacroCryptoView', 'MacroPanel']) {
     const src = readFileSync(new URL(`../src/${f === 'MacroPanel' ? 'components' : 'views'}/${f}.vue`, import.meta.url), 'utf8')
     const script = src.slice(0, src.indexOf('</script>'))
     for (const m of src.matchAll(/@click="([A-Za-z_$][\w$]*)"/g)) {

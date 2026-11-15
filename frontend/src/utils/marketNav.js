@@ -9,6 +9,9 @@ export const MACRO_SECTIONS = [
   { key: 'fed', label: 'Ставка ФРС', icon: 'usa', feed: 'us' },
   { key: 'yields', label: 'Кривая Treasury', icon: 'usa', feed: 'uscurve' },
   { key: 'real', label: 'Реальные ставки', icon: 'usa', feed: 'usreal' },
+  { key: 'prices', label: 'Цены США', icon: 'inflation', feed: 'usprices' },
+  { key: 'jobs', label: 'Рынок труда США', icon: 'usa', feed: 'usjobs' },
+  { key: 'activity', label: 'Активность США', icon: 'usa', feed: 'usact' },
   { key: 'usecon', label: 'Экономика США', icon: 'usa', feed: 'usecon' },
   { key: 'stocks', label: 'Биржа США', icon: 'stocks', feed: 'stocks' },
   { key: 'crypto', label: 'Крипто', icon: 'crypto', feed: 'crypto' }
@@ -26,7 +29,7 @@ export const MARKET_SECTIONS = leafKeys(MARKET_TREE)
 export const isBondSection = (key) => SOURCES.some((s) => s.key === key)
 export const isMacroSection = (key) => MACRO_SECTIONS.some((s) => s.key === key)
 
-// Какой источник опрашивает кнопка «Обновить» в разделе: бумаги — свой (nbu/ust), ставка и инфляция — общий macro, курсы — fx, ФРС — us, кривая — uscurve, реальные ставки — usreal, экономика США — usecon
+// Какой источник опрашивает кнопка «Обновить» в разделе: бумаги — свой (nbu/ust), ставка и инфляция — общий macro, курсы — fx, ФРС — us, кривая — uscurve, реальные ставки — usreal, цены — usprices, труд — usjobs, активность — usact, экономика США — usecon
 export const feedOf = (key) => MACRO_SECTIONS.find((s) => s.key === key)?.feed ?? key
 
 // Ключ группы, в которой лежит раздел (null — раздел не в группе)
