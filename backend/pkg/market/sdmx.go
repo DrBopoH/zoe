@@ -14,9 +14,18 @@ import (
 // sdmxHeaders — заголовки для SDMX-CSV Евростата и ЕЦБ: не стандартный User-Agent Go (Евростат такой отшивает), без сжатия.
 var sdmxHeaders = map[string]string{"Accept": "text/csv,*/*", "Accept-Encoding": "identity", "User-Agent": "Mozilla/5.0 (compatible; Zoe personal finance; +local)"}
 
-// sdmxGet скачивает SDMX-CSV (Евростат: format=SDMX-CSV, ЕЦБ: format=csvdata) и разбирает его в ряд series.
+// sdmxGet скачивает SDMX-CSV (Евростат: format=SDMX-CSV, ЕЦБ: format=csvdata, BIS: format=csv) и разбирает его в ряд series.
 // Евростат иногда присылает gzip без заголовка Content-Encoding — Go такое сам не распаковывает: узнаём по сигнатуре 1f 8b.
 func (c *Client) sdmxGet(ctx context.Context, url, series string) ([]SeriesPoint, error) {
+	body, err := c.fetchPlain(ctx, url)
+	if err != nil {
+		return nil, err
+	}
+	return parseSDMX(body, series)
+}
+
+// fetchPlain скачивает CSV-ответ (Евростат, ЕЦБ, BIS, Банк Англии, ONS) с общими заголовками и распаковывает gzip без заголовка.
+func (c *Client) fetchPlain(ctx context.Context, url string) ([]byte, error) {
 	body, err := c.getHeaders(ctx, url, sdmxHeaders)
 	if err != nil {
 		return nil, err
@@ -32,7 +41,7 @@ func (c *Client) sdmxGet(ctx context.Context, url, series string) ([]SeriesPoint
 		}
 		body = plain
 	}
-	return parseSDMX(body, series)
+	return body, nil
 }
 
 // sdmxDate приводит период SDMX к дате: день «2026-11-12» как есть, месяц «2026-10» → первое число, квартал «2026-Q3» → первое число квартала.

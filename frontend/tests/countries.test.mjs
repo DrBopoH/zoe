@@ -37,3 +37,12 @@ test('ряды стран еврозоны: у каждого есть подп�
   assert.deepEqual(spreadIds(), ['it_bund_spread', 'fr_bund_spread', 'es_bund_spread'])
   for (const id of [...memberIds('cpi'), ...memberIds('u'), ...memberIds('y10'), ...spreadIds()]) assert.ok(SERIES[id]?.label && SERIES[id]?.color, id)
 })
+
+test('у рядов Великобритании и Швейцарии есть подпись и цвет', () => {
+  for (const id of ['gb_policy', 'gb_sonia', 'gb_y10', 'gb_cpi', 'gb_u', 'gb_gdp', 'ch_policy', 'ch_cpi', 'ch_u', 'gbp_uah', 'chf_uah']) assert.ok(SERIES[id]?.label && SERIES[id]?.color, id)
+})
+
+test('карточка Швейцарии: только те показатели, что есть у страны', () => {
+  const ch = { cc: 'ch', name: 'Швейцария', metrics: { policy: 'ch_policy', cpi: 'ch_cpi', u: 'ch_u', fx: 'chf_uah' } }
+  assert.deepEqual(countryRows(ch, {}).map((r) => r.key), ['policy', 'cpi', 'u', 'fx'])
+})

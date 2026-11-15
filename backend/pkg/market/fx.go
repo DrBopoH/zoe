@@ -17,6 +17,8 @@ const (
 	SerUSDUAH = "usd_uah" // гривен за 1 доллар США
 	SerEURUAH = "eur_uah" // гривен за 1 евро
 	SerXAUUAH = "xau_uah" // гривен за 1 тройскую унцию золота
+	SerGBPUAH = "gbp_uah" // гривен за 1 фунт стерлингов
+	SerCHFUAH = "chf_uah" // гривен за 1 швейцарский франк
 
 	fxFirstYear = 1996
 	fxWindow    = 10
@@ -29,6 +31,8 @@ var fxCodes = []struct{ code, series string }{
 	{"usd", SerUSDUAH},
 	{"eur", SerEURUAH},
 	{"xau", SerXAUUAH},
+	{"gbp", SerGBPUAH},
+	{"chf", SerCHFUAH},
 }
 
 // FXNBU — курсы USD, EUR и золота к гривне за всю историю. Сбой одного ряда не убивает остальные: что скачалось — возвращается.

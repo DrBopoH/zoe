@@ -9,17 +9,22 @@ type Country struct {
 	CC       string            `json:"cc"`
 	Name     string            `json:"name"`
 	Currency string            `json:"currency"`
+	Source   string            `json:"source"` // источник, который опрашивает «Обновить» в карточке страны
 	Metrics  map[string]string `json:"metrics"`
 }
 
 // Countries — страны набора в порядке показа. Показатели — id рядов, которые уже отдаёт Catalog.
 func Countries() []Country {
 	return []Country{
-		{CC: "us", Name: "США", Currency: "USD", Metrics: map[string]string{
+		{CC: "us", Name: "США", Currency: "USD", Source: SourceUS, Metrics: map[string]string{
 			"policy": SerFedFunds, "cpi": SerUSCPIYoY, "cpi_core": SerUSCoreCPIYoY, "u": SerUSUnrate, "gdp": SerUSGDP, "y10": SerUST10Y, "fx": SerUSDUAH}},
-		{CC: "ua", Name: "Украина", Currency: "UAH", Metrics: map[string]string{
+		{CC: "ua", Name: "Украина", Currency: "UAH", Source: SourceMacro, Metrics: map[string]string{
 			"policy": SerPolicyRate, "cpi": SerCPIYoY, "cpi_core": SerCoreYoY}},
-		{CC: "ez", Name: "Еврозона", Currency: "EUR", Metrics: map[string]string{
+		{CC: "ez", Name: "Еврозона", Currency: "EUR", Source: SourceEZ, Metrics: map[string]string{
 			"policy": SerEZPolicy, "cpi": SerEUCPIYoY, "cpi_core": SerEZCPICore, "u": SerEZUnrate, "gdp": SerEZGDP, "y10": SerEZY10, "fx": SerEURUAH}},
+		{CC: "gb", Name: "Великобритания", Currency: "GBP", Source: SourceGB, Metrics: map[string]string{
+			"policy": SerGBPolicy, "cpi": SerGBCPI, "u": SerGBUnrate, "gdp": SerGBGDP, "y10": SerGBY10, "fx": SerGBPUAH}},
+		{CC: "ch", Name: "Швейцария", Currency: "CHF", Source: SourceCH, Metrics: map[string]string{
+			"policy": SerCHPolicy, "cpi": SerCHCPI, "u": SerCHUnrate, "fx": SerCHFUAH}},
 	}
 }

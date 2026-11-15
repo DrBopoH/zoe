@@ -33,7 +33,7 @@ func (c *Client) Catalog() map[string][]string {
 // IsSource — известен ли такой источник (для ?source=… в маршрутах).
 func IsSource(id string) bool {
 	switch id {
-	case SourceNBU, SourceUST, SourceMacro, SourceFX, SourceUS, SourceUSEcon, SourceUSCurve, SourceUSReal, SourceUSPrices, SourceUSJobs, SourceUSAct, SourceUSLiq, SourceUSCredit, SourceEZ, SourceCrypto, SourceStocks:
+	case SourceNBU, SourceUST, SourceMacro, SourceFX, SourceUS, SourceUSEcon, SourceUSCurve, SourceUSReal, SourceUSPrices, SourceUSJobs, SourceUSAct, SourceUSLiq, SourceUSCredit, SourceEZ, SourceGB, SourceCH, SourceCrypto, SourceStocks:
 		return true
 	}
 	return false
@@ -62,7 +62,7 @@ func (c *Client) Feeds() []Feed {
 			return list, res
 		}},
 		{ID: SourceMacro, Title: "Ставки и инфляция · НБУ, Евростат", Unit: "точек", Provides: []string{SerPolicyRate, SerOvernightCD, SerOvernightLoans, SerCPIYoY, SerCPIMoM, SerCoreYoY, SerCoreMoM, SerEUCPIYoY}, Series: c.MacroNBU},
-		{ID: SourceFX, Title: "Курсы валют и золото · НБУ", Unit: "точек", Provides: []string{SerUSDUAH, SerEURUAH, SerXAUUAH}, Series: c.FXNBU},
+		{ID: SourceFX, Title: "Курсы валют и золото · НБУ", Unit: "точек", Provides: []string{SerUSDUAH, SerEURUAH, SerXAUUAH, SerGBPUAH, SerCHFUAH}, Series: c.FXNBU},
 		{ID: SourceUS, Title: "Ставка ФРС и инфляция США · FRED", Unit: "точек", Provides: []string{SerFedFunds, SerFedTarget, SerUSCPIYoY, SerUSCPIMoM, SerUST10Y}, Series: c.USFRED},
 		{ID: SourceUSEcon, Title: "Экономика США · FRED", Unit: "точек", Provides: []string{SerUSUnrate, SerUSGDP, SerUSSpread, SerUSVIX, SerUSSentiment}, Series: c.USEcon},
 		{ID: SourceUSCurve, Title: "Кривая доходности США · FRED", Unit: "точек", Provides: []string{SerUST1M, SerUST3M, SerUST6M, SerUST1Y, SerUST2Y, SerUST3Y, SerUST5Y, SerUST7Y, SerUST20Y, SerUST30Y, SerUSSpread3M}, Series: c.USCurve},
@@ -73,6 +73,8 @@ func (c *Client) Feeds() []Feed {
 		{ID: SourceUSLiq, Title: "Ликвидность США · FRED", Unit: "точек", Provides: []string{SerUSM2, SerUSM2YoY, SerUSFedBS, SerUSRRP, SerUSTGA, SerUSNetLiq, SerUSSOFR}, Series: c.USLiquidity},
 		{ID: SourceUSCredit, Title: "Кредит и доллар США · FRED", Unit: "точек", Provides: []string{SerUSHY, SerUSIG, SerUSNFCI, SerUSUSD, SerUSDebtGDP}, Series: c.USCredit},
 		{ID: SourceEZ, Title: "Еврозона · ЕЦБ и Евростат", Unit: "точек", Provides: append([]string{SerEZPolicy, SerEZMRO, SerEZESTR, SerEZY2, SerEZY10, SerEZCPICore, SerEZUnrate, SerEZGDP}, ezMemberSeries()...), Series: c.Eurozone},
+		{ID: SourceGB, Title: "Великобритания · Банк Англии и ONS", Unit: "точек", Provides: gbSeries, Series: c.UK},
+		{ID: SourceCH, Title: "Швейцария · BIS и Евростат", Unit: "точек", Provides: chSeries, Series: c.Switzerland},
 		{ID: SourceCrypto, Title: "Крипто · Binance", Unit: "точек", Provides: []string{SerCryptoBTC, SerCryptoETH, SerCryptoBNB, SerCryptoSOL, SerCryptoFNG}, Series: c.Crypto},
 		{ID: SourceStocks, Title: "Биржа США · FRED", Unit: "точек", Provides: []string{SerStockSP500, SerStockNasdaq, SerStockDow}, Series: c.Stocks},
 	}
