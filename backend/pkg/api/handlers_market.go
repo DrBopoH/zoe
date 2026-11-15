@@ -342,3 +342,46 @@ func (s *Server) HandleMacroCatalog(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, map[string]any{"feeds": feeds, "countries": market.Countries()})
 }
+
+// GET /api/macro/sources — здоровье источников: что обещает каждый, что лежит в кеше, когда обновлялось, какие ряды устарели, последняя ошибка.
+// {"feeds":[{id,title,series,cached,points,last_date,updated_at,stale,error}],"series":[{id,feed,points,from,to,updated_at,freq,lag_days,stale}],"running":false}.
+// Ошибка — из последнего опроса этого запуска сервера (после перезапуска её нет, а свежесть считается по кешу).
+func (s *Server) HandleMacroSources(w http.ResponseWriter, r *http.Request) {
+	if !allow(w, r, http.MethodGet) {
+		return
+	}
+	stats, err := s.storage.MacroStats()
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	var feeds []market.Feed
+	if c := s.mk.client; c != nil {
+		feeds = c.Feeds()
+	}
+	errs := map[string]string{}
+	m := &s.mk
+	m.mu.Lock()
+	running := m.running
+	if m.last != nil {
+		for _, f := range m.last.Feeds {
+			if f.Error != "" {
+				errs[f.ID] = f.Error
+			}
+		}
+	}
+	for _, f := range m.feeds {
+		if f.Error != "" {
+			errs[f.ID] = f.Error
+		}
+	}
+	m.mu.Unlock()
+	fh, sh := market.Health(feeds, stats, errs, time.Now())
+	if fh == nil {
+		fh = []market.FeedHealth{}
+	}
+	if sh == nil {
+		sh = []market.SeriesHealth{}
+	}
+	writeJSON(w, map[string]any{"feeds": fh, "series": sh, "running": running})
+}

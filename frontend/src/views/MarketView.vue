@@ -23,8 +23,10 @@ import MacroWorldView from './MacroWorldView.vue'
 import MacroChainView from './MacroChainView.vue'
 import MacroPppView from './MacroPppView.vue'
 import MacroScorecardView from './MacroScorecardView.vue'
+import MacroSourcesView from './MacroSourcesView.vue'
 import { useSection } from '../composables/useSection.js'
 import { useMacro } from '../composables/useMacro.js'
+import { useSources } from '../composables/useSources.js'
 import { useCountries } from '../composables/useCountries.js'
 import { toLocalDateStr } from '../utils/formatters.js'
 import { MARKET_TREE, MARKET_SECTIONS, isBondSection } from '../utils/marketNav.js'
@@ -63,11 +65,12 @@ const world = useMacro('world')
 const chain = useMacro('chain', ['usd_uah'])
 const ppp = useMacro('ppp')
 const score = useMacro('usecon', ['fed_funds', 'us_cpi_yoy', 'us_pce_yoy', 'us_corecpi_yoy', 'us_claims', 'us_hy', 'us_nfci', 'us_usd'])
+const sources = useSources()
 const scoreScreen = { series: score.series, load: () => Promise.all([score.load(), countries.load()]) }
 const commodities = useMacro('commodities', ['usd_uah', 'xau_uah', 'xag_uah', 'xpt_uah', 'xpd_uah'])
 // «Курсы» читают ещё и реестр стран (ставки и реальные курсы в таблице мировых валют)
 const fxScreen = { series: fx.series, load: () => Promise.all([fx.load(), countries.load()]) }
-const heavy = { countries, eurozone: ez, fx: fxScreen, fed: us, yields: curve, real, prices, jobs, activity, liquidity, credit, usecon: econ, crypto, stocks, commodities, world, chain, ppp, scorecard: scoreScreen }
+const heavy = { countries, eurozone: ez, fx: fxScreen, fed: us, yields: curve, real, prices, jobs, activity, liquidity, credit, usecon: econ, crypto, stocks, commodities, world, chain, ppp, scorecard: scoreScreen, sources }
 // Таблицы облигаций считают доходность в долларах: нужны курсы и инфляция США (тяжёлые ряды, поэтому только на этих экранах)
 const dollar = computed(() => ({ ...fx.series.value, ...us.series.value }))
 const loadBond = () => { if (!bondSection.value) return; for (const h of [fx, us]) if (!Object.keys(h.series.value).length) h.load() }
@@ -103,6 +106,7 @@ const bondSection = computed(() => (isBondSection(section.value) ? section.value
     <MacroWorldView v-else-if="section === 'world'" :world="world.series.value" :today="today" :running="running" />
     <MacroChainView v-else-if="section === 'chain'" :chain="chain.series.value" :today="today" :running="running" />
     <MacroScorecardView v-else-if="section === 'scorecard'" :econ="score.series.value" :countries="countries.countries.value" :cseries="countries.series.value" :today="today" :running="running" />
+    <MacroSourcesView v-else-if="section === 'sources'" :health="sources.series.value" :running="running" />
     <MacroPppView v-else-if="section === 'ppp'" :ppp="ppp.series.value" :macro="macro.series.value" :today="today" :running="running" />
     <MacroCryptoView v-else-if="section === 'crypto'" :crypto="crypto.series.value" :today="today" :running="running" />
   </div>

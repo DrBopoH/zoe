@@ -23,7 +23,8 @@ export const MACRO_SECTIONS = [
   { key: 'world', label: 'Мировые акции', icon: 'stocks', feed: 'world' },
   { key: 'crypto', label: 'Крипто', icon: 'crypto', feed: 'crypto' },
   { key: 'chain', label: 'Крипто-контур', icon: 'crypto', feed: 'chain' },
-  { key: 'ppp', label: 'Покупательная способность', icon: 'inflation', feed: 'ppp' }
+  { key: 'ppp', label: 'Покупательная способность', icon: 'inflation', feed: 'ppp' },
+  { key: 'sources', label: 'Источники', icon: 'macro', feed: '' }
 ]
 
 export const MARKET_TREE = [
@@ -39,7 +40,7 @@ export const isBondSection = (key) => SOURCES.some((s) => s.key === key)
 export const isMacroSection = (key) => MACRO_SECTIONS.some((s) => s.key === key)
 
 // Какой источник опрашивает кнопка «Обновить» в разделе: бумаги — свой (nbu/ust), ставка и инфляция — общий macro, курсы — fx, ФРС — us, кривая — uscurve, реальные ставки — usreal, цены — usprices, труд — usjobs, активность — usact, ликвидность — usliq, кредит и доллар — uscredit, экономика США — usecon, еврозона и карточки стран — ez
-export const feedOf = (key) => MACRO_SECTIONS.find((s) => s.key === key)?.feed ?? key
+export const feedOf = (key) => MACRO_SECTIONS.find((s) => s.key === key)?.feed ?? key // у «Источников» feed пустой: «Обновить» запускает все источники
 
 // Ключ группы, в которой лежит раздел (null — раздел не в группе)
 export const groupOf = (tree, key) => tree.find((n) => n.children?.some((c) => c.key === key))?.key ?? null
