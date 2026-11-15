@@ -47,3 +47,36 @@ export const groupAccounts = (accounts) => {
   }
   return [...by.values()].sort((x, y) => x.name.localeCompare(y.name, 'ru'))
 }
+
+// Сводный таймлайн: общая ось от самой старой даты среди ВСЕХ счетов до now, чтобы выбор счетов её не двигал.
+// Каждый счёт кладёт на ось свои отрезки (cells: '1' данные, '2' снято без операций, '0' нет данных) прозрачностью 1/n,
+// где n — число рисуемых счетов; штриховка (kind '2') идёт отдельным слоем поверх всех заливок.
+// all — все счета; drawn — те, что рисуем (выбранные или все, если ничего не выбрано).
+export const summaryLayers = (all, drawn, now = 0) => {
+  const withAxis = (all || []).filter(a => a.axis_to > a.axis_from && a.cells)
+  if (!withAxis.length) return { from: 0, to: 0, fills: [], hatches: [] }
+  const from = Math.min(...withAxis.map(a => a.axis_from))
+  const to = Math.max(now || 0, ...withAxis.map(a => a.axis_to))
+  const span = to - from || 1
+  const list = (drawn || []).filter(a => a.axis_to > a.axis_from && a.cells)
+  const alpha = list.length ? 1 / list.length : 1
+  const fills = []
+  const hatches = []
+  for (const a of list) {
+    const color = accountLook(a).color
+    const len = a.cells.length
+    const t = (i) => (a.axis_from + (i / len) * (a.axis_to - a.axis_from) - from) / span * 100
+    let i = 0
+    while (i < len) {
+      let j = i
+      while (j < len && a.cells[j] === a.cells[i]) j++
+      const kind = a.cells[i]
+      if (kind === '1' || kind === '2') {
+        const run = { left: t(i), width: t(j) - t(i), color, alpha }
+        ;(kind === '1' ? fills : hatches).push(run)
+      }
+      i = j
+    }
+  }
+  return { from, to, fills, hatches }
+}

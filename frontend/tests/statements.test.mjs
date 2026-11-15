@@ -35,3 +35,29 @@ test('groupBadges: значки группы без повторов', () => {
   assert.equal(tags.length, 2)
   assert.ok(tags.includes('HOT'))
 })
+
+import { summaryLayers } from '../src/utils/statements.js'
+
+test('summaryLayers: общая ось по всем счетам, прозрачность 1/n, штриховка отдельно', () => {
+  const a = { id: 'a', type: 'privat', axis_from: 0, axis_to: 100, cells: '1122' }
+  const b = { id: 'b', type: 'raif', axis_from: 50, axis_to: 100, cells: '11' }
+  const all = summaryLayers([a, b], [a, b], 100)
+  assert.equal(all.from, 0)
+  assert.equal(all.to, 100)
+  assert.equal(all.fills.length, 2)
+  assert.equal(all.hatches.length, 1)
+  assert.equal(all.fills[0].alpha, 0.5)
+  assert.equal(all.fills[0].width, 50)
+  assert.equal(all.fills[1].left, 50) // b начинается с середины общей оси
+  // выбор одного счёта ось не двигает
+  const one = summaryLayers([a, b], [b], 100)
+  assert.equal(one.from, 0)
+  assert.equal(one.fills[0].alpha, 1)
+  assert.equal(one.fills[0].left, 50)
+})
+
+test('summaryLayers: ось тянется до now, пустой ввод безопасен', () => {
+  const a = { id: 'a', type: 'privat', axis_from: 0, axis_to: 50, cells: '11' }
+  assert.equal(summaryLayers([a], [a], 100).fills[0].width, 50)
+  assert.deepEqual(summaryLayers([], [], 5), { from: 0, to: 0, fills: [], hatches: [] })
+})

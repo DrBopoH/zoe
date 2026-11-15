@@ -5,6 +5,7 @@ import UiButton from './ui/UiButton.vue'
 import UiIconButton from './ui/UiIconButton.vue'
 import UiIcon from './ui/UiIcon.vue'
 import CoverBar from './CoverBar.vue'
+import CoverSummary from './CoverSummary.vue'
 import ImportCsvModal from './ImportCsvModal.vue'
 import SyncButton from './SyncButton.vue'
 import { apiGetJson, apiSend, q } from '../utils/api.js'
@@ -120,6 +121,8 @@ const hasApiFile = (a) => a.files.some(f => f.origin === 'api')
 // Группы по имени файла и вид каждого счёта (цвет банка, значок OVDP/HOT)
 const groups = computed(() => groupAccounts(accounts.value))
 const looks = computed(() => new Map(accounts.value.map(a => [a.id, accountLook(a)])))
+// Что рисуем в сводке: отмеченные счета, а если ничего не отмечено — все
+const drawn = computed(() => (picked.value.size ? accounts.value.filter(a => picked.value.has(a.id)) : accounts.value))
 const look = (a) => looks.value.get(a.id) || accountLook(a)
 const title = (a) => label(a) || a.id // подпись счёта: IBAN, договор или идентификатор профиля
 
@@ -236,6 +239,11 @@ const toggleGroup = (g) => {
         </div>
         </div>
       </section>
+    </div>
+
+    <!-- Сводка покрытия: отдельно от списка, не скроллится вместе с ним -->
+    <div v-if="accounts.length" class="pt-3 mt-1 border-t border-slate-800">
+      <CoverSummary :accounts="accounts" :drawn="drawn" />
     </div>
 
     <!-- Действия: без выбора — на все счета, с выбором — на отмеченные (число в скобках) -->
