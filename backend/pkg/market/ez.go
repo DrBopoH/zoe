@@ -2,7 +2,6 @@ package market
 
 import (
 	"context"
-	"fmt"
 	"strings"
 )
 
@@ -24,10 +23,12 @@ const (
 // У Евростата код еврозоны меняется при вступлении новой страны (EA19 → EA20 → EA21): пробуем по очереди, пока не придут данные.
 var ezGeos = []string{"EA21", "EA20", "EA"}
 
-type ezJob struct {
+// packJob — один ряд пакета: откуда взять (url), как разобрать (get; пусто — SDMX-CSV) и как обработать (post). Общий для еврозоны и пакетов стран (pack.go).
+type packJob struct {
 	series string
 	url    func(c *Client, geo string) string
 	geos   bool // перебирать коды еврозоны (иначе url не зависит от geo)
+	get    func(c *Client, ctx context.Context, url, series string) ([]SeriesPoint, error)
 	post   func([]SeriesPoint) []SeriesPoint
 }
 
@@ -53,11 +54,10 @@ func ident(p []SeriesPoint) []SeriesPoint { return p }
 
 // Eurozone — ряды еврозоны. Сбой одного ряда не убивает остальные, ошибка — в Result.Error.
 func (c *Client) Eurozone(ctx context.Context, rep Reporter) ([]SeriesPoint, Result) {
-	res := Result{Source: SourceEZ}
-	ecb := func(id, key string, post func([]SeriesPoint) []SeriesPoint) ezJob {
-		return ezJob{series: id, url: func(c *Client, _ string) string { return ecbURL(c, key) }, post: retag(id, post)}
+	ecb := func(id, key string, post func([]SeriesPoint) []SeriesPoint) packJob {
+		return packJob{series: id, url: func(c *Client, _ string) string { return ecbURL(c, key) }, post: retag(id, post)}
 	}
-	jobs := []ezJob{
+	jobs := []packJob{
 		ecb(SerEZPolicy, "FM/D.U2.EUR.4F.KR.DFR.LEV", changePoints),
 		ecb(SerEZMRO, "FM/D.U2.EUR.4F.KR.MRR_FR.LEV", changePoints),
 		ecb(SerEZESTR, "EST/B.EU000A2X2A25.WT", weekly),
@@ -69,37 +69,16 @@ func (c *Client) Eurozone(ctx context.Context, rep Reporter) ([]SeriesPoint, Res
 	}
 	if c.EurostatBase != "" {
 		jobs = append(jobs,
-			ezJob{series: SerEZCPICore, url: func(c *Client, _ string) string { return eurostatURL(c, "prc_hicp_minr/M.RCH_A.TOT_X_NRG_FOOD.EA") }, post: ident},
-			ezJob{series: SerEZUnrate, geos: true, url: func(c *Client, geo string) string { return eurostatURL(c, "une_rt_m/M.SA.TOTAL.PC_ACT.T."+geo) }, post: ident},
-			ezJob{series: SerEZGDP, geos: true, url: func(c *Client, geo string) string { return eurostatURL(c, "namq_10_gdp/Q.CLV_PCH_PRE.SCA.B1GQ."+geo) }, post: ident},
+			packJob{series: SerEZCPICore, url: func(c *Client, _ string) string { return eurostatURL(c, "prc_hicp_minr/M.RCH_A.TOT_X_NRG_FOOD.EA") }, post: ident},
+			packJob{series: SerEZUnrate, geos: true, url: func(c *Client, geo string) string { return eurostatURL(c, "une_rt_m/M.SA.TOTAL.PC_ACT.T."+geo) }, post: ident},
+			packJob{series: SerEZGDP, geos: true, url: func(c *Client, geo string) string { return eurostatURL(c, "namq_10_gdp/Q.CLV_PCH_PRE.SCA.B1GQ."+geo) }, post: ident},
 		)
 	}
 	if c.EurostatBase != "" {
 		jobs = append(jobs, memberJobs()...)
 	}
-	var out []SeriesPoint
-	var errs []string
-	for i, j := range jobs {
-		rep.report(5+i*90/len(jobs), j.series)
-		tryGeos := []string{""}
-		if j.geos {
-			tryGeos = ezGeos
-		}
-		var pts []SeriesPoint
-		var err error
-		for _, g := range tryGeos {
-			if pts, err = c.sdmxGet(ctx, j.url(c, g), j.series); err == nil {
-				break
-			}
-		}
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("%s: %v", j.series, err))
-			continue
-		}
-		out = append(out, j.post(pts)...)
-	}
+	out, res := c.runJobs(ctx, rep, SourceEZ, jobs)
 	out = append(out, memberSpreads(groupSeries(out))...)
-	rep.report(95, "")
-	res.Fetched, res.Error = len(out), strings.Join(errs, "; ")
+	res.Fetched = len(out)
 	return out, res
 }

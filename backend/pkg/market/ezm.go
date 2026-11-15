@@ -30,14 +30,14 @@ func ezMemberSeries() []string {
 	return ids
 }
 
-func memberJobs() []ezJob {
-	var jobs []ezJob
+func memberJobs() []packJob {
+	var jobs []packJob
 	for _, cc := range ezMembers {
 		geo := strings.ToUpper(cc)
 		jobs = append(jobs,
-			ezJob{series: memberID(cc, "cpi"), url: func(c *Client, _ string) string { return eurostatURL(c, "prc_hicp_minr/M.RCH_A.TOTAL."+geo) }, post: ident},
-			ezJob{series: memberID(cc, "u"), url: func(c *Client, _ string) string { return eurostatURL(c, "une_rt_m/M.SA.TOTAL.PC_ACT.T."+geo) }, post: ident},
-			ezJob{series: memberID(cc, "y10"), url: func(c *Client, _ string) string { return eurostatURL(c, "irt_lt_mcby_m/M.MCBY."+geo) }, post: ident},
+			packJob{series: memberID(cc, "cpi"), url: func(c *Client, _ string) string { return eurostatURL(c, "prc_hicp_minr/M.RCH_A.TOTAL."+geo) }, post: ident},
+			packJob{series: memberID(cc, "u"), url: func(c *Client, _ string) string { return eurostatURL(c, "une_rt_m/M.SA.TOTAL.PC_ACT.T."+geo) }, post: ident},
+			packJob{series: memberID(cc, "y10"), url: func(c *Client, _ string) string { return eurostatURL(c, "irt_lt_mcby_m/M.MCBY."+geo) }, post: ident},
 		)
 	}
 	return jobs
