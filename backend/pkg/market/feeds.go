@@ -62,7 +62,7 @@ func (c *Client) Feeds() []Feed {
 			return list, res
 		}},
 		{ID: SourceMacro, Title: "Ставки, инфляция, резервы и деньги · НБУ, Евростат", Unit: "точек", Provides: append(append([]string{SerPolicyRate, SerOvernightCD, SerOvernightLoans, SerCPIYoY, SerCPIMoM, SerCoreYoY, SerCoreMoM, SerEUCPIYoY}, uaInflationSeries...), nbuDeepSeries...), Series: c.MacroAll},
-		{ID: SourceFX, Title: "Курсы валют и золото · НБУ", Unit: "точек", Provides: []string{SerUSDUAH, SerEURUAH, SerXAUUAH, SerGBPUAH, SerCHFUAH, SerJPYUAH, SerCNYUAH, SerRUBUAH, SerEGPUAH, SerPLNUAH, SerTRYUAH, SerNOKUAH, SerSEKUAH, SerCADUAH}, Series: c.FXNBU},
+		{ID: SourceFX, Title: "Курсы валют, золото и реальные курсы · НБУ, BIS", Unit: "точек", Provides: append([]string{SerUSDUAH, SerEURUAH, SerXAUUAH, SerGBPUAH, SerCHFUAH, SerJPYUAH, SerCNYUAH, SerRUBUAH, SerEGPUAH, SerPLNUAH, SerTRYUAH, SerNOKUAH, SerSEKUAH, SerCADUAH}, reerSeries...), Series: c.FXWorld},
 		{ID: SourceUS, Title: "Ставка ФРС и инфляция США · FRED", Unit: "точек", Provides: []string{SerFedFunds, SerFedTarget, SerUSCPIYoY, SerUSCPIMoM, SerUST10Y}, Series: c.USFRED},
 		{ID: SourceUSEcon, Title: "Экономика США · FRED", Unit: "точек", Provides: []string{SerUSUnrate, SerUSGDP, SerUSSpread, SerUSVIX, SerUSSentiment}, Series: c.USEcon},
 		{ID: SourceUSCurve, Title: "Кривая доходности США · FRED", Unit: "точек", Provides: []string{SerUST1M, SerUST3M, SerUST6M, SerUST1Y, SerUST2Y, SerUST3Y, SerUST5Y, SerUST7Y, SerUST20Y, SerUST30Y, SerUSSpread3M}, Series: c.USCurve},
