@@ -6,19 +6,34 @@ import (
 	"testing"
 )
 
-func TestRussiaAndEgyptBuildSeries(t *testing.T) {
+func TestRussiaBuildsSeries(t *testing.T) {
+	pts, res := jpClient(jpServer(t, "")).Russia(context.Background(), nil)
+	by := byID(pts)
+	if res.Error != "" || res.Source != SourceRU || len(by[SerRUPolicy]) != 2 || len(by[SerRUCPI]) != 2 {
+		t.Fatalf("%+v %v", res, by)
+	}
+}
+
+func TestEgyptInflationFromWorldBank(t *testing.T) {
 	c := jpClient(jpServer(t, ""))
-	for _, tc := range []struct {
-		name, policy, cpi string
-		run               func(context.Context, Reporter) ([]SeriesPoint, Result)
-	}{
-		{SourceRU, SerRUPolicy, SerRUCPI, c.Russia},
-		{SourceEG, SerEGPolicy, SerEGCPI, c.Egypt},
-	} {
-		pts, res := tc.run(context.Background(), nil)
-		by := byID(pts)
-		if res.Error != "" || res.Source != tc.name || len(by[tc.policy]) != 2 || len(by[tc.cpi]) != 2 {
-			t.Fatalf("%s: %+v %v", tc.name, res, by)
+	c.WBBase = c.BISBase
+	pts, res := c.Egypt(context.Background(), nil)
+	if res.Error != "" || res.Source != SourceEG || len(pts) != 3 {
+		t.Fatalf("%+v %v", res, pts)
+	}
+	if pts[0].Date != "2021-12-01" || pts[2].Date != "2024-12-01" || pts[2].Value != 28.27 || pts[0].Series != SerEGCPI {
+		t.Fatalf("годы от старых к новым, null пропущен, точка на конец года: %+v", pts)
+	}
+	c.WBBase = ""
+	if pts, res := c.Egypt(context.Background(), nil); len(pts) != 0 || res.Error != "" {
+		t.Fatalf("без Всемирного банка опрашивать нечего: %d %q", len(pts), res.Error)
+	}
+}
+
+func TestParseWBErrors(t *testing.T) {
+	for _, bad := range []string{"", "<html>blocked</html>", `[{"message":[{"id":"120","value":"Invalid format"}]}]`, `[{"page":1},[]]`, `[{"page":1},[{"date":"2024","value":null}]]`} {
+		if _, err := parseWB([]byte(bad), "x"); err == nil {
+			t.Errorf("ждали ошибку для %q", bad)
 		}
 	}
 }
@@ -40,6 +55,7 @@ func TestRussiaDownDoesNotAffectNeighbours(t *testing.T) {
 	if len(pts) != 0 || !strings.Contains(res.Error, SerRUPolicy) || !strings.Contains(res.Error, SerRUCPI) {
 		t.Fatalf("Россия должна дать ошибку по обоим рядам: %d %q", len(pts), res.Error)
 	}
+	c.WBBase = srv.URL
 	if pts, res := c.Egypt(context.Background(), nil); res.Error != "" || len(pts) == 0 {
 		t.Fatalf("Египет жив: %+v", res)
 	}

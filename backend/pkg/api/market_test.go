@@ -63,7 +63,7 @@ func newMarketServer(t *testing.T, usUp bool) *Server {
 	t.Cleanup(func() { st.Close() })
 	s := NewServer(st, nil, nil)
 	c := market.NewClient()
-	c.NBUBase, c.USTBase, c.FREDBase, c.BinanceBase, c.FNGBase, c.ShillerBase, c.EurostatBase, c.ECBBase, c.BoEBase, c.ONSBase, c.BISBase, c.AuctionDays = up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, 1
+	c.NBUBase, c.USTBase, c.FREDBase, c.BinanceBase, c.FNGBase, c.ShillerBase, c.EurostatBase, c.ECBBase, c.BoEBase, c.ONSBase, c.BISBase, c.WBBase, c.AuctionDays = up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, 1
 	s.SetMarket(c)
 	return s
 }
