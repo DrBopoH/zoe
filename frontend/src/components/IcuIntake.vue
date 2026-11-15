@@ -40,7 +40,7 @@ const addImages = async (files) => {
     }
     const merged = mergeEntries(parsed)
     const old = new Map(rows.value.map((r) => [r.isin, r]))
-    rows.value = merged.map((e) => old.get(e.isin) || { ...e, include: true })
+    rows.value = merged.map((e) => old.get(e.isin) || { ...e, include: !e.flags.includes('isin-weak') })
     if (!merged.length) err.value = 'На картинках не нашёл карточек с ISIN и доходностью (YTM). Нужен экран «Купити → ОВДП».'
   } catch (e) {
     err.value = `Не удалось распознать: ${e.message || e}`
@@ -65,13 +65,14 @@ const fmt = (v) => (v == null ? '—' : (Math.round(v * 100) / 100).toFixed(2).r
 const FLAG_TEXT = {
   'isin-fixed': 'ISIN исправлен по реестру',
   'isin-ambiguous': 'ISIN неоднозначен, проверь',
+  'isin-weak': 'ISIN найден только по дате, цифры не сошлись: проверь по экрану (галочка снята)',
   'not-in-registry': 'нет в реестре НБУ',
   'price-none': 'цену не прочитал',
   'price-bad': 'цена не сошлась с YTM'
 }
 const soon = (r) => !!r.maturity && (Date.parse(`${r.maturity}T00:00:00Z`) - Date.parse(`${props.today}T00:00:00Z`)) / 86400000 < 30
 const notes = (r) => [...r.flags.map((f) => FLAG_TEXT[f] || f), ...(soon(r) ? ['гасится меньше чем через месяц: годовая доходность условна'] : [])]
-const bad = (r) => r.flags.includes('not-in-registry') || r.flags.includes('isin-ambiguous')
+const bad = (r) => r.flags.includes('not-in-registry') || r.flags.includes('isin-ambiguous') || r.flags.includes('isin-weak')
 const included = computed(() => rows.value.filter((r) => r.include))
 const dateText = (iso) => (iso ? iso.split('-').reverse().join('.') : '—')
 
