@@ -22,7 +22,6 @@ defineEmits(['refresh'])
       <UiIcon
         name="refresh" size="lg"
         :class="running ? 'animate-spin text-slate-500' : 'transition-transform duration-500 ease-out group-hover:rotate-180'"
-        class="motion-reduce:animate-none motion-reduce:transition-none"
       />
     </UiButton>
   </section>
