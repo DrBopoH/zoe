@@ -4,7 +4,7 @@ import MacroPanel from '../components/MacroPanel.vue'
 import MarketHeader from '../components/MarketHeader.vue'
 import { useMarketRefresh } from '../composables/useMarketRefresh.js'
 import { storageGet, storageSet } from '../utils/storage.js'
-import { countryRows } from '../utils/countries.js'
+import { countryRows, COUNTRY_PANELS } from '../utils/countries.js'
 import { dateOf, hasPoints } from '../utils/macro.js'
 
 // Экран «Страны»: переключатель стран и карточка — главные показатели одной строкой каждый; клик по строке рисует её график.
@@ -23,6 +23,7 @@ watch(country, (c) => { if (c) storageSet(KEY, c.cc) })
 const rows = computed(() => countryRows(country.value, props.series))
 const pick = ref('')
 const chosen = computed(() => rows.value.find((r) => r.key === pick.value) || rows.value.find((r) => r.last) || rows.value[0] || null)
+const panels = computed(() => COUNTRY_PANELS[country.value?.cc] || [])
 const has = computed(() => hasPoints(props.series))
 const EMPTY = 'Нет данных. Нажми «Обновить»: подтянутся показатели выбранной страны'
 </script>
@@ -57,6 +58,7 @@ const EMPTY = 'Нет данных. Нажми «Обновить»: подтя�
       </div>
 
       <MacroPanel v-if="chosen" :title="`${country.name}: ${chosen.label.toLowerCase()}`" :unit="chosen.unit" :series="series" :today="today" :ids="[chosen.id]" :empty="EMPTY" />
+      <MacroPanel v-for="p in panels" :key="p.title" :title="p.title" :unit="p.unit" :series="series" :today="today" :ids="p.ids" :empty="EMPTY" />
       <div v-if="has" class="text-[11px] text-slate-600">Значения — последние в кеше; даты у показателей разные (ставки — день, инфляция и труд — месяц, ВВП — квартал).</div>
     </template>
   </div>
