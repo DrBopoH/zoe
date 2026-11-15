@@ -12,7 +12,7 @@ import (
 )
 
 // Пакеты стран: Великобритания (Банк Англии, ONS) и Швейцария (BIS, Евростат). Источник на страну: своя кнопка «Обновить» и сбой не трогает соседей.
-// Что не взяли (нет подтверждённого источника, зонд №3): доходность 10 лет и ВВП Швейцарии, базовая инфляция Великобритании.
+// Что не взяли (нет подтверждённого источника, зонд №3): ВВП Швейцарии, базовая инфляция Великобритании.
 const (
 	SourceGB = "gb"
 	SourceCH = "ch"
@@ -31,7 +31,7 @@ const (
 
 var (
 	gbSeries = []string{SerGBPolicy, SerGBSonia, SerGBY10, SerGBCPI, SerGBUnrate, SerGBGDP}
-	chSeries = []string{SerCHPolicy, SerCHCPI, SerCHUnrate}
+	chSeries = []string{SerCHPolicy, SerCHCPI, SerCHUnrate, SerCHY10}
 )
 
 // boeURL — суточный ряд базы IADB Банка Англии: csv без оформления (CSVF=TN), даты «02 Jan 2024».
@@ -172,8 +172,15 @@ func (c *Client) UK(ctx context.Context, rep Reporter) ([]SeriesPoint, Result) {
 	return c.runJobs(ctx, rep, SourceGB, jobs)
 }
 
-// Switzerland — ряды Швейцарии: ставка SNB из BIS, инфляция и безработица из Евростата.
+// Switzerland — ряды Швейцарии: ставка SNB из BIS, инфляция и безработица из Евростата, доходность 10 лет из FRED.
 func (c *Client) Switzerland(ctx context.Context, rep Reporter) ([]SeriesPoint, Result) {
+	res := Result{Source: SourceCH}
+	var out []SeriesPoint
+	if c.FREDBase != "" {
+		r := c.fredAll(ctx, rep, []fredJob{{"IRLTLT01CHM156N", "доходность 10 лет Швейцарии", ""}})
+		out = append(out, toPoints(SerCHY10, r.Obs["IRLTLT01CHM156N"])...)
+		res.Fetched, res.Skipped, res.Tail, res.Error = len(out), r.Skipped, r.Tail, strings.Join(r.Errs, "; ")
+	}
 	var jobs []packJob
 	if c.BISBase != "" {
 		jobs = append(jobs, bisPolicy(SerCHPolicy, "CH"))
@@ -181,5 +188,9 @@ func (c *Client) Switzerland(ctx context.Context, rep Reporter) ([]SeriesPoint, 
 	if c.EurostatBase != "" {
 		jobs = append(jobs, eurostatJob(SerCHCPI, "prc_hicp_minr/M.RCH_A.TOTAL.CH"), eurostatJob(SerCHUnrate, "une_rt_m/M.SA.TOTAL.PC_ACT.T.CH"))
 	}
-	return c.runJobs(ctx, rep, SourceCH, jobs)
+	pts, r := c.runJobs(ctx, rep, SourceCH, jobs)
+	out = append(out, pts...)
+	res = mergeResult(res, r)
+	res.Fetched = len(out)
+	return out, res
 }
