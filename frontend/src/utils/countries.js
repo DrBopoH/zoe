@@ -25,3 +25,9 @@ export function countryRows(country, series) {
     return { key: m.key, label: m.label, id, unit: m.unit, last, text: last ? (m.unit === '%' ? plainPct(last.v) : money(last.v)) : '—' }
   })
 }
+
+// Страны еврозоны и их ряды (источник ez): экран «Еврозона» рисует сравнение. Состав — как в реестре стран на сервере (ezMembers).
+export const EZ_MEMBERS = ['de', 'fr', 'it', 'es', 'nl']
+export const EZ_SPREADS = ['it', 'fr', 'es']
+export const memberIds = (part) => EZ_MEMBERS.map((cc) => `${cc}_${part}`)
+export const spreadIds = () => EZ_SPREADS.map((cc) => `${cc}_bund_spread`)

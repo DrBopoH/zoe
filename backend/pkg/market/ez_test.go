@@ -24,8 +24,12 @@ func TestSDMXDate(t *testing.T) {
 const ezCSV = "KEY,FREQ,TIME_PERIOD,OBS_VALUE,OBS_STATUS\n"
 
 // ezServer отвечает как ЕЦБ и Евростат вместе: путь решает, какие данные отдать; geoOK — какой код еврозоны у Евростата «живой».
-func ezServer(t *testing.T, geoOK string, failSub string) *httptest.Server {
+func ezServer(t *testing.T, geoOK string, failSub string, failGeo ...string) *httptest.Server {
 	t.Helper()
+	fg := ""
+	if len(failGeo) > 0 {
+		fg = failGeo[0]
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
 		if failSub != "" && strings.Contains(p, failSub) {
@@ -45,8 +49,21 @@ func ezServer(t *testing.T, geoOK string, failSub string) *httptest.Server {
 			w.Write([]byte(ezCSV + "x,B,2026-11-10,2.80,A\n"))
 		case strings.Contains(p, "prc_hicp_minr"):
 			w.Write([]byte(ezCSV + "x,M,2026-09,2.4,A\nx,M,2026-10,2.3,A\n"))
+		case strings.Contains(p, "irt_lt_mcby_m"):
+			v := map[string]string{"DE": "2.60", "FR": "3.10", "IT": "3.70", "ES": "3.20", "NL": "2.75"}
+			for geo, val := range v {
+				if strings.HasSuffix(p, "."+geo) {
+					if geo == fg {
+						http.Error(w, "boom", http.StatusBadGateway)
+						return
+					}
+					w.Write([]byte(ezCSV + "x,M,2026-09," + val + ",A\nx,M,2026-10," + val + ",A\n"))
+					return
+				}
+			}
+			http.NotFound(w, r)
 		case strings.Contains(p, "une_rt_m"):
-			if !strings.HasSuffix(p, "."+geoOK) {
+			if strings.Contains(p, ".EA") && !strings.HasSuffix(p, "."+geoOK) {
 				http.Error(w, "no data", http.StatusNotFound)
 				return
 			}
@@ -140,8 +157,8 @@ func TestEurozoneRegisteredAndProvidesMatch(t *testing.T) {
 	if !IsSource(SourceEZ) {
 		t.Fatal("ez не зарегистрирован")
 	}
-	if got := len(c.Catalog()[SourceEZ]); got != 8 {
-		t.Fatalf("ez даёт %d рядов, ждали 8", got)
+	if got := len(c.Catalog()[SourceEZ]); got != 8+len(ezMemberSeries()) || len(ezMemberSeries()) != 18 {
+		t.Fatalf("ez даёт %d рядов, ждали 8 + 18 стран", got)
 	}
 }
 
@@ -163,5 +180,48 @@ func TestCountriesMetricsAreInCatalog(t *testing.T) {
 				t.Errorf("%s/%s: ряда %q нет в каталоге", c.CC, m, id)
 			}
 		}
+	}
+}
+
+func TestEurozoneMembersAndSpreads(t *testing.T) {
+	pts, res := ezClient(ezServer(t, "EA21", "")).Eurozone(context.Background(), nil)
+	if res.Error != "" {
+		t.Fatalf("error: %s", res.Error)
+	}
+	by := byID(pts)
+	for _, cc := range ezMembers {
+		for _, part := range []string{"cpi", "u", "y10"} {
+			if len(by[memberID(cc, part)]) == 0 {
+				t.Errorf("нет ряда %s", memberID(cc, part))
+			}
+		}
+	}
+	// Италия 3,70 − Германия 2,60 = 1,10 (округление до сотых)
+	if s := by[spreadID("it")]; len(s) != 2 || s[1].Date != "2026-10-01" || s[1].Value != 1.10 {
+		t.Fatalf("спред Италия − Германия: %+v", s)
+	}
+	if s := by[spreadID("fr")]; len(s) != 2 || s[0].Value != 0.5 {
+		t.Fatalf("спред Франция − Германия: %+v", s)
+	}
+}
+
+func TestEurozoneMemberFailureKeepsOthers(t *testing.T) {
+	pts, res := ezClient(ezServer(t, "EA21", "", "IT")).Eurozone(context.Background(), nil)
+	by := byID(pts)
+	if len(by["it_y10"]) != 0 || len(by[spreadID("it")]) != 0 {
+		t.Fatalf("упавшая страна не должна давать ряд и спред: %v", by["it_y10"])
+	}
+	if len(by["fr_y10"]) == 0 || len(by[spreadID("fr")]) == 0 || len(by["de_y10"]) == 0 {
+		t.Fatal("остальные страны должны остаться")
+	}
+	if !strings.Contains(res.Error, "it_y10") || strings.Contains(res.Error, "fr_y10") {
+		t.Fatalf("ошибка называет только упавший ряд: %q", res.Error)
+	}
+}
+
+func TestMemberSpreadsNeedBund(t *testing.T) {
+	by := map[string][]SeriesPoint{"it_y10": {{Series: "it_y10", Date: "2026-10-01", Value: 3.7}}}
+	if got := memberSpreads(by); len(got) != 0 {
+		t.Fatalf("без Bund спреда нет: %+v", got)
 	}
 }

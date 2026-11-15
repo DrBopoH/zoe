@@ -7,7 +7,7 @@ import (
 )
 
 // Еврозона: ставки и рынок ЕЦБ (SDMX csvdata) и экономика Евростата (SDMX-CSV), без ключей. Общий инфляционный HICP еврозоны (eu_cpi_yoy) лежит
-// в источнике «macro» — здесь только то, чего там нет. Имена рядов — по правилу <страна>_<показатель>.
+// в источнике «macro» — здесь только то, чего там нет. Страны-члены (Германия, Франция, …) и их спреды к Bund — ezm.go. Имена рядов — по правилу <страна>_<показатель>.
 const (
 	SourceEZ = "ez"
 
@@ -74,6 +74,9 @@ func (c *Client) Eurozone(ctx context.Context, rep Reporter) ([]SeriesPoint, Res
 			ezJob{series: SerEZGDP, geos: true, url: func(c *Client, geo string) string { return eurostatURL(c, "namq_10_gdp/Q.CLV_PCH_PRE.SCA.B1GQ."+geo) }, post: ident},
 		)
 	}
+	if c.EurostatBase != "" {
+		jobs = append(jobs, memberJobs()...)
+	}
 	var out []SeriesPoint
 	var errs []string
 	for i, j := range jobs {
@@ -95,6 +98,7 @@ func (c *Client) Eurozone(ctx context.Context, rep Reporter) ([]SeriesPoint, Res
 		}
 		out = append(out, j.post(pts)...)
 	}
+	out = append(out, memberSpreads(groupSeries(out))...)
 	rep.report(95, "")
 	res.Fetched, res.Error = len(out), strings.Join(errs, "; ")
 	return out, res
