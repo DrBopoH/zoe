@@ -70,6 +70,11 @@ test('карточка Турции без доходности 10 лет: ст�
   assert.equal(countryRows(tr, { tr_cpi: [{ d: '2026-10-01', v: 31.2 }] })[1].text, '31,2 %')
 })
 
+test('у рядов Норвегии, Швеции и Канады и курсов их валют есть подпись и цвет', () => {
+  for (const cc of ['no', 'se', 'ca']) for (const k of ['policy', 'cpi', 'u', 'y10']) assert.ok(SERIES[`${cc}_${k}`]?.label && SERIES[`${cc}_${k}`]?.color, `${cc}_${k}`)
+  for (const id of ['nok_uah', 'sek_uah', 'cad_uah']) assert.ok(SERIES[id]?.label && SERIES[id]?.color, id)
+})
+
 test('высокая инфляция в карточке: без сокращений и потери знаков', () => {
   const eg = { cc: 'eg', name: 'Египет', metrics: { cpi: 'eg_cpi' } }
   assert.equal(countryRows(eg, { eg_cpi: [{ d: '2026-09-01', v: 165.2 }] })[0].text, '165,2 %')

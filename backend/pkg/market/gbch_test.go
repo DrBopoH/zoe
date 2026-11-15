@@ -151,11 +151,11 @@ func TestPacksSkipDisabledBases(t *testing.T) {
 }
 
 func TestPacksRegisteredWithSources(t *testing.T) {
-	if !IsSource(SourceGB) || !IsSource(SourceCH) || !IsSource(SourceJP) || !IsSource(SourceCN) || !IsSource(SourceRU) || !IsSource(SourceEG) || !IsSource(SourcePL) || !IsSource(SourceTR) {
+	if !IsSource(SourceGB) || !IsSource(SourceCH) || !IsSource(SourceJP) || !IsSource(SourceCN) || !IsSource(SourceRU) || !IsSource(SourceEG) || !IsSource(SourcePL) || !IsSource(SourceTR) || !IsSource(SourceNO) || !IsSource(SourceSE) || !IsSource(SourceCA) {
 		t.Fatal("gb/ch не зарегистрированы")
 	}
 	cat := NewClient().Catalog()
-	if len(cat[SourceGB]) != 6 || len(cat[SourceCH]) != 4 || len(cat[SourceJP]) != 5 || len(cat[SourceCN]) != 2 || len(cat[SourceRU]) != 2 || len(cat[SourceEG]) != 1 || len(cat[SourcePL]) != 4 || len(cat[SourceTR]) != 3 {
+	if len(cat[SourceGB]) != 6 || len(cat[SourceCH]) != 4 || len(cat[SourceJP]) != 5 || len(cat[SourceCN]) != 2 || len(cat[SourceRU]) != 2 || len(cat[SourceEG]) != 1 || len(cat[SourcePL]) != 4 || len(cat[SourceTR]) != 3 || len(cat[SourceNO]) != 4 || len(cat[SourceSE]) != 4 || len(cat[SourceCA]) != 4 {
 		t.Fatalf("%v", cat)
 	}
 	for _, c := range Countries() {
