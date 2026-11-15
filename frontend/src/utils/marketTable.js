@@ -114,7 +114,7 @@ export function resolveRates({ pool, prices = {}, ytms = {}, curve = [], today }
 }
 
 // Доходность к погашению (эффективная годовая, %) по цене из брокера. Цена — полная, с накопленным купоном (как в ICU).
-// Купоны раз в полгода, от даты погашения назад; тот же порядок, что у расчёта выплат на бэкенде (couponDays). Без купона —
+// Купоны раз в полгода, от даты погашения назад; купон, который выплачивается сегодня, ещё в цене (цена брокера с накопленным купоном); тот же порядок, что у расчёта выплат на бэкенде (couponDays). Без купона —
 // одна выплата в день погашения. null — если бумага погашена, цены нет или решения нет.
 export function ytmFromPrice(b, price, today) {
   const nominal = b.nominal > 0 ? b.nominal : 1000
@@ -123,7 +123,7 @@ export function ytmFromPrice(b, price, today) {
   if (!(mat > t0)) return null
   const coupon = b.coupon_rate > 0 ? (nominal * b.coupon_rate) / 100 / 2 : 0
   const flows = []
-  if (coupon > 0) for (let k = 0, d = mat; d > t0 && k < 200; k++, d = addMonthsMs(mat, -6 * k)) flows.push({ t: (d - t0) / 86400000 / 365, cf: coupon })
+  if (coupon > 0) for (let k = 0, d = mat; d >= t0 && k < 200; k++, d = addMonthsMs(mat, -6 * k)) flows.push({ t: (d - t0) / 86400000 / 365, cf: coupon })
   else flows.push({ t: (mat - t0) / 86400000 / 365, cf: 0 })
   flows[0].cf += nominal
   const pv = (y) => flows.reduce((s, f) => s + f.cf / Math.pow(1 + y, f.t), 0)

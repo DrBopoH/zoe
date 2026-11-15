@@ -10,6 +10,9 @@ const dateToIso = (d, m, y) => `${y}-${m}-${d}`
 const DATE_RE = /(\d{2})\.(\d{2})\.(\d{4})/
 const YTM_RE = /\b(YTM|SIM)\s*([\d.,]+)\s*%/i
 
+// Больше стольких несовпавших цифр из 10 — ISIN держится только на дате погашения
+const WEAK_ISIN = 4
+
 const hamming = (a, b) => (a.length !== b.length ? 99 : [...a].reduce((n, c, i) => n + (c !== b[i] ? 1 : 0), 0))
 
 // Варианты цены из строки «Кількість: 9 566 1 038,68 ₴» → [38.68, 1038.68, ...]. Количество слева от цены и пробелы в тысячах
@@ -21,7 +24,18 @@ export function priceCandidates(line) {
   if (!toks) return []
   let m = -1
   toks.forEach((t, i) => { if (/^\d*,\d{2,3}$/.test(t)) m = i })
-  if (m < 0) return []
+  if (m < 0) {
+    // Запятую распознавание тоже теряет («1 053,87 ₴» → «1053872»: ₴ стал цифрой). Берём последний длинный набор цифр как копейки
+    // с хвостовым значком и без него; правильный вариант выберет проверка по YTM.
+    const big = toks.filter((t) => /^\d{6,8}$/.test(t)).pop()
+    if (!big) return []
+    const out = []
+    for (const d of [big, big.slice(0, -1)]) {
+      const v = Number(d) / 100
+      if (Number.isFinite(v) && v >= 100 && !out.includes(v)) out.push(v)
+    }
+    return out
+  }
   const [int, frac] = toks[m].split(',')
   const out = []
   let whole = int
@@ -53,6 +67,9 @@ function matchBond(token, iso, registry) {
     const flags = []
     if (bestD > 0) flags.push('isin-fixed')
     if (ties > 1) flags.push('isin-ambiguous')
+    // Совпала только дата, а цифры ISIN почти не сошлись: если ошиблась и дата («10.03» прочиталось как «10.05»), реестр выдаст
+    // другую настоящую бумагу, которой на экране нет. Такой ISIN не подтверждён, пока его не увидит другой проход или человек.
+    if (byDate.length && bestD > WEAK_ISIN) flags.push('isin-weak')
     return { bond: best, flags }
   }
   if (/^\d{10}$/.test(tail)) return { bond: { id: `UA${tail}`, maturity: iso || '' }, flags: ['not-in-registry'] }
@@ -63,15 +80,21 @@ function matchBond(token, iso, registry) {
  * text — распознанный текст одного скриншота; registry — бумаги реестра НБУ [{id, maturity, coupon_rate, nominal}].
  * Возвращает [{ isin, maturity, kind: 'YTM'|'SIM', shown (как на экране), ytm (эффективная, %), price|null, flags[] }].
  * flags: isin-fixed (ISIN исправлен по реестру), isin-ambiguous, not-in-registry, price-bad (цена отброшена, остался YTM),
- * price-none (цены на экране не нашли).
+ * price-none (цены на экране не нашли), isin-weak (ISIN найден только по дате: цифры не сошлись).
  */
 export function parseIcuScreen(text, registry, today) {
   const lines = String(text || '').split(/\r?\n/)
   const starts = []
   lines.forEach((l, i) => { if (YTM_RE.test(l)) starts.push(i) })
+  // Заголовок следующей карточки («ОВДП 25.08.2027») стоит в тексте над её строкой с YTM, то есть внутри блока предыдущей.
+  // Если у предыдущей строка «Погашення» не прочиталась, дата заголовка соседа ушла бы ей, а с ней и ISIN с ценой.
+  const titleAt = (idx) => {
+    for (let j = idx - 1; j >= Math.max(idx - 3, 0); j--) if (DATE_RE.test(lines[j])) return j
+    return idx
+  }
   const out = []
   starts.forEach((i, k) => {
-    const end = k + 1 < starts.length ? starts[k + 1] : lines.length
+    const end = k + 1 < starts.length ? Math.max(titleAt(starts[k + 1]), i + 1) : lines.length
     const m = lines[i].match(YTM_RE)
     const kind = m[1].toUpperCase()
     const shown = Number(m[2].replace(',', '.'))
@@ -89,7 +112,8 @@ export function parseIcuScreen(text, registry, today) {
     const ytm = kind === 'SIM' ? simpleToEffective(shown, years) : shown
     let price = null
     const cands = []
-    for (const l of block.split('\n')) if (/:/.test(l)) cands.push(...priceCandidates(l))
+    // «Кількість:» нередко читается без двоеточия («Kinoricie, 10982 …»): ищем цену в любой строке блока, кроме даты и доходности
+    for (const l of block.split('\n')) if (!DATE_RE.test(l) && !YTM_RE.test(l)) cands.push(...priceCandidates(l))
     if (!cands.length) flags.push('price-none')
     else {
       const inRange = cands.filter((v) => v >= nominal * 0.8 && v <= nominal * 1.3)
@@ -112,12 +136,14 @@ export function parseIcuScreen(text, registry, today) {
 // при равенстве — без пометок о проблемах с ISIN. Порядок бумаг — по первому появлению.
 export function mergeEntries(lists) {
   const best = new Map()
-  const score = (e) => (e.price !== null ? 4 : 0) + (e.flags.includes('isin-ambiguous') || e.flags.includes('not-in-registry') ? 0 : 1)
+  const confirmed = new Set() // бумаги, у которых хоть одно прочтение ISIN было уверенным
+  const score = (e) => (e.price !== null ? 4 : 0) + (e.flags.includes('isin-ambiguous') || e.flags.includes('not-in-registry') || e.flags.includes('isin-weak') ? 0 : 1)
   for (const list of lists) {
     for (const e of list) {
+      if (!e.flags.includes('isin-weak')) confirmed.add(e.isin)
       const cur = best.get(e.isin)
       if (!cur || score(e) > score(cur)) best.set(e.isin, e)
     }
   }
-  return [...best.values()]
+  return [...best.values()].map((e) => (confirmed.has(e.isin) && e.flags.includes('isin-weak') ? { ...e, flags: e.flags.filter((f) => f !== 'isin-weak') } : e))
 }
