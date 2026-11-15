@@ -1,5 +1,6 @@
-// Адрес бэкенда: VITE_API_BASE в .env фронта, иначе локальный бэкенд.
-export const API_BASE = import.meta.env?.VITE_API_BASE || 'http://localhost:8080/api'
+// Адрес бэкенда: VITE_API_BASE в .env фронта, иначе локальный бэкенд. Именно 127.0.0.1, а не localhost: бэкенд слушает IPv4,
+// а «localhost» браузер пробует сначала как ::1, где порт 8080 может занять чужая программа (так было со Steam) — и запросы уходят мимо.
+export const API_BASE = import.meta.env?.VITE_API_BASE || 'http://127.0.0.1:8080/api'
 
 async function request(method, path, opts) {
   const res = await fetch(`${API_BASE}${path}`, { method, ...opts })
