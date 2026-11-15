@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { COUNTRY_METRICS, countryIds, countryRows, memberIds, spreadIds } from '../src/utils/countries.js'
+import { COUNTRY_METRICS, COUNTRY_PANELS, countryIds, countryRows, memberIds, spreadIds } from '../src/utils/countries.js'
 import { SERIES } from '../src/utils/macro.js'
 
 const ez = { cc: 'ez', name: 'Еврозона', currency: 'EUR', metrics: { policy: 'ez_policy', cpi: 'eu_cpi_yoy', y10: 'ez_y10', fx: 'eur_uah' } }
@@ -11,7 +11,7 @@ test('у каждого ряда еврозоны есть подпись и ц�
 })
 
 test('id рядов для карточек: без повторов', () => {
-  assert.deepEqual(countryIds([ez, { ...ua, metrics: { policy: 'ez_policy', cpi: 'cpi_yoy' } }]).sort(), ['cpi_yoy', 'eu_cpi_yoy', 'eur_uah', 'ez_policy', 'ez_y10'])
+  assert.deepEqual(countryIds([ez, { ...ua, cc: 'zz', metrics: { policy: 'ez_policy', cpi: 'cpi_yoy' } }]).sort(), ['cpi_yoy', 'eu_cpi_yoy', 'eur_uah', 'ez_policy', 'ez_y10'])
   assert.deepEqual(countryIds(null), [])
 })
 
@@ -82,6 +82,18 @@ test('карточка Украины: резервы в млрд долларо
   assert.equal(rows[1].text, '48,67 млрд $')
   assert.equal(rows[2].text, '9,94 %')
   for (const id of ['ua_reserves', 'ua_m0', 'ua_m3', 'ua_m3_yoy']) assert.ok(SERIES[id]?.label && SERIES[id]?.color, id)
+})
+
+test('Украина: графики под карточкой и их ряды попадают в запрос кеша', () => {
+  const ua = { cc: 'ua', name: 'Украина', metrics: { policy: 'policy_rate', ppi: 'ua_ppi_yoy', ca: 'ua_ca' } }
+  assert.ok(COUNTRY_PANELS.ua.length >= 2)
+  const ids = countryIds([ua, { cc: 'us', metrics: { policy: 'fed_funds' } }])
+  for (const id of ['policy_rate', 'ua_cpi_01', 'ua_cpi_11', 'ua_gs', 'ua_m3_yoy', 'fed_funds']) assert.ok(ids.includes(id), id)
+  assert.equal(new Set(ids).size, ids.length)
+  for (const p of COUNTRY_PANELS.ua) for (const id of p.ids) assert.ok(SERIES[id]?.label && SERIES[id]?.color, id)
+  for (let n = 1; n <= 12; n++) { const id = `ua_cpi_${String(n).padStart(2, '0')}`; assert.ok(SERIES[id]?.label, id) }
+  const rows = countryRows(ua, { ua_ppi_yoy: [{ d: '2026-09-01', v: 5.7 }], ua_ca: [{ d: '2026-01-01', v: -1.02 }] })
+  assert.deepEqual(rows.map((r) => r.text), ['—', '5,7 %', '-1,02 млрд $'])
 })
 
 test('высокая инфляция в карточке: без сокращений и потери знаков', () => {
