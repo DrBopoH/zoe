@@ -33,7 +33,7 @@ func (c *Client) Catalog() map[string][]string {
 // IsSource — известен ли такой источник (для ?source=… в маршрутах).
 func IsSource(id string) bool {
 	switch id {
-	case SourceNBU, SourceUST, SourceMacro, SourceFX, SourceUS, SourceUSEcon, SourceUSCurve, SourceUSReal, SourceUSPrices, SourceUSJobs, SourceUSAct, SourceUSLiq, SourceUSCredit, SourceEZ, SourceGB, SourceCH, SourceJP, SourceCN, SourceRU, SourceEG, SourcePL, SourceTR, SourceCrypto, SourceStocks:
+	case SourceNBU, SourceUST, SourceMacro, SourceFX, SourceUS, SourceUSEcon, SourceUSCurve, SourceUSReal, SourceUSPrices, SourceUSJobs, SourceUSAct, SourceUSLiq, SourceUSCredit, SourceEZ, SourceGB, SourceCH, SourceJP, SourceCN, SourceRU, SourceEG, SourcePL, SourceTR, SourceNO, SourceSE, SourceCA, SourceCrypto, SourceStocks:
 		return true
 	}
 	return false
@@ -62,7 +62,7 @@ func (c *Client) Feeds() []Feed {
 			return list, res
 		}},
 		{ID: SourceMacro, Title: "Ставки и инфляция · НБУ, Евростат", Unit: "точек", Provides: []string{SerPolicyRate, SerOvernightCD, SerOvernightLoans, SerCPIYoY, SerCPIMoM, SerCoreYoY, SerCoreMoM, SerEUCPIYoY}, Series: c.MacroNBU},
-		{ID: SourceFX, Title: "Курсы валют и золото · НБУ", Unit: "точек", Provides: []string{SerUSDUAH, SerEURUAH, SerXAUUAH, SerGBPUAH, SerCHFUAH, SerJPYUAH, SerCNYUAH, SerRUBUAH, SerEGPUAH, SerPLNUAH, SerTRYUAH}, Series: c.FXNBU},
+		{ID: SourceFX, Title: "Курсы валют и золото · НБУ", Unit: "точек", Provides: []string{SerUSDUAH, SerEURUAH, SerXAUUAH, SerGBPUAH, SerCHFUAH, SerJPYUAH, SerCNYUAH, SerRUBUAH, SerEGPUAH, SerPLNUAH, SerTRYUAH, SerNOKUAH, SerSEKUAH, SerCADUAH}, Series: c.FXNBU},
 		{ID: SourceUS, Title: "Ставка ФРС и инфляция США · FRED", Unit: "точек", Provides: []string{SerFedFunds, SerFedTarget, SerUSCPIYoY, SerUSCPIMoM, SerUST10Y}, Series: c.USFRED},
 		{ID: SourceUSEcon, Title: "Экономика США · FRED", Unit: "точек", Provides: []string{SerUSUnrate, SerUSGDP, SerUSSpread, SerUSVIX, SerUSSentiment}, Series: c.USEcon},
 		{ID: SourceUSCurve, Title: "Кривая доходности США · FRED", Unit: "точек", Provides: []string{SerUST1M, SerUST3M, SerUST6M, SerUST1Y, SerUST2Y, SerUST3Y, SerUST5Y, SerUST7Y, SerUST20Y, SerUST30Y, SerUSSpread3M}, Series: c.USCurve},
@@ -81,6 +81,9 @@ func (c *Client) Feeds() []Feed {
 		{ID: SourceEG, Title: "Египет · Всемирный банк", Unit: "точек", Provides: egSeries, Series: c.Egypt},
 		{ID: SourcePL, Title: "Польша · BIS, Евростат и FRED", Unit: "точек", Provides: plSeries, Series: c.Poland},
 		{ID: SourceTR, Title: "Турция · BIS, Евростат и FRED", Unit: "точек", Provides: trSeries, Series: c.Turkey},
+		{ID: SourceNO, Title: "Норвегия · BIS, Евростат и FRED", Unit: "точек", Provides: noSeries, Series: c.Norway},
+		{ID: SourceSE, Title: "Швеция · BIS, Евростат и FRED", Unit: "точек", Provides: seSeries, Series: c.Sweden},
+		{ID: SourceCA, Title: "Канада · BIS и FRED", Unit: "точек", Provides: caSeries, Series: c.Canada},
 		{ID: SourceCrypto, Title: "Крипто · Binance", Unit: "точек", Provides: []string{SerCryptoBTC, SerCryptoETH, SerCryptoBNB, SerCryptoSOL, SerCryptoFNG}, Series: c.Crypto},
 		{ID: SourceStocks, Title: "Биржа США · FRED", Unit: "точек", Provides: []string{SerStockSP500, SerStockNasdaq, SerStockDow}, Series: c.Stocks},
 	}
