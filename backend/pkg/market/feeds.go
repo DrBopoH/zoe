@@ -33,7 +33,7 @@ func (c *Client) Catalog() map[string][]string {
 // IsSource — известен ли такой источник (для ?source=… в маршрутах).
 func IsSource(id string) bool {
 	switch id {
-	case SourceNBU, SourceUST, SourceMacro, SourceFX, SourceUS, SourceUSEcon, SourceUSCurve, SourceUSReal, SourceUSPrices, SourceUSJobs, SourceUSAct, SourceUSLiq, SourceUSCredit, SourceEZ, SourceGB, SourceCH, SourceJP, SourceCN, SourceRU, SourceEG, SourcePL, SourceTR, SourceNO, SourceSE, SourceCA, SourceCommodities, SourceWorld, SourceChain, SourcePPP, SourceCrypto, SourceStocks:
+	case SourceNBU, SourceUST, SourceMacro, SourceFX, SourceUS, SourceUSEcon, SourceUSCurve, SourceUSReal, SourceUSPrices, SourceUSJobs, SourceUSAct, SourceUSLiq, SourceUSCredit, SourceEZ, SourceGB, SourceCH, SourceJP, SourceCN, SourceRU, SourceEG, SourcePL, SourceTR, SourceNO, SourceSE, SourceCA, SourceKR, SourceTW, SourceCommodities, SourceWorld, SourceChain, SourcePPP, SourceCrypto, SourceStocks:
 		return true
 	}
 	return false
@@ -84,6 +84,8 @@ func (c *Client) Feeds() []Feed {
 		{ID: SourceNO, Title: "Норвегия · BIS, Евростат и FRED", Unit: "точек", Provides: noSeries, Series: c.Norway},
 		{ID: SourceSE, Title: "Швеция · BIS, Евростат и FRED", Unit: "точек", Provides: seSeries, Series: c.Sweden},
 		{ID: SourceCA, Title: "Канада · BIS и FRED", Unit: "точек", Provides: caSeries, Series: c.Canada},
+		{ID: SourceKR, Title: "Корея · BIS и Yahoo", Unit: "точек", Provides: krSeries, Series: c.Korea},
+		{ID: SourceTW, Title: "Тайвань · Yahoo", Unit: "точек", Provides: twSeries, Series: c.Taiwan},
 		{ID: SourceCommodities, Title: "Сырьё: нефть, газ, металлы, зерно · FRED", Unit: "точек", Provides: commoditySeries, Series: c.Commodities},
 		{ID: SourceWorld, Title: "Мировые рынки акций и оценка · FRED, Шиллер", Unit: "точек", Provides: worldSeries, Series: c.World},
 		{ID: SourceChain, Title: "Крипто-контур: P2P, фандинг, комиссии сетей · Binance, DefiLlama", Unit: "точек", Provides: chainSeries, Series: c.Chain},

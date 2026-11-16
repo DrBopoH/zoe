@@ -34,6 +34,7 @@ const (
 	DefaultONSBase      = "https://www.ons.gov.uk"
 	DefaultBISBase      = "https://stats.bis.org"
 	DefaultWBBase       = "https://api.worldbank.org"
+	DefaultYahooBase    = "https://query1.finance.yahoo.com"
 	DefaultUSTBase      = "https://api.fiscaldata.treasury.gov/services/api/fiscal_service"
 	DefaultP2PBase      = "https://p2p.binance.com"
 	DefaultFuturesBase  = "https://fapi.binance.com"
@@ -92,7 +93,9 @@ type Client struct {
 	WBBase string
 	// Крипто-контур (источник «chain»): P2P Binance, фьючерсы Binance, DefiLlama, mempool.space, TronGrid, публичный RPC Ethereum, CoinGecko; пустая строка отключает часть (тесты)
 	P2PBase, FuturesBase, LlamaBase, MempoolBase, TronBase, EthRPCBase, GeckoBase string
-	Now                                                                           func() time.Time
+	// YahooBase — график индекса биржи (KOSPI, TAIEX), публичный JSON без ключа; пустая строка отключает опрос (тесты)
+	YahooBase string
+	Now       func() time.Time
 	// Limiter — паузы между запросами к одному хосту (nil — без пауз)
 	Limiter *HostLimiter
 	// LastDate — до какой даты ряд уже лежит в кеше (пусто — нет такого). По ней тяжёлые дневные ряды FRED докачиваются хвостом, а не целиком.
@@ -112,7 +115,7 @@ type Client struct {
 var DefaultRetryWait = time.Second
 
 func NewClient() *Client {
-	return &Client{HTTP: &http.Client{Timeout: 30 * time.Second}, NBUBase: DefaultNBUBase, USTBase: DefaultUSTBase, FREDBase: DefaultFREDBase, BinanceBase: DefaultBinanceBase, FNGBase: DefaultFNGBase, ShillerBase: DefaultShillerBase, EurostatBase: DefaultEurostatBase, ECBBase: DefaultECBBase, BoEBase: DefaultBoEBase, ONSBase: DefaultONSBase, BISBase: DefaultBISBase, WBBase: DefaultWBBase, P2PBase: DefaultP2PBase, FuturesBase: DefaultFuturesBase, LlamaBase: DefaultLlamaBase, MempoolBase: DefaultMempoolBase, TronBase: DefaultTronBase, EthRPCBase: DefaultEthRPCBase, GeckoBase: DefaultGeckoBase, Now: time.Now, Limiter: NewHostLimiter(DefaultHostGaps()).WithSlots(DefaultHostSlots()), Retries: 2, RetryWait: DefaultRetryWait}
+	return &Client{HTTP: &http.Client{Timeout: 30 * time.Second}, NBUBase: DefaultNBUBase, USTBase: DefaultUSTBase, FREDBase: DefaultFREDBase, BinanceBase: DefaultBinanceBase, FNGBase: DefaultFNGBase, ShillerBase: DefaultShillerBase, EurostatBase: DefaultEurostatBase, ECBBase: DefaultECBBase, BoEBase: DefaultBoEBase, ONSBase: DefaultONSBase, BISBase: DefaultBISBase, WBBase: DefaultWBBase, YahooBase: DefaultYahooBase, P2PBase: DefaultP2PBase, FuturesBase: DefaultFuturesBase, LlamaBase: DefaultLlamaBase, MempoolBase: DefaultMempoolBase, TronBase: DefaultTronBase, EthRPCBase: DefaultEthRPCBase, GeckoBase: DefaultGeckoBase, Now: time.Now, Limiter: NewHostLimiter(DefaultHostGaps()).WithSlots(DefaultHostSlots()), Retries: 2, RetryWait: DefaultRetryWait}
 }
 
 func (c *Client) now() time.Time {

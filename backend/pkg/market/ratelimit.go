@@ -91,15 +91,16 @@ func (l *HostLimiter) Wait(ctx context.Context, host string) error {
 // DefaultHostGaps — паузы по хостам из базовых адресов клиента: публичные API без ключей, у большинства есть негласные лимиты.
 func DefaultHostGaps() map[string]time.Duration {
 	return map[string]time.Duration{
-		"fred.stlouisfed.org":    150 * time.Millisecond,
-		"stats.bis.org":          250 * time.Millisecond,
-		"api.worldbank.org":      200 * time.Millisecond,
-		"ec.europa.eu":           200 * time.Millisecond,
-		"data-api.ecb.europa.eu": 150 * time.Millisecond,
-		"p2p.binance.com":        500 * time.Millisecond,
-		"api.coingecko.com":      1500 * time.Millisecond,
-		"api.trongrid.io":        400 * time.Millisecond,
-		"bank.gov.ua":            100 * time.Millisecond,
+		"fred.stlouisfed.org":      150 * time.Millisecond,
+		"stats.bis.org":            250 * time.Millisecond,
+		"api.worldbank.org":        200 * time.Millisecond,
+		"ec.europa.eu":             200 * time.Millisecond,
+		"data-api.ecb.europa.eu":   150 * time.Millisecond,
+		"p2p.binance.com":          500 * time.Millisecond,
+		"api.coingecko.com":        1500 * time.Millisecond,
+		"api.trongrid.io":          400 * time.Millisecond,
+		"bank.gov.ua":              100 * time.Millisecond,
+		"query1.finance.yahoo.com": 500 * time.Millisecond,
 	}
 }
 

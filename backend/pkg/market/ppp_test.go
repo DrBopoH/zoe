@@ -99,8 +99,8 @@ func TestPPPOneFailureKeepsRest(t *testing.T) {
 }
 
 func TestPPPCatalogCounts(t *testing.T) {
-	// 1 индекс США + 14 + 15 + 14 + 15 + 15 рядов Всемирного банка + 14 стран × 2 ряда Big Mac
-	if len(pppSeries) != 1+14+15+14+15+15+28 {
+	// 1 индекс США + 15 + 16 + 15 + 16 + 16 рядов Всемирного банка + 15 стран × 2 ряда Big Mac
+	if len(pppSeries) != 1+15+16+15+16+16+30 {
 		t.Fatalf("%d", len(pppSeries))
 	}
 }
