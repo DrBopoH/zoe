@@ -31,13 +31,19 @@ func stockJSON(adj bool) string {
 	if adj {
 		s += `,"adjclose":[{"adjclose":[` + strings.Join(ad, ",") + `]}]`
 	}
-	return s + `}}],"error":null}}`
+	s += `}`
+	// сплит 4:1 (31 августа 2026) в событиях графика
+	s += `,"events":{"splits":{"1788157800":{"date":1788157800,"numerator":4,"denominator":1,"splitRatio":"4:1"},"bad":{"date":0,"numerator":0,"denominator":1}}}`
+	return s + `}],"error":null}}`
 }
 
 func TestParseStockHistory(t *testing.T) {
-	bars, err := parseStockHistory([]byte(stockJSON(true)), "AAPL")
+	bars, splits, err := parseStockHistory([]byte(stockJSON(true)), "AAPL")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(splits) != 1 || splits[0].Ratio != 4 || splits[0].Date != "2026-08-31" {
+		t.Fatalf("сплит 4:1, строка без числителя отброшена: %+v", splits)
 	}
 	if len(bars) != 3 {
 		t.Fatalf("месяц без закрытия пропущен, дубль ноября схлопнут: %+v", bars)
@@ -48,7 +54,7 @@ func TestParseStockHistory(t *testing.T) {
 	if bars[2].Date != "2026-11-01" || bars[2].Close != 125 || bars[2].Adj != 123 {
 		t.Fatalf("ноябрь — поздний отсчёт: %+v", bars[2])
 	}
-	noAdj, err := parseStockHistory([]byte(stockJSON(false)), "AAPL")
+	noAdj, _, err := parseStockHistory([]byte(stockJSON(false)), "AAPL")
 	if err != nil || noAdj[0].Adj != 100 {
 		t.Fatalf("нет поправленной цены — Adj равна Close: %v %+v", err, noAdj)
 	}
@@ -61,7 +67,7 @@ func TestParseStockHistoryRejectsBadAnswers(t *testing.T) {
 		`{"chart":{"result":[],"error":null}}`,
 		`{"chart":{"result":[{"timestamp":[1],"indicators":{"quote":[{"close":[null]}]}}],"error":null}}`,
 	} {
-		if _, err := parseStockHistory([]byte(bad), "X"); err == nil {
+		if _, _, err := parseStockHistory([]byte(bad), "X"); err == nil {
 			t.Errorf("ждали ошибку на %q", bad)
 		}
 	}
@@ -98,21 +104,24 @@ func stockClient(t *testing.T, missing ...string) (*Client, *[]string) {
 func TestStockPricesSavesEachTickerAndSkipsMissing(t *testing.T) {
 	c, asked := stockClient(t, "GONE")
 	got := map[string]int{}
-	res := c.StockPrices(context.Background(), nil, []string{"AAPL", "GONE", "BRK-B", "MSFT", "NVDA", "TSLA", "AMZN", "META", "GOOG", "AVGO", "ORCL"}, func(b []PriceBar) error {
-		got[b[0].Ticker] += len(b)
+	res := c.StockPrices(context.Background(), nil, []string{"AAPL", "GONE", "BRK-B", "MSFT", "NVDA", "TSLA", "AMZN", "META", "GOOG", "AVGO", "ORCL"}, func(tk string, b []PriceBar, sp []Split) error {
+		got[tk] += len(b)
+		if len(sp) != 1 {
+			t.Errorf("сплиты доходят до save: %+v", sp)
+		}
 		return nil
 	})
 	if res.Error != "" || res.Source != SourceStockPrices || res.Skipped != 1 || res.Fetched != 30 || len(got) != 10 || got["GONE"] != 0 {
 		t.Fatalf("один тикер без истории из 11 — не ошибка источника: %+v %v", res, got)
 	}
-	if !strings.Contains(strings.Join(*asked, " "), "BRK-B?interval=1mo&range=max") {
+	if !strings.Contains(strings.Join(*asked, " "), "BRK-B?interval=1mo&range=max&events=split") {
 		t.Fatalf("класс акций уходит как есть, месячный интервал: %v", *asked)
 	}
 }
 
 func TestStockPricesReportsWhenFifthIsMissing(t *testing.T) {
 	c, _ := stockClient(t, "A", "B")
-	res := c.StockPrices(context.Background(), nil, []string{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J"}, func([]PriceBar) error { return nil })
+	res := c.StockPrices(context.Background(), nil, []string{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J"}, func(string, []PriceBar, []Split) error { return nil })
 	if res.Skipped != 2 || !strings.HasPrefix(res.Error, "без истории 2 из 10: ") {
 		t.Fatalf("пятая часть без истории — ошибка источника: %+v", res)
 	}
@@ -122,7 +131,7 @@ func TestStockPricesStopsOnCancelAndSaveFailure(t *testing.T) {
 	c, asked := stockClient(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	n := 0
-	res := c.StockPrices(ctx, nil, []string{"A", "B", "C"}, func([]PriceBar) error {
+	res := c.StockPrices(ctx, nil, []string{"A", "B", "C"}, func(string, []PriceBar, []Split) error {
 		if n++; n == 1 {
 			cancel()
 		}
@@ -132,7 +141,7 @@ func TestStockPricesStopsOnCancelAndSaveFailure(t *testing.T) {
 		t.Fatalf("после отмены дальше не идём, скачанное остаётся: %+v %v", res, *asked)
 	}
 	c2, _ := stockClient(t)
-	res = c2.StockPrices(context.Background(), nil, []string{"A", "B"}, func([]PriceBar) error { return fmt.Errorf("диск") })
+	res = c2.StockPrices(context.Background(), nil, []string{"A", "B"}, func(string, []PriceBar, []Split) error { return fmt.Errorf("диск") })
 	if res.Skipped != 2 || !strings.Contains(res.Error, "диск") {
 		t.Fatalf("сбой сохранения виден: %+v", res)
 	}

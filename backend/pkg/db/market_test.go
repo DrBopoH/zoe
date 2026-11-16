@@ -70,18 +70,24 @@ func TestStockPricesReplaceAndPickStaleTop(t *testing.T) {
 	if got, err := s.StockTickersToFetch(2, 20*time.Hour, now); err != nil || len(got) != 2 || got[0] != "AAPL" || got[1] != "NVDA" {
 		t.Fatalf("топ-2 без истории: %v %v", err, got)
 	}
-	if err := s.SaveStockPrices([]market.PriceBar{{Ticker: "aapl", Date: "2026-09-01", Close: 100, Adj: 99}, {Ticker: "aapl", Date: "2026-10-01", Close: 110, Adj: 109}}, now-3600); err != nil {
+	if err := s.SaveStockPrices("aapl", []market.PriceBar{{Date: "2026-09-01", Close: 100, Adj: 99}, {Date: "2026-10-01", Close: 110, Adj: 109}}, []market.Split{{Date: "2026-09-15", Ratio: 4}}, now-3600); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := s.StockTickersToFetch(2, 20*time.Hour, now); len(got) != 1 || got[0] != "NVDA" {
 		t.Fatalf("свежая история AAPL не перекачивается: %v", got)
 	}
+	if sp, err := s.StockSplits("aapl"); err != nil || len(sp) != 1 || sp[0].Ratio != 4 || sp[0].Date != "2026-09-15" {
+		t.Fatalf("сплиты тикера: %v %+v", err, sp)
+	}
 	if got, _ := s.StockTickersToFetch(3, 20*time.Hour, now+30*3600); len(got) != 3 || got[0] != "AAPL" {
 		t.Fatalf("через сутки с лишним снова всё: %v", got)
 	}
 	// новая история заменяет прежнюю целиком (сплит пересчитал прошлые цены)
-	if err := s.SaveStockPrices([]market.PriceBar{{Ticker: "AAPL", Date: "2026-10-01", Close: 55, Adj: 54.5}}, now); err != nil {
+	if err := s.SaveStockPrices("AAPL", []market.PriceBar{{Date: "2026-10-01", Close: 55, Adj: 54.5}}, nil, now); err != nil {
 		t.Fatal(err)
+	}
+	if sp, _ := s.StockSplits("AAPL"); len(sp) != 0 {
+		t.Fatalf("сплиты заменяются вместе с историей: %+v", sp)
 	}
 	bars, at, err := s.StockPrices("aapl")
 	if err != nil || at != now || len(bars) != 1 || bars[0].Close != 55 || bars[0].Adj != 54.5 || bars[0].Ticker != "AAPL" {
@@ -90,7 +96,7 @@ func TestStockPricesReplaceAndPickStaleTop(t *testing.T) {
 	if bars, at, _ = s.StockPrices("NONE"); len(bars) != 0 || at != 0 {
 		t.Fatalf("нет истории: %+v %d", bars, at)
 	}
-	if err := s.SaveStockPrices(nil, now); err != nil {
+	if err := s.SaveStockPrices("AAPL", nil, nil, now); err != nil {
 		t.Fatal(err)
 	}
 	if c, ok, err := s.MarketCompany("nvda"); err != nil || !ok || c.CIK != 2 {
@@ -104,6 +110,83 @@ func TestStockPricesReplaceAndPickStaleTop(t *testing.T) {
 	}
 	if bars, at, _ = s.StockPrices("AAPL"); len(bars) != 0 || at != 0 {
 		t.Fatalf("«стереть кеш» уносит и историю: %+v", bars)
+	}
+}
+
+// История, скачанная до сплитов (в кеше есть цены, но нет отметки о сплитах), перекачивается один раз.
+func TestStockTickersToFetchRefetchesHistoryWithoutSplitMark(t *testing.T) {
+	d := t.TempDir()
+	s, err := NewStorage(filepath.Join(d, "c.db"), filepath.Join(d, "k.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.SaveMarketCompanies([]market.Company{{Ticker: "AAPL", Name: "Apple", CIK: 1, MarketCap: 4e12, Price: 1}}, 1); err != nil {
+		t.Fatal(err)
+	}
+	now := int64(1_000_000)
+	if _, err := s.cacheDB.Exec(`INSERT INTO stock_fetched(ticker, at) VALUES('AAPL', ?)`, now); err != nil { // как после версии без сплитов
+		t.Fatal(err)
+	}
+	if got, _ := s.StockTickersToFetch(10, 20*time.Hour, now); len(got) != 1 {
+		t.Fatalf("свежая история без отметки о сплитах качается снова: %v", got)
+	}
+	if err := s.SaveStockPrices("AAPL", []market.PriceBar{{Date: "2026-10-01", Close: 1, Adj: 1}}, nil, now); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.StockTickersToFetch(10, 20*time.Hour, now); len(got) != 0 {
+		t.Fatalf("после загрузки (даже без единого сплита) отметка есть: %v", got)
+	}
+}
+
+func TestStockFramesStoreSharesAndTodo(t *testing.T) {
+	d := t.TempDir()
+	s, err := NewStorage(filepath.Join(d, "c.db"), filepath.Join(d, "k.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	all := []market.FrameRequest{
+		{Tag: market.TagSharesBalance, Unit: "shares", Period: "CY2025Q2I"},
+		{Tag: market.TagSharesBalance, Unit: "shares", Period: "CY2025Q3I", Recent: true},
+		{Tag: market.TagSharesCover, Unit: "shares", Period: "CY2025Q3I", Recent: true},
+	}
+	now := int64(10_000_000)
+	if todo, err := s.StockFramesTodo(all, 72*time.Hour, now); err != nil || len(todo) != 3 {
+		t.Fatalf("ничего не скачано: %v %v", err, todo)
+	}
+	if err := s.SaveStockFrame(all[0], []market.FrameFact{{CIK: 320193, End: "2025-06-28", Val: 14.9e9}, {CIK: 5, End: "2025-06-30", Val: 7}}, now-10); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveStockFrame(all[1], []market.FrameFact{{CIK: 320193, End: "2025-09-27", Val: 14.8e9}}, now-100*3600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveStockFrame(all[2], nil, now-10); err != nil { // период без значений тоже отмечается: заново не качаем
+		t.Fatal(err)
+	}
+	// старый кадр не перекачивается, а Recent старше 72 часов — да
+	if todo, _ := s.StockFramesTodo(all, 72*time.Hour, now); len(todo) != 1 || todo[0].Key() != all[1].Key() {
+		t.Fatalf("только устаревший свежий кадр: %v", todo)
+	}
+	sh, err := s.StockShares(320193)
+	if err != nil || len(sh) != 2 || sh[0].End != "2025-06-28" || sh[1].Tag != market.TagSharesBalance || sh[1].Val != 14.8e9 {
+		t.Fatalf("акции Apple по возрастанию даты: %v %+v", err, sh)
+	}
+	// перекачанный кадр заменяет прежний целиком
+	if err := s.SaveStockFrame(all[1], []market.FrameFact{{CIK: 1, End: "2025-09-30", Val: 3}}, now); err != nil {
+		t.Fatal(err)
+	}
+	if sh, _ = s.StockShares(320193); len(sh) != 1 {
+		t.Fatalf("замена кадра: %+v", sh)
+	}
+	if todo, _ := s.StockFramesTodo(all, 72*time.Hour, now); len(todo) != 0 {
+		t.Fatalf("всё свежее: %v", todo)
+	}
+	if err := s.WipeCache(); err != nil {
+		t.Fatal(err)
+	}
+	if sh, _ = s.StockShares(1); len(sh) != 0 {
+		t.Fatalf("«стереть кеш» уносит и отчётность: %+v", sh)
 	}
 }
 
