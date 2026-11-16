@@ -31,3 +31,13 @@ test('dmy: ГГГГ-ММ-ДД → ДД.ММ.ГГГГ, пусто — пуста�
   assert.equal(dmy(''), '')
   assert.equal(dmy(null), '')
 })
+
+test('numText: малое отличное от нуля число не округляется до «0»', async () => {
+  const { numText } = await import('../src/utils/numfmt.js')
+  assert.equal(numText(0.0007), '0,0007')
+  assert.equal(numText(0.0000142), '0,000014')
+  assert.equal(numText(0.004, 2), '0,004')
+  assert.equal(numText(0.5), '0,5')
+  assert.equal(numText(0), '0')
+  assert.equal(numText(-0.0007), '-0,0007')
+})

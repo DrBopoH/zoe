@@ -1,5 +1,5 @@
 <script setup>
-import { fixedText, intText } from '../utils/numfmt.js'
+import { fixedText, intText, numText } from '../utils/numfmt.js'
 import { computed, ref } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
 import MarketHeader from '../components/MarketHeader.vue'
@@ -53,7 +53,8 @@ const lastYear = computed(() => {
   return d ? d.slice(0, 4) : null
 })
 
-const money = (v, s = sym.value) => (v === null || v === undefined || !isFinite(v) ? '—' : `${intText(v)} ${s}`)
+// Меньше единицы — не «0 ₴», а честная малая сумма (за 34 года гривна обесценилась так, что 1 000 ₴ стоят доли копейки)
+const money = (v, s = sym.value) => (v === null || v === undefined || !isFinite(v) ? '—' : `${Math.abs(v) > 0 && Math.abs(v) < 1 ? numText(v, 2) : intText(v)} ${s}`)
 const num = (v, d = 2) => (v === null || v === undefined || !isFinite(v) ? '—' : fixedText(v, d))
 const tone = (v) => (v === null ? 'text-slate-500' : v >= 0 ? 'text-emerald-400' : 'text-rose-400')
 </script>
