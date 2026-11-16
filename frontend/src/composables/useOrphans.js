@@ -2,6 +2,7 @@ import { ref, computed } from 'vue'
 import { formatMaskedIBAN } from '../utils/formatters.js'
 import { structuredAccounts } from '../utils/personLayout.js'
 import { apiSend, q } from '../utils/api.js'
+import { pushRequestError } from './useToasts.js'
 
 /*
  * «Бесхоз» = алиасы без лица. Всё берётся из графа (кэш ∪ статика), своего хранилища
@@ -65,7 +66,7 @@ export function useOrphans(props, users, emit, fetchUsers, graph) {
       }
       activeSelectIndex.value = null
     } catch (err) {
-      console.error('Link signature error:', err)
+      pushRequestError('Не удалось привязать подпись', err)
     } finally {
       await fetchUsers()
       if (emit) emit('refresh')
@@ -77,7 +78,7 @@ export function useOrphans(props, users, emit, fetchUsers, graph) {
     try {
       await apiSend('DELETE', `/users/alias?alias=${q(alias)}`)
     } catch (err) {
-      console.error('Unlink alias error:', err)
+      pushRequestError('Не удалось отвязать подпись', err)
     } finally {
       await fetchUsers()
       if (emit) emit('refresh')

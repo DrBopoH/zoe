@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { idKey } from '../utils/personLayout.js'
 import { apiSend, q } from '../utils/api.js'
+import { pushRequestError } from './useToasts.js'
 
 export function useLinkEditor(users, emit, fetchUsers) {
   const isModalOpen = ref(false)
@@ -44,7 +45,7 @@ export function useLinkEditor(users, emit, fetchUsers) {
       if (emit) emit('refresh')
       if (created?.id && callback) callback(created.id)
     } catch (err) {
-      console.error('Quick create user error:', err)
+      pushRequestError('Не удалось создать лицо', err)
     }
   }
 
@@ -96,7 +97,7 @@ export function useLinkEditor(users, emit, fetchUsers) {
         await apiSend('DELETE', `/users/alias?alias=${q(alias)}`)
       }
     } catch (err) {
-      console.error('Save link editor data error:', err)
+      pushRequestError('Не удалось сохранить привязку', err)
     } finally {
       closeLinkEditor()
       await fetchUsers()

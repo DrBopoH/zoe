@@ -1,6 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { apiGetJson, q } from '../utils/api.js'
 import { bankTheme } from '../utils/bankTheme.js'
+import { pushRequestError } from './useToasts.js'
 
 // Данные для CandleChart: гривневые счета, их операции, крипто-счета и выплаты по облигациям.
 // `pickedIds` — ref с массивом id счетов, по которым строить график; пусто → все (Смета — всегда все, Операционная — выбранные карты).
@@ -50,7 +51,7 @@ export function useCapitalChart(accounts, transactions, pickedIds = ref([])) {
         description: `${x.qty} ${x.asset} ${x.side === 'buy' ? 'за' : '→'} ${x.quote_qty} ${x.quote}`
       }))
     } catch (e) {
-      console.error('Binance trades error:', e)
+      pushRequestError('Сделки Binance не загрузились', e)
     }
   }, { immediate: true })
 
@@ -67,7 +68,7 @@ export function useCapitalChart(accounts, transactions, pickedIds = ref([])) {
         description: `${legs(x.out)} → ${legs(x.in)}`
       }))
     } catch (e) {
-      console.error('Binance swaps error:', e)
+      pushRequestError('Обмены Binance не загрузились', e)
     }
   }, { immediate: true })
 
@@ -82,7 +83,7 @@ export function useCapitalChart(accounts, transactions, pickedIds = ref([])) {
         memo: 'move', exact: true, from: m.from, to: m.to, description: `${m.qty} ${m.asset}`
       }))
     } catch (e) {
-      console.error('Binance moves error:', e)
+      pushRequestError('Переводы Binance не загрузились', e)
     }
   }, { immediate: true })
 
@@ -102,7 +103,7 @@ export function useCapitalChart(accounts, transactions, pickedIds = ref([])) {
       icuOps.value = ops
       positions.value = held
     } catch (e) {
-      console.error('ICU events error:', e)
+      pushRequestError('События ИЦУ не загрузились', e)
     }
   }, { immediate: true })
 

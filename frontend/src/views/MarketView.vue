@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, watch } from 'vue'
 import SectionRail from '../components/SectionRail.vue'
+import UiLoadError from '../components/ui/UiLoadError.vue'
 import BondsView from './BondsView.vue'
 import MacroRatesView from './MacroRatesView.vue'
 import MacroInflationView from './MacroInflationView.vue'
@@ -29,6 +30,7 @@ import { useMacro } from '../composables/useMacro.js'
 import { useSources } from '../composables/useSources.js'
 import { useCountries } from '../composables/useCountries.js'
 import { toLocalDateStr } from '../utils/formatters.js'
+import { firstLoadError } from '../utils/loadError.js'
 import { MARKET_TREE, MARKET_SECTIONS, isBondSection } from '../utils/marketNav.js'
 
 // Оболочка вкладки «Рынок»: шторка с группами («Ценные бумаги», «Макро») и экран выбранного раздела.
@@ -66,10 +68,10 @@ const chain = useMacro('chain', ['usd_uah'])
 const ppp = useMacro('ppp')
 const score = useMacro('usecon', ['fed_funds', 'us_cpi_yoy', 'us_pce_yoy', 'us_corecpi_yoy', 'us_claims', 'us_hy', 'us_nfci', 'us_usd'])
 const sources = useSources()
-const scoreScreen = { series: score.series, load: () => Promise.all([score.load(), countries.load()]) }
+const scoreScreen = { series: score.series, error: computed(() => firstLoadError(score.error.value, countries.error.value)), load: () => Promise.all([score.load(), countries.load()]) }
 const commodities = useMacro('commodities', ['usd_uah', 'xau_uah', 'xag_uah', 'xpt_uah', 'xpd_uah'])
 // «Курсы» читают ещё и реестр стран (ставки и реальные курсы в таблице мировых валют)
-const fxScreen = { series: fx.series, load: () => Promise.all([fx.load(), countries.load()]) }
+const fxScreen = { series: fx.series, error: computed(() => firstLoadError(fx.error.value, countries.error.value)), load: () => Promise.all([fx.load(), countries.load()]) }
 const heavy = { countries, eurozone: ez, fx: fxScreen, fed: us, yields: curve, real, prices, jobs, activity, liquidity, credit, usecon: econ, crypto, stocks, commodities, world, chain, ppp, scorecard: scoreScreen, sources }
 // Таблицы облигаций считают доходность в долларах: нужны курсы и инфляция США (тяжёлые ряды, поэтому только на этих экранах)
 const dollar = computed(() => ({ ...fx.series.value, ...us.series.value }))
@@ -77,6 +79,9 @@ const loadBond = () => { if (!bondSection.value) return; for (const h of [fx, us
 onMounted(() => { macro.load(); heavy[section.value]?.load(); loadBond() })
 watch(() => props.dataVersion, () => { macro.load(); heavy[section.value]?.load(); if (bondSection.value) { fx.load(); us.load() } })
 watch(section, (s) => { const h = heavy[s]; if (h && !Object.keys(h.series.value).length) h.load(); loadBond() })
+// Сбой загрузки текущего раздела (ряды, реестр стран, здоровье источников) — плашкой с повтором, а не пустым экраном
+const loadError = computed(() => firstLoadError(macro.error.value, heavy[section.value]?.error?.value, ...(bondSection.value ? [fx.error.value, us.error.value] : [])))
+const retry = () => { macro.load(); heavy[section.value]?.load(); loadBond() }
 const today = computed(() => toLocalDateStr(new Date()))
 const bondSection = computed(() => (isBondSection(section.value) ? section.value : null))
 </script>
@@ -84,6 +89,7 @@ const bondSection = computed(() => (isBondSection(section.value) ? section.value
 <template>
   <div class="relative space-y-4">
     <SectionRail v-model="section" :sections="MARKET_TREE" label="Разделы рынка" groups-key="economic_market_groups" />
+    <UiLoadError v-if="loadError" :message="loadError" @retry="retry" />
     <KeepAlive>
       <BondsView v-if="bondSection" key="bonds" :section="bondSection" :accounts="accounts" :data-version="dataVersion" :running="running" :macro="macro.series.value" :dollar="dollar" @go="section = $event" />
     </KeepAlive>
