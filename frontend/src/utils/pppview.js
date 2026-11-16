@@ -7,7 +7,6 @@ export const PPP_COUNTRIES = [
   { cc: 'ua', name: 'Украина', cur: 'UAH', sym: '₴' },
   { cc: 'us', name: 'США', cur: 'USD', sym: '$' },
   { cc: 'ez', name: 'Еврозона', cur: 'EUR', sym: '€' },
-  { cc: 'de', name: 'Германия', cur: 'EUR', sym: '€' },
   { cc: 'gb', name: 'Великобритания', cur: 'GBP', sym: '£' },
   { cc: 'ch', name: 'Швейцария', cur: 'CHF', sym: 'CHF' },
   { cc: 'jp', name: 'Япония', cur: 'JPY', sym: '¥' },
@@ -114,7 +113,7 @@ export function levelRows(series, today) {
 
 /** Big Mac по странам и «бургеров в месяц» на среднедушевой доход (номинальный ВВП на душу ÷ 12 на цену бургера). Сортировка — по цене. */
 export function burgerRows(series, today) {
-  const ccs = PPP_COUNTRIES.map((c) => c.cc).filter((cc) => cc !== 'de')
+  const ccs = PPP_COUNTRIES.map((c) => c.cc)
   return bigMacRows(series, ccs).filter((r) => r.price !== null).map((r) => {
     const gdpn = valueAt(series?.[`ppp_gdpn_${r.cc}`], today)
     return { ...r, name: countryOf(r.cc)?.name || r.cc, perMonth: gdpn ? burgersPerMonth(gdpn / 12, r.price) : null }
