@@ -1,8 +1,10 @@
 package db
 
 import (
+	"database/sql"
 	"economic/pkg/market"
 	"strings"
+	"time"
 )
 
 // Рыночные данные по облигациям (ОВДП и US Treasury) из публичных источников — кеш: стереть и скачать заново можно
@@ -37,6 +39,17 @@ CREATE TABLE IF NOT EXISTS market_companies (
 	updated_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_market_companies_cap ON market_companies(market_cap DESC);
+CREATE TABLE IF NOT EXISTS stock_prices (
+	ticker TEXT NOT NULL,
+	d TEXT NOT NULL,                  -- первое число месяца, YYYY-MM-01
+	close REAL NOT NULL,              -- закрытие месяца с поправкой на сплиты
+	adj REAL NOT NULL,                -- и на дивиденды
+	PRIMARY KEY (ticker, d)
+);
+CREATE TABLE IF NOT EXISTS stock_fetched (
+	ticker TEXT NOT NULL PRIMARY KEY,
+	at INTEGER NOT NULL               -- когда история скачана (unix)
+);
 `
 
 // SaveMarketBonds кладёт бумаги в кеш. Пришедшее пустое (нет ставки, даты, доходности) не затирает уже известное:
@@ -160,6 +173,96 @@ func (s *Storage) MarketCompanies(q string, limit int) ([]market.Company, error)
 		list = append(list, c)
 	}
 	return list, rows.Err()
+}
+
+// SaveStockPrices заменяет историю одного тикера целиком (Yahoo пересчитывает прошлые цены при сплитах и дивидендах) и помечает время загрузки.
+// bars — история одного тикера (поле Ticker у всех одинаковое); пустой список ничего не меняет.
+func (s *Storage) SaveStockPrices(bars []market.PriceBar, nowUnix int64) error {
+	if len(bars) == 0 {
+		return nil
+	}
+	ticker := strings.ToUpper(bars[0].Ticker)
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	defer s.bump()
+	tx, err := s.cacheDB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM stock_prices WHERE ticker = ?`, ticker); err != nil {
+		return err
+	}
+	for _, b := range bars {
+		if _, err := tx.Exec(`INSERT OR REPLACE INTO stock_prices(ticker, d, close, adj) VALUES(?,?,?,?)`, ticker, b.Date, b.Close, b.Adj); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`INSERT OR REPLACE INTO stock_fetched(ticker, at) VALUES(?,?)`, ticker, nowUnix); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// StockPrices — месячная история тикера по возрастанию даты и время её загрузки (0 — истории нет).
+func (s *Storage) StockPrices(ticker string) ([]market.PriceBar, int64, error) {
+	ticker = strings.ToUpper(strings.TrimSpace(ticker))
+	rows, err := s.cacheDB.Query(`SELECT d, close, adj FROM stock_prices WHERE ticker = ? ORDER BY d`, ticker)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	bars := []market.PriceBar{}
+	for rows.Next() {
+		b := market.PriceBar{Ticker: ticker}
+		if err := rows.Scan(&b.Date, &b.Close, &b.Adj); err != nil {
+			return nil, 0, err
+		}
+		bars = append(bars, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	var at int64
+	err = s.cacheDB.QueryRow(`SELECT at FROM stock_fetched WHERE ticker = ?`, ticker).Scan(&at)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, 0, err
+	}
+	return bars, at, nil
+}
+
+// StockTickersToFetch — тикеры n крупнейших по капитализации компаний, чья история не скачана или старше maxAge; крупные первыми.
+func (s *Storage) StockTickersToFetch(n int, maxAge time.Duration, nowUnix int64) ([]string, error) {
+	rows, err := s.cacheDB.Query(`
+		SELECT c.ticker FROM market_companies c
+		LEFT JOIN stock_fetched f ON f.ticker = c.ticker
+		WHERE c.ticker IN (SELECT ticker FROM market_companies ORDER BY market_cap DESC, ticker LIMIT ?)
+		  AND (f.at IS NULL OR f.at < ?)
+		ORDER BY c.market_cap DESC, c.ticker`, n, nowUnix-int64(maxAge/time.Second))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// MarketCompany — одна компания списка по тикеру (без учёта регистра).
+func (s *Storage) MarketCompany(ticker string) (market.Company, bool, error) {
+	var c market.Company
+	err := s.cacheDB.QueryRow(`SELECT ticker, name, exchange, cik, sector, industry, country, ipo_year, market_cap, price FROM market_companies WHERE ticker = ?`, strings.ToUpper(strings.TrimSpace(ticker))).
+		Scan(&c.Ticker, &c.Name, &c.Exchange, &c.CIK, &c.Sector, &c.Industry, &c.Country, &c.IPOYear, &c.MarketCap, &c.Price)
+	if err == sql.ErrNoRows {
+		return market.Company{}, false, nil
+	}
+	return c, err == nil, err
 }
 
 // bondTerms — условия облигаций для расчёта: справочник пользователя (core.bonds) поверх скачанных ОВДП.

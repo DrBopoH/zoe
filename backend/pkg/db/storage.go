@@ -464,7 +464,7 @@ func (s *Storage) WipeCache() error {
 	if _, err := s.cacheDB.Exec(`DELETE FROM transactions`); err != nil {
 		return err
 	}
-	for _, t := range []string{"sync_coverage", "binance_minutes", "binance_state", "binance_ledger", "binance_p2p", "icu_flows", "market_bonds", "market_companies", "macro_series", "accounts"} {
+	for _, t := range []string{"sync_coverage", "binance_minutes", "binance_state", "binance_ledger", "binance_p2p", "icu_flows", "market_bonds", "market_companies", "stock_prices", "stock_fetched", "macro_series", "accounts"} {
 		if _, err := s.cacheDB.Exec(`DELETE FROM ` + t); err != nil {
 			return err
 		}

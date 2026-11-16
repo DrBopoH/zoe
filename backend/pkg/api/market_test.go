@@ -56,6 +56,8 @@ func newMarketServer(t *testing.T, usUp bool) *Server {
 			w.Write([]byte(`{"data":{"rows":[{"symbol":"TSLA","name":"Tesla, Inc. Common Stock","lastsale":"$420.50","marketCap":"1300000000000.00","country":"United States","ipoyear":"2010","sector":"Consumer Discretionary","industry":"Auto Manufacturers"},{"symbol":"AAPL","name":"Apple Inc. Common Stock","lastsale":"$300.00","marketCap":"4500000000000.00","country":"United States","ipoyear":"1980","sector":"Technology","industry":"Computer Manufacturing"},{"symbol":"NOSEC","name":"Нет в SEC","lastsale":"$1.00","marketCap":"1000.00"}]}}`))
 		case "/files/company_tickers_exchange.json":
 			w.Write([]byte(`{"data":[[320193,"Apple Inc.","AAPL","Nasdaq"],[1318605,"Tesla, Inc.","TSLA","Nasdaq"]]}`))
+		case "/v8/finance/chart/AAPL", "/v8/finance/chart/TSLA":
+			w.Write([]byte(`{"chart":{"result":[{"timestamp":[1759327800,1761919800],"indicators":{"quote":[{"close":[250.5,270]}],"adjclose":[{"adjclose":[249,268.5]}]}}],"error":null}}`))
 		case "/fng/":
 			w.Write([]byte(`{"data":[{"value":"40","timestamp":"1794009600"}]}`))
 		case "/v1/accounting/od/auctions_query":
@@ -175,11 +177,15 @@ func TestFullSyncStartsMarketToo(t *testing.T) {
 		t.Fatalf("sync/full: %d", code)
 	}
 	last := waitMarketLast(t, s)
-	if len(last["feeds"].([]any)) != 40 || feedByID(last, "stocks")["state"] != "done" || feedByID(last, "crypto")["state"] != "done" || feedByID(last, "usecon")["state"] != "done" || feedByID(last, "us")["state"] != "done" || feedByID(last, "fx")["state"] != "done" || feedByID(last, "ust")["state"] != "done" || feedByID(last, "nbu")["state"] != "done" || feedByID(last, "macro")["state"] != "done" {
+	if len(last["feeds"].([]any)) != 41 || feedByID(last, "stocks")["state"] != "done" || feedByID(last, "crypto")["state"] != "done" || feedByID(last, "usecon")["state"] != "done" || feedByID(last, "us")["state"] != "done" || feedByID(last, "fx")["state"] != "done" || feedByID(last, "ust")["state"] != "done" || feedByID(last, "nbu")["state"] != "done" || feedByID(last, "macro")["state"] != "done" {
 		t.Fatalf("все фиды должны отработать: %+v", last)
 	}
 	if f := feedByID(last, "companies"); f["state"] != "done" || f["unit"] != "компаний" || f["fetched"].(float64) != 2 || f["skipped"].(float64) != 1 {
 		t.Fatalf("companies: Apple и Tesla сошлись с SEC, строка без пары пропущена: %+v", f)
+	}
+	// история цен пошла из списка, который «companies» положил в кеш в том же опросе или раньше: в этом прогоне списка ещё не было
+	if f := feedByID(last, "stockprices"); f == nil || f["unit"] != "месяцев" {
+		t.Fatalf("stockprices: %+v", f)
 	}
 	ccode, cbody := call(t, s.HandleMarketCompanies, http.MethodGet, "/api/market/companies", "")
 	var cs []market.Company
@@ -430,5 +436,53 @@ func TestEconomyFilesRebuildMacroCache(t *testing.T) {
 	}
 	if n, _ := s.RestoreEconomy(); n != 0 { // повтор ничего не добавляет
 		t.Fatalf("повторное восстановление: %d", n)
+	}
+}
+
+// Страница компании: история подтягивается с Yahoo по требованию, повторный запрос идёт из кеша, чужой тикер — 404.
+func TestMarketStockOnDemandAndFeed(t *testing.T) {
+	s := newMarketServer(t, true)
+	if err := s.storage.SaveMarketCompanies([]market.Company{{Ticker: "AAPL", Name: "Apple Inc.", CIK: 320193, MarketCap: 4.5e12, Price: 300}, {Ticker: "TSLA", Name: "Tesla", CIK: 1318605, MarketCap: 1.3e12, Price: 420}}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := call(t, s.HandleMarketStock, http.MethodGet, "/api/market/stock", ""); code != http.StatusBadRequest {
+		t.Fatalf("без тикера: %d", code)
+	}
+	if code, _ := call(t, s.HandleMarketStock, http.MethodGet, "/api/market/stock?ticker=ZZZ", ""); code != http.StatusNotFound {
+		t.Fatalf("тикер не из списка: %d", code)
+	}
+	if code, _ := call(t, s.HandleMarketStock, http.MethodPost, "/api/market/stock?ticker=AAPL", ""); code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST: %d", code)
+	}
+	code, body := call(t, s.HandleMarketStock, http.MethodGet, "/api/market/stock?ticker=aapl", "")
+	var r struct {
+		Company market.Company `json:"company"`
+		Prices  []struct {
+			D string
+			C float64
+			A float64
+		} `json:"prices"`
+		FetchedAt int64 `json:"fetched_at"`
+	}
+	if code != 200 || json.Unmarshal(body, &r) != nil || r.Company.CIK != 320193 || len(r.Prices) != 2 || r.Prices[0].C != 250.5 || r.Prices[1].A != 268.5 || r.FetchedAt == 0 {
+		t.Fatalf("история AAPL: %d %s", code, body)
+	}
+	// теперь история в кеше: Yahoo может лечь, ответ не меняется
+	s.mk.client.YahooBase = "http://127.0.0.1:1"
+	if code, body = call(t, s.HandleMarketStock, http.MethodGet, "/api/market/stock?ticker=AAPL", ""); code != 200 || !strings.Contains(string(body), `"c":270`) {
+		t.Fatalf("из кеша: %d %s", code, body)
+	}
+	// общий опрос берёт из списка только тех, у кого истории нет: AAPL свежая, TSLA качается
+	s.mk.client.YahooBase = s.mk.client.NasdaqBase
+	if code, _ = call(t, s.HandleMarketSync, http.MethodPost, "/api/market/sync?source=stockprices", ""); code != 200 {
+		t.Fatalf("sync: %d", code)
+	}
+	last := waitMarketLast(t, s)
+	f := feedByID(last, "stockprices")
+	if f["state"] != "done" || f["fetched"].(float64) != 2 {
+		t.Fatalf("качается один TSLA (2 месяца), AAPL свежая: %+v", f)
+	}
+	if bars, _, _ := s.storage.StockPrices("TSLA"); len(bars) != 2 {
+		t.Fatalf("TSLA в кеше: %+v", bars)
 	}
 }

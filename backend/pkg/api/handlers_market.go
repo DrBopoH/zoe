@@ -26,7 +26,8 @@ func (s *Server) SetMarket(c *market.Client) {
 	s.mk.client = c
 }
 
-const marketFeedTimeout = 3 * time.Minute // с запасом на повторы запросов (market.Client.Retries): источник может отвечать медленно
+const marketPricesTimeout = 20 * time.Minute // история 500 компаний: по запросу к Yahoo каждые полсекунды, около четырёх минут с запасом
+const marketFeedTimeout = 3 * time.Minute    // с запасом на повторы запросов (market.Client.Retries): источник может отвечать медленно
 
 type feedState struct {
 	ID      string `json:"id"`
@@ -113,7 +114,11 @@ func (s *Server) startMarket(ctx context.Context, only string, quiet bool) bool 
 				m.mu.Lock()
 				st.State = "fetch"
 				m.mu.Unlock()
-				fctx, cancel := context.WithTimeout(ctx, marketFeedTimeout)
+				timeout := marketFeedTimeout
+				if f.Prices != nil {
+					timeout = marketPricesTimeout
+				}
+				fctx, cancel := context.WithTimeout(ctx, timeout)
 				defer cancel()
 				rep := func(pct int, note string) {
 					m.mu.Lock()
@@ -138,6 +143,20 @@ func (s *Server) startMarket(ctx context.Context, only string, quiet bool) bool 
 						if err := store().AppendTicks(source.SetChainTicks, step, now-now%step, snapshotValues(pts)); err != nil {
 							res.Error = strings.TrimSpace(res.Error + " часовые точки: " + err.Error())
 						}
+					}
+				} else if f.Prices != nil {
+					now := time.Now().Unix()
+					tickers, err := s.storage.StockTickersToFetch(market.StockTopN, market.StockMaxAge, now)
+					have, herr := s.storage.MarketCompanies("", 1)
+					switch {
+					case err != nil:
+						res.Error = err.Error()
+					case herr != nil:
+						res.Error = herr.Error()
+					case len(have) == 0:
+						res.Error = "нет списка компаний: сначала обнови источник companies"
+					case len(tickers) > 0:
+						res = f.Prices(fctx, rep, tickers, func(b []market.PriceBar) error { return s.storage.SaveStockPrices(b, now) })
 					}
 				} else if f.Companies != nil {
 					var list []market.Company
@@ -247,7 +266,56 @@ func (s *Server) HandleMarketCompanies(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, list)
 }
 
-// POST /api/market/sync[?source=<источник>[,<источник>…]; список источников:  nbu|ust|macro|fx|us|usecon|uscurve|usreal|usprices|usjobs|usact|usliq|uscredit|ez|gb|ch|jp|cn|ru|eg|pl|tr|no|se|ca|crypto|stocks|companies] — запустить опрос отдельно от «Разведать». Ответ сразу, ход и итог —
+// GET /api/market/stock?ticker=AAPL — компания из списка и её месячная история цен: [{"d":"2026-10-01","c":закрытие,"a":с дивидендами}].
+// Нет истории или она старше суток — подтягивается с Yahoo прямо сейчас (одна компания: доли секунды); Yahoo недоступен, а в кеше что-то есть — отдаётся то, что есть.
+// Тикер не из списка — 404: произвольные запросы к Yahoo через сервер не нужны.
+func (s *Server) HandleMarketStock(w http.ResponseWriter, r *http.Request) {
+	if !allow(w, r, http.MethodGet) {
+		return
+	}
+	ticker := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("ticker")))
+	if ticker == "" {
+		fail(w, http.StatusBadRequest, "ticker: тикер компании, например AAPL")
+		return
+	}
+	co, ok, err := s.storage.MarketCompany(ticker)
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	if !ok {
+		fail(w, http.StatusNotFound, "компании "+ticker+" нет в списке: обнови источник companies")
+		return
+	}
+	bars, at, err := s.storage.StockPrices(ticker)
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	now := time.Now().Unix()
+	if (len(bars) == 0 || now-at > int64(stockOnDemandAge/time.Second)) && s.mk.client != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), marketFeedTimeout)
+		fresh, ferr := s.mk.client.StockHistory(ctx, co.Ticker)
+		cancel()
+		switch {
+		case ferr == nil:
+			if err := s.storage.SaveStockPrices(fresh, now); err != nil {
+				failErr(w, err)
+				return
+			}
+			bars, at = fresh, now
+		case len(bars) == 0:
+			fail(w, http.StatusBadGateway, ferr.Error())
+			return
+		}
+	}
+	writeJSON(w, map[string]any{"company": co, "prices": bars, "fetched_at": at})
+}
+
+// stockOnDemandAge — насколько старой может быть история в кеше, чтобы страница компании не ходила за ней в Yahoo.
+const stockOnDemandAge = 24 * time.Hour
+
+// POST /api/market/sync[?source=<источник>[,<источник>…]; список источников:  nbu|ust|macro|fx|us|usecon|uscurve|usreal|usprices|usjobs|usact|usliq|uscredit|ez|gb|ch|jp|cn|ru|eg|pl|tr|no|se|ca|crypto|stocks|companies|stockprices] — запустить опрос отдельно от «Разведать». Ответ сразу, ход и итог —
 // в "market" из /api/sync/status. Уже идёт — 409.
 func (s *Server) HandleMarketSync(w http.ResponseWriter, r *http.Request) {
 	if !allow(w, r, http.MethodPost) {
@@ -259,7 +327,7 @@ func (s *Server) HandleMarketSync(w http.ResponseWriter, r *http.Request) {
 	}
 	src := strings.ToLower(r.URL.Query().Get("source"))
 	if !market.IsSources(src) {
-		fail(w, http.StatusBadRequest, "source: nbu, ust, macro, fx, us, usecon, uscurve, usreal, usprices, usjobs, usact, usliq, uscredit, ez, gb, ch, jp, cn, ru, eg, pl, tr, no, se, ca, commodities, world, chain, ppp, crypto, stocks или companies")
+		fail(w, http.StatusBadRequest, "source: nbu, ust, macro, fx, us, usecon, uscurve, usreal, usprices, usjobs, usact, usliq, uscredit, ez, gb, ch, jp, cn, ru, eg, pl, tr, no, se, ca, commodities, world, chain, ppp, crypto, stocks, companies или stockprices")
 		return
 	}
 	if !s.startMarket(s.marketContext(), src, false) {

@@ -21,7 +21,9 @@ type Feed struct {
 	Fetch    func(ctx context.Context, rep Reporter) ([]Security, Result)
 	// Companies — источник списка компаний (раздел «Акции»): третий вид после облигаций (Fetch) и числовых рядов (Series)
 	Companies func(ctx context.Context, rep Reporter) ([]Company, Result)
-	Series    func(ctx context.Context, rep Reporter) ([]SeriesPoint, Result)
+	// Prices — история цен акций: тикеры выбирает сервер (топ по капитализации, у кого история устарела), каждую историю отдаёт в save сразу
+	Prices func(ctx context.Context, rep Reporter, tickers []string, save func([]PriceBar) error) Result
+	Series func(ctx context.Context, rep Reporter) ([]SeriesPoint, Result)
 }
 
 // Catalog — какие ряды даёт каждый числовой источник: источник → id рядов, в порядке показа.
@@ -38,7 +40,7 @@ func (c *Client) Catalog() map[string][]string {
 // IsSource — известен ли такой источник (для ?source=… в маршрутах).
 func IsSource(id string) bool {
 	switch id {
-	case SourceNBU, SourceUST, SourceMacro, SourceFX, SourceUS, SourceUSEcon, SourceUSCurve, SourceUSReal, SourceUSPrices, SourceUSJobs, SourceUSAct, SourceUSLiq, SourceUSCredit, SourceEZ, SourceGB, SourceCH, SourceJP, SourceCN, SourceRU, SourceEG, SourcePL, SourceTR, SourceNO, SourceSE, SourceCA, SourceKR, SourceTW, SourceAU, SourceBR, SourceSA, SourceAE, SourceIR, SourceIN, SourceCommodities, SourceWorld, SourceChain, SourcePPP, SourceCrypto, SourceStocks, SourceCompanies:
+	case SourceNBU, SourceUST, SourceMacro, SourceFX, SourceUS, SourceUSEcon, SourceUSCurve, SourceUSReal, SourceUSPrices, SourceUSJobs, SourceUSAct, SourceUSLiq, SourceUSCredit, SourceEZ, SourceGB, SourceCH, SourceJP, SourceCN, SourceRU, SourceEG, SourcePL, SourceTR, SourceNO, SourceSE, SourceCA, SourceKR, SourceTW, SourceAU, SourceBR, SourceSA, SourceAE, SourceIR, SourceIN, SourceCommodities, SourceWorld, SourceChain, SourcePPP, SourceCrypto, SourceStocks, SourceCompanies, SourceStockPrices:
 		return true
 	}
 	return false
@@ -125,5 +127,6 @@ func (c *Client) Feeds() []Feed {
 		{ID: SourceCrypto, Title: "Крипто · Binance", Unit: "точек", Provides: []string{SerCryptoBTC, SerCryptoETH, SerCryptoBNB, SerCryptoSOL, SerCryptoFNG}, Series: c.Crypto},
 		{ID: SourceStocks, Title: "Биржа США · FRED", Unit: "точек", Provides: []string{SerStockSP500, SerStockNasdaq, SerStockDow}, Series: c.Stocks},
 		{ID: SourceCompanies, Title: "Акции: список компаний · Nasdaq, SEC", Unit: "компаний", Companies: c.Companies},
+		{ID: SourceStockPrices, Title: "Акции: история цен · Yahoo", Unit: "месяцев", Prices: c.StockPrices},
 	}
 }
