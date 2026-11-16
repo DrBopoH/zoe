@@ -1,4 +1,5 @@
 <script setup>
+import { dmy, numText } from '../utils/numfmt.js'
 import { computed } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
 import MarketHeader from '../components/MarketHeader.vue'
@@ -21,7 +22,7 @@ const u6 = computed(() => lastPoint(props.jobs.us_u6))
 const unrate = computed(() => lastPoint(props.jobs.us_unrate))
 const wages = computed(() => lastPoint(props.jobs.us_wages_yoy))
 const real = computed(() => realWageGrowth(props.jobs.us_wages_yoy, props.jobs.us_cpi_yoy))
-const num = (v) => String(Math.round(v * 10) / 10).replace('.', ',')
+const num = (v) => numText(v, 1)
 const has = computed(() => hasPoints(props.jobs))
 </script>
 
@@ -46,7 +47,7 @@ const has = computed(() => hasPoints(props.jobs))
 
     <MacroPanel title="Заявки на пособие по безработице (в неделю)" unit="чел." :series="jobs" :today="today" :ids="['us_claims']" :empty="EMPTY" hint="Колесо: масштаб, перетаскивание: сдвиг. Самый быстрый показатель рынка труда: растёт раньше остальных">
       <template #summary>
-        <span v-if="claims" class="text-slate-400">неделя {{ claims.d.split('-').reverse().join('.') }} <b class="tabular-nums text-amber-300">{{ unitText(claims.v, 'чел.') }}</b></span>
+        <span v-if="claims" class="text-slate-400">неделя {{ dmy(claims.d) }} <b class="tabular-nums text-amber-300">{{ unitText(claims.v, 'чел.') }}</b></span>
       </template>
     </MacroPanel>
 

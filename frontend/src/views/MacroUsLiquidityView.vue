@@ -1,4 +1,5 @@
 <script setup>
+import { dmy } from '../utils/numfmt.js'
 import { computed } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
 import MarketHeader from '../components/MarketHeader.vue'
@@ -13,7 +14,7 @@ const props = defineProps({
 })
 const { refresh } = useMarketRefresh(() => 'liquidity')
 const EMPTY = 'Нет данных. Нажми «Обновить»: подтянется ликвидность США из FRED'
-const dateOf = (p) => (p ? p.d.split('-').reverse().join('.') : '')
+const dateOf = (p) => (p ? dmy(p.d) : '')
 const monthOf = (p) => (p ? `${p.d.slice(5, 7)}.${p.d.slice(0, 4)}` : '')
 const net = computed(() => lastPoint(props.liquidity.us_netliq))
 const fedbs = computed(() => lastPoint(props.liquidity.us_fedbs))

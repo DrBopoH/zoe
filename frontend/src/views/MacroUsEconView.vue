@@ -1,4 +1,5 @@
 <script setup>
+import { numText } from '../utils/numfmt.js'
 import { computed } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
 import MarketHeader from '../components/MarketHeader.vue'
@@ -56,20 +57,20 @@ const has = computed(() => hasPoints(props.econ))
 
     <MacroPanel title="Кривая доходности: 10-летние минус 2-летние Treasury" unit="п. п." :series="econ" :today="today" :ids="['us_spread']" :empty="EMPTY" hint="Колесо: масштаб, перетаскивание: сдвиг. Ниже нуля кривая «инвертирована»">
       <template #summary>
-        <span v-if="spread" class="text-slate-400">Сейчас <b class="tabular-nums" :class="spread.v < 0 ? 'text-rose-400' : 'text-emerald-400'">{{ String(Math.round(spread.v * 100) / 100).replace('.', ',') }} п. п.</b></span>
+        <span v-if="spread" class="text-slate-400">Сейчас <b class="tabular-nums" :class="spread.v < 0 ? 'text-rose-400' : 'text-emerald-400'">{{ numText(spread.v, 2) }} п. п.</b></span>
         <span v-if="curve" class="text-slate-500">кривая {{ CURVE_TEXT[curve] }}</span>
       </template>
     </MacroPanel>
 
     <MacroPanel title="VIX: индекс страха рынка акций" unit="п." :series="econ" :today="today" :ids="['us_vix']" :empty="EMPTY" hint="Колесо: масштаб, перетаскивание: сдвиг. До 20 спокойно, 20–30 тревожно, выше 30 паника">
       <template #summary>
-        <span v-if="vix" class="text-slate-400">Сейчас <b class="tabular-nums" :class="vixColor">{{ String(Math.round(vix.v * 10) / 10).replace('.', ',') }}</b><span class="text-slate-600"> · {{ vixWord }}</span></span>
+        <span v-if="vix" class="text-slate-400">Сейчас <b class="tabular-nums" :class="vixColor">{{ numText(vix.v, 1) }}</b><span class="text-slate-600"> · {{ vixWord }}</span></span>
       </template>
     </MacroPanel>
 
     <MacroPanel title="Настроения потребителей (Мичиган)" unit="п." :series="econ" :today="today" :ids="['us_sentiment']" :empty="EMPTY" hint="Колесо: масштаб, перетаскивание: сдвиг. Индекс: чем выше, тем оптимистичнее люди">
       <template #summary>
-        <span v-if="sentiment" class="text-slate-400">{{ monthOf(sentiment) }} <b class="tabular-nums" :class="sentimentColor">{{ String(Math.round(sentiment.v * 10) / 10).replace('.', ',') }}</b></span>
+        <span v-if="sentiment" class="text-slate-400">{{ monthOf(sentiment) }} <b class="tabular-nums" :class="sentimentColor">{{ numText(sentiment.v, 1) }}</b></span>
       </template>
     </MacroPanel>
 

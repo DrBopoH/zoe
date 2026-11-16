@@ -1,4 +1,5 @@
 <script setup>
+import { numText } from '../utils/numfmt.js'
 import { ref, computed, watch, onMounted } from 'vue'
 import MarketHeader from '../components/MarketHeader.vue'
 import GrowthChart from '../components/GrowthChart.vue'
@@ -182,7 +183,7 @@ const TIER_CLASS = {
   top100: 'text-slate-300 border-slate-500/60 bg-slate-500/10'
 }
 const f2 = (x) => (Math.round(x * 100) / 100).toFixed(2).replace(/0$/, '').replace(/\.$/, '').replace('.', ',')
-const f1 = (x) => String(Math.round(x * 10) / 10).replace('.', ',')
+const f1 = (x) => numText(x, 1)
 const scoreTitle = (sc) => `Коэффициент ${Math.round(sc.score)} %. Рост капитала ≈ ${f1(sc.growth)} % годовых за ${HORIZON_YEARS} лет: ставка ${f1(sc.rate)} % на ${f1(sc.years)} г., дальше под ${f1(sc.base)} % (осторожная база ${sc.currency}: нижняя четверть ставок). Место ${sc.rank} среди ${sc.currency}. Вложение ${moneyText(amountN.value, sc.currency)}: к погашению ${moneyText(amountN.value * sc.multipleT, sc.currency)}, за ${HORIZON_YEARS} лет ${moneyText(amountN.value * sc.multipleH, sc.currency)}`
 </script>
 

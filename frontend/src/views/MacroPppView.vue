@@ -1,4 +1,5 @@
 <script setup>
+import { fixedText, intText } from '../utils/numfmt.js'
 import { computed, ref } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
 import MarketHeader from '../components/MarketHeader.vue'
@@ -47,8 +48,8 @@ const lastYear = computed(() => {
   return d ? d.slice(0, 4) : null
 })
 
-const money = (v, s = sym.value) => (v === null || v === undefined || !isFinite(v) ? '—' : `${Math.round(v).toLocaleString('ru-RU')} ${s}`)
-const num = (v, d = 2) => (v === null || v === undefined || !isFinite(v) ? '—' : v.toFixed(d).replace('.', ','))
+const money = (v, s = sym.value) => (v === null || v === undefined || !isFinite(v) ? '—' : `${intText(v)} ${s}`)
+const num = (v, d = 2) => (v === null || v === undefined || !isFinite(v) ? '—' : fixedText(v, d))
 const tone = (v) => (v === null ? 'text-slate-500' : v >= 0 ? 'text-emerald-400' : 'text-rose-400')
 </script>
 
@@ -93,8 +94,8 @@ const tone = (v) => (v === null ? 'text-slate-500' : v >= 0 ? 'text-emerald-400'
             <td class="px-3 py-1.5 text-slate-300">{{ r.name }}</td>
             <td class="px-2 text-right text-slate-100">{{ num(r.level) }}</td>
             <td class="px-2 text-right" :class="tone(r.dev)">{{ r.dev === null ? '—' : signedPct(r.dev) }}</td>
-            <td class="px-2 text-right text-slate-300">{{ r.gdpPpp === null ? '—' : Math.round(r.gdpPpp).toLocaleString('ru-RU') }}</td>
-            <td class="px-3 text-right text-slate-300">{{ r.gdpNom === null ? '—' : Math.round(r.gdpNom).toLocaleString('ru-RU') }}</td>
+            <td class="px-2 text-right text-slate-300">{{ r.gdpPpp === null ? '—' : intText(r.gdpPpp) }}</td>
+            <td class="px-3 text-right text-slate-300">{{ r.gdpNom === null ? '—' : intText(r.gdpNom) }}</td>
           </tr>
         </tbody>
       </table>
@@ -112,7 +113,7 @@ const tone = (v) => (v === null ? 'text-slate-500' : v >= 0 ? 'text-emerald-400'
             <td class="px-3 py-1.5 text-slate-300">{{ r.name }} <span class="text-slate-600">{{ r.date ? dateOf(r.date) : '' }}</span></td>
             <td class="px-2 text-right text-slate-100">{{ num(r.price) }}</td>
             <td class="px-2 text-right" :class="tone(r.raw)">{{ r.raw === null ? '—' : signedPct(r.raw) }}</td>
-            <td class="px-3 text-right text-slate-300">{{ r.perMonth === null ? '—' : Math.round(r.perMonth).toLocaleString('ru-RU') }}</td>
+            <td class="px-3 text-right text-slate-300">{{ r.perMonth === null ? '—' : intText(r.perMonth) }}</td>
           </tr>
         </tbody>
       </table>

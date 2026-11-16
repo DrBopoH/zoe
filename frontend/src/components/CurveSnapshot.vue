@@ -1,4 +1,5 @@
 <script setup>
+import { dmy } from '../utils/numfmt.js'
 import { computed } from 'vue'
 import { curveSnapshot, curveChart, lastPoint, plainPct } from '../utils/macro.js'
 
@@ -29,7 +30,7 @@ const tenYears = (s) => s.points.find((p) => p.id === 'ust_10y')?.v ?? null
         <i class="inline-block w-3 h-0.5 rounded" :style="{ backgroundColor: s.color }"></i>{{ s.label }}
         <b v-if="tenYears(s) !== null" class="tabular-nums text-slate-300" title="10 лет">{{ plainPct(tenYears(s)) }}</b>
       </span>
-      <span v-if="asOf" class="ml-auto text-slate-600">последняя точка {{ asOf.split('-').reverse().join('.') }}</span>
+      <span v-if="asOf" class="ml-auto text-slate-600">последняя точка {{ dmy(asOf) }}</span>
     </div>
     <p v-if="chart.empty" class="text-xs text-slate-500">Нет данных. Нажми «Обновить»: подтянется кривая доходности Treasury из FRED</p>
     <svg v-else :viewBox="`0 0 ${chart.width} ${chart.height}`" class="w-full h-auto" role="img" aria-label="Кривая доходности Treasury">

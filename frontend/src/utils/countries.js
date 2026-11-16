@@ -1,4 +1,5 @@
 import { lastPoint, plainPct, unitText } from './macro.js'
+import { numText } from './numfmt.js'
 
 // Показатели карточки страны в порядке показа. Какой ряд за какой показатель отвечает у страны, решает сервер (реестр стран в /api/macro/catalog):
 // здесь только подписи и единицы. Нет показателя у страны — строки в карточке нет.
@@ -26,7 +27,7 @@ export const COUNTRY_PANELS = {
   ]
 }
 
-const money = (v) => `${String(Math.round(v * 100) / 100).replace('.', ',')} ₴`
+const money = (v) => `${numText(v, 2)} ₴`
 
 // Все id рядов, нужные карточкам стран (без повторов): по ним читается кеш одним запросом
 export const countryIds = (countries) => [...new Set((countries || []).flatMap((c) => [...Object.values(c.metrics || {}), ...(COUNTRY_PANELS[c.cc] || []).flatMap((p) => p.ids)]))]

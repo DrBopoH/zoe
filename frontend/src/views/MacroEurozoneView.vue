@@ -1,4 +1,5 @@
 <script setup>
+import { numText } from '../utils/numfmt.js'
 import { computed } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
 import MarketHeader from '../components/MarketHeader.vue'
@@ -85,7 +86,7 @@ const members = computed(() => ({ cpi: lasts(MEMBER_CPI), u: lasts(MEMBER_U), y1
 
     <MacroPanel title="Спред к Германии (10 лет)" unit="п. п." :series="ez" :today="today" :ids="SPREADS" :empty="EMPTY" hint="Колесо: масштаб, перетаскивание: сдвиг. Разница доходностей со страной Bund — плата за риск страны внутри еврозоны">
       <template #summary>
-        <span v-for="r in members.spread" :key="r.id" class="text-slate-400">{{ r.label }} <b class="tabular-nums" :style="{ color: r.color }">{{ String(Math.round(r.p.v * 100) / 100).replace('.', ',') }} п. п.</b></span>
+        <span v-for="r in members.spread" :key="r.id" class="text-slate-400">{{ r.label }} <b class="tabular-nums" :style="{ color: r.color }">{{ numText(r.p.v, 2) }} п. п.</b></span>
       </template>
     </MacroPanel>
 

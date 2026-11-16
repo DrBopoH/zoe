@@ -1,4 +1,5 @@
 <script setup>
+import { dmy } from '../utils/numfmt.js'
 import { ref, inject, computed, watch } from 'vue'
 import { apiGetJson, apiSend, q } from '../utils/api.js'
 import UiButton from './ui/UiButton.vue'
@@ -76,7 +77,7 @@ const save = () => run(async () => {
 })
 const remove = (b) => run(() => apiSend('DELETE', `/icu/bonds?isin=${q(b.isin)}`))
 
-const fmtDate = (iso) => iso.split('-').reverse().join('.')
+const fmtDate = (iso) => dmy(iso)
 </script>
 
 <template>

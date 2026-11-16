@@ -1,6 +1,7 @@
 // Таблица «Рынок»: фильтр, сортировка и подписи. Чистые функции над списком из /market/bonds.
 import { isoToText } from './dateText.js'
 import { curSym } from './formatters.js'
+import { numText } from './numfmt.js'
 
 export const SOURCES = [
   { key: 'nbu', label: 'ОВДП', icon: 'bond', title: 'ОВДП · НБУ', idLabel: 'ISIN' },
@@ -163,7 +164,7 @@ export function sortBonds(list, key, dir = 'asc') {
 export const currenciesOf = (list) => [...new Set((list || []).map((b) => b.currency).filter(Boolean))].sort()
 
 // Округление до сотых: доходность приходит дробью, иначе в ячейке 15,299999999999999
-const pct = (v) => (v > 0 ? `${String(Math.round(v * 100) / 100).replace('.', ',')} %` : '—')
+const pct = (v) => (v > 0 ? `${numText(v, 2)} %` : '—')
 
 // Подписи ячеек одной строки
 export function bondCells(b) {

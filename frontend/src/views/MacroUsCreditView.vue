@@ -1,4 +1,5 @@
 <script setup>
+import { numText } from '../utils/numfmt.js'
 import { computed } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
 import MarketHeader from '../components/MarketHeader.vue'
@@ -13,7 +14,7 @@ const props = defineProps({
 })
 const { refresh } = useMarketRefresh(() => 'credit')
 const EMPTY = 'Нет данных. Нажми «Обновить»: подтянутся кредит и доллар США из FRED'
-const num = (v) => String(Math.round(v * 100) / 100).replace('.', ',')
+const num = (v) => numText(v, 2)
 const hy = computed(() => lastPoint(props.credit.us_hy))
 const ig = computed(() => lastPoint(props.credit.us_ig))
 const level = computed(() => creditLevel(hy.value?.v))
