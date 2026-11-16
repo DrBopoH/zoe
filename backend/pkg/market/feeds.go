@@ -1,6 +1,9 @@
 package market
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 // Feed — один источник рыночных данных как самостоятельный процесс: свой id, своё название, свой итог.
 // Новый источник (ключевая ставка, депозитные сертификаты НБУ, ФРС, инфляция) — ещё одна запись в Feeds,
@@ -37,6 +40,27 @@ func IsSource(id string) bool {
 		return true
 	}
 	return false
+}
+
+// SplitSources разбирает ?source=a,b,c: пустой ответ — все источники (nil), пробелы и регистр не важны.
+func SplitSources(q string) []string {
+	var out []string
+	for _, id := range strings.Split(q, ",") {
+		if id = strings.ToLower(strings.TrimSpace(id)); id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// IsSources — известны ли все источники списка «a,b,c» (пустой список — да: «все»).
+func IsSources(q string) bool {
+	for _, id := range SplitSources(q) {
+		if !IsSource(id) {
+			return false
+		}
+	}
+	return true
 }
 
 // Reporter — ход долгого источника: процент 0..100 и короткая заметка («аукционы: 10.11»). nil допустим.

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -72,7 +73,7 @@ func (s *Server) marketSnapshot() map[string]any {
 	return map[string]any{"running": m.running, "started_at": m.startedAt, "feeds": feeds, "last": m.last}
 }
 
-// startMarket запускает опрос в фоне. only — один источник (пусто — все). false: клиента нет или опрос уже идёт.
+// startMarket запускает опрос в фоне. only — один источник или несколько через запятую (пусто — все). false: клиента нет или опрос уже идёт.
 // ctx отменяет опрос (сброс кеша); недописанное после отмены в кеш не попадает.
 // quiet — опрос по расписанию: итог не сохраняется в last и статус его не показывает.
 func (s *Server) startMarket(ctx context.Context, only string, quiet bool) bool {
@@ -81,8 +82,9 @@ func (s *Server) startMarket(ctx context.Context, only string, quiet bool) bool 
 		return false
 	}
 	var feeds []market.Feed
+	want := market.SplitSources(only)
 	for _, f := range m.client.Feeds() {
-		if only == "" || only == f.ID {
+		if len(want) == 0 || slices.Contains(want, f.ID) {
 			feeds = append(feeds, f)
 		}
 	}
@@ -214,7 +216,7 @@ func (s *Server) HandleMarketBonds(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, list)
 }
 
-// POST /api/market/sync[?source=nbu|ust|macro|fx|us|usecon|uscurve|usreal|usprices|usjobs|usact|usliq|uscredit|ez|gb|ch|jp|cn|ru|eg|pl|tr|no|se|ca|crypto|stocks] — запустить опрос отдельно от «Разведать». Ответ сразу, ход и итог —
+// POST /api/market/sync[?source=<источник>[,<источник>…]; список источников:  nbu|ust|macro|fx|us|usecon|uscurve|usreal|usprices|usjobs|usact|usliq|uscredit|ez|gb|ch|jp|cn|ru|eg|pl|tr|no|se|ca|crypto|stocks] — запустить опрос отдельно от «Разведать». Ответ сразу, ход и итог —
 // в "market" из /api/sync/status. Уже идёт — 409.
 func (s *Server) HandleMarketSync(w http.ResponseWriter, r *http.Request) {
 	if !allow(w, r, http.MethodPost) {
@@ -225,7 +227,7 @@ func (s *Server) HandleMarketSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	src := strings.ToLower(r.URL.Query().Get("source"))
-	if src != "" && !market.IsSource(src) {
+	if !market.IsSources(src) {
 		fail(w, http.StatusBadRequest, "source: nbu, ust, macro, fx, us, usecon, uscurve, usreal, usprices, usjobs, usact, usliq, uscredit, ez, gb, ch, jp, cn, ru, eg, pl, tr, no, se, ca, commodities, world, chain, ppp, crypto или stocks")
 		return
 	}
@@ -356,7 +358,7 @@ func (s *Server) HandleMacroCatalog(w http.ResponseWriter, r *http.Request) {
 	if c := s.mk.client; c != nil {
 		feeds = c.Catalog()
 	}
-	writeJSON(w, map[string]any{"feeds": feeds, "countries": market.Countries()})
+	writeJSON(w, map[string]any{"feeds": feeds, "countries": market.WithSources(market.Countries(), feeds)})
 }
 
 // GET /api/macro/sources — здоровье источников: что обещает каждый, что лежит в кеше, когда обновлялось, какие ряды устарели, последняя ошибка.
