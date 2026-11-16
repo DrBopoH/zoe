@@ -15,12 +15,14 @@ export const WORLD_INDICES = [
   { id: 'wm_cn', label: 'Китай', group: 'other' },
   { id: 'wm_kr', label: 'Южная Корея', group: 'other' },
   { id: 'wm_tw', label: 'Тайвань', group: 'other' },
+  { id: 'wm_au', label: 'Австралия', group: 'other' },
+  { id: 'wm_br', label: 'Бразилия', group: 'other' },
   { id: 'wm_tr', label: 'Турция (в лирах)', group: 'turkey' }
 ]
 
 export const WORLD_GROUPS = [
   { key: 'developed', title: 'Развитые рынки', hint: 'Индексы ОЭСР, 2015 = 100: можно сравнивать между странами. Колесо: масштаб, перетаскивание: сдвиг' },
-  { key: 'other', title: 'Север, Польша и Азия', hint: 'Индексы ОЭСР и Yahoo (Корея, Тайвань), 2015 = 100, в местной валюте' },
+  { key: 'other', title: 'Остальные страны', hint: 'Индексы ОЭСР и Yahoo (Корея, Тайвань, Австралия, Бразилия), 2015 = 100, в местной валюте' },
   { key: 'turkey', title: 'Турция (в лирах, шкала логарифмическая)', hint: 'Индекс в лирах: большую часть роста съела инфляция, поэтому шкала логарифмическая и отдельная', log: true }
 ]
 
