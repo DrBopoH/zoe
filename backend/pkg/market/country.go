@@ -4,7 +4,7 @@ package market
 // Страны еврозоны по отдельности сюда не входят: еврозона — одна карточка «ez», сравнение стран-членов лежит внутри раздела «Еврозона» (ezm.go).
 // Новая страна = одна запись здесь + её источник в Feeds; фронт, каталог и тесты ничего больше не требуют.
 // Показатели: policy — ключевая ставка, cpi — инфляция, cpi_core — базовая, u — безработица, gdp — рост ВВП, y10 — доходность 10-летних,
-// fx — курс валюты к гривне (если есть у НБУ).
+// fx — курс валюты к гривне (если есть у НБУ), reer — реальный эффективный курс, stock — индекс акций страны (2015 = 100), если его опрашивает источник страны.
 type Country struct {
 	CC       string            `json:"cc"`
 	Name     string            `json:"name"`
@@ -45,8 +45,8 @@ func Countries() []Country {
 		{CC: "ca", Name: "Канада", Currency: "CAD", Source: SourceCA, Metrics: map[string]string{
 			"policy": SerCAPolicy, "cpi": SerCACPI, "u": SerCAUnrate, "y10": SerCAY10, "fx": SerCADUAH, "reer": SerREER("ca")}},
 		{CC: "kr", Name: "Южная Корея", Currency: "KRW", Source: SourceKR, Metrics: map[string]string{
-			"policy": SerKRPolicy, "cpi": SerKRCPI, "reer": SerREER("kr")}},
+			"policy": SerKRPolicy, "cpi": SerKRCPI, "reer": SerREER("kr"), "stock": SerWM("kr")}},
 		{CC: "tw", Name: "Тайвань", Currency: "TWD", Source: SourceTW, Metrics: map[string]string{
-			"reer": SerREER("tw")}},
+			"reer": SerREER("tw"), "stock": SerWM("tw")}},
 	}
 }
