@@ -32,6 +32,8 @@ const (
 	SerSEKUAH = "sek_uah" // гривен за 1 шведскую крону
 	SerCADUAH = "cad_uah" // гривен за 1 канадский доллар
 	SerAUDUAH = "aud_uah" // гривен за 1 австралийский доллар
+	SerAEDUAH = "aed_uah" // гривен за 1 дирхам ОАЭ
+	SerSARUAH = "sar_uah" // гривен за 1 саудовский риял
 
 	fxFirstYear = 1996
 	fxWindow    = 10
@@ -59,6 +61,8 @@ var fxCodes = []struct{ code, series string }{
 	{"sek", SerSEKUAH},
 	{"cad", SerCADUAH},
 	{"aud", SerAUDUAH},
+	{"aed", SerAEDUAH},
+	{"sar", SerSARUAH},
 }
 
 // FXNBU — курсы USD, EUR и золота к гривне за всю историю. Сбой одного ряда не убивает остальные: что скачалось — возвращается.

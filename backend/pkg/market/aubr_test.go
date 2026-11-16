@@ -25,6 +25,12 @@ func aubrServer(t *testing.T, failSub string) *httptest.Server {
 			w.Write([]byte("observation_date,X\n2026-07-01,4.0\n2026-08-01,4.1\n"))
 		case strings.Contains(p, "IRLTLT01"):
 			w.Write([]byte("observation_date,X\n2026-08-01,4.3\n2026-09-01,4.4\n"))
+		case strings.Contains(p, "TASI"):
+			w.Write([]byte(yahooJSON(2600)))
+		case strings.Contains(p, "DFMGI"):
+			w.Write([]byte(yahooJSON(2400)))
+		case strings.Contains(p, "FP.CPI.TOTL.ZG"):
+			w.Write([]byte(`[{"page":1,"pages":1,"per_page":200,"total":3},[{"date":"2024","value":32.5},{"date":"2023","value":44.6},{"date":"2022","value":null}]]`))
 		case strings.Contains(p, "WS_CBPOL"):
 			w.Write([]byte(ezCSV + "x,M,2026-08,3.6,A\nx,M,2026-09,3.6,A\nx,M,2026-10,3.85,A\n"))
 		case strings.Contains(p, "WS_LONG_CPI"):

@@ -72,7 +72,7 @@ test('карточка Турции без доходности 10 лет: ст�
 
 test('у рядов Норвегии, Швеции и Канады и курсов их валют есть подпись и цвет', () => {
   for (const cc of ['no', 'se', 'ca']) for (const k of ['policy', 'cpi', 'u', 'y10']) assert.ok(SERIES[`${cc}_${k}`]?.label && SERIES[`${cc}_${k}`]?.color, `${cc}_${k}`)
-  for (const id of ['nok_uah', 'sek_uah', 'cad_uah', 'aud_uah']) assert.ok(SERIES[id]?.label && SERIES[id]?.color, id)
+  for (const id of ['nok_uah', 'sek_uah', 'cad_uah', 'aud_uah', 'sar_uah', 'aed_uah']) assert.ok(SERIES[id]?.label && SERIES[id]?.color, id)
 })
 
 test('карточка Украины: резервы в млрд долларов и рост M3 в процентах', () => {

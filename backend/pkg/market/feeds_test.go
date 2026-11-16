@@ -19,7 +19,7 @@ func TestCatalogIsConsistent(t *testing.T) {
 		}
 	}
 	cat := c.Catalog()
-	if len(cat) != 33 || len(cat["fx"]) != 34 || cat["fx"][0] != SerUSDUAH || len(cat["macro"]) != 27 || len(cat["commodities"]) != 14 || len(cat["world"]) != 15 || len(cat["chain"]) != 14 || len(cat["ppp"]) != 123 {
+	if len(cat) != 36 || len(cat["fx"]) != 38 || cat["fx"][0] != SerUSDUAH || len(cat["macro"]) != 27 || len(cat["commodities"]) != 14 || len(cat["world"]) != 15 || len(cat["chain"]) != 14 || len(cat["ppp"]) != 137 {
 		t.Fatalf("каталог: %v", cat)
 	}
 	if _, ok := cat["nbu"]; ok {
