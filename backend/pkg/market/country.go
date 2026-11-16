@@ -54,7 +54,7 @@ func Countries() []Country {
 		{CC: "au", Name: "Австралия", Currency: "AUD", Source: SourceAU, Metrics: map[string]string{
 			"policy": SerAUPolicy, "cpi": SerAUCPI, "u": SerAUUnrate, "y10": SerAUY10, "fx": SerAUDUAH, "reer": SerREER("au"), "stock": SerWM("au")}},
 		{CC: "br", Name: "Бразилия", Currency: "BRL", Source: SourceBR, Metrics: map[string]string{
-			"policy": SerBRPolicy, "cpi": SerBRCPI, "y10": SerBRY10, "reer": SerREER("br"), "stock": SerWM("br")}},
+			"policy": SerBRPolicy, "cpi": SerBRCPI, "reer": SerREER("br"), "stock": SerWM("br")}},
 		{CC: "tw", Name: "Тайвань", Currency: "TWD", Source: SourceTW, Metrics: map[string]string{
 			"reer": SerREER("tw"), "stock": SerWM("tw")}},
 	}

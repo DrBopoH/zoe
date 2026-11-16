@@ -4,7 +4,7 @@ import "context"
 
 // Пакеты Австралии и Бразилии. Источники подтверждены зондом Дока 16.11.2026 (probe5).
 // BIS: ставка (WS_CBPOL), инфляция (WS_LONG_CPI), реальный курс (общий список reer.go). Индексы ASX 200 и Bovespa — Yahoo (krtw.go, среднее 2015 = 100).
-// Доходность 10 лет и безработица Австралии, доходность Бразилии — FRED, зеркало ОЭСР (из приложения, зондом не проверялись: FRED из зонда не отвечает).
+// Доходность 10 лет и безработица Австралии — FRED, зеркало ОЭСР (зондом не проверялись: FRED из зонда не отвечает). Доходности Бразилии в FRED нет (IRLTLT01BRM156N — HTTP 404), безработицы Бразилии тоже не берём.
 // Курс к гривне: у НБУ есть австралийский доллар (общий источник курсов), бразильского реала в его списке нет.
 const (
 	SourceAU = "au"
@@ -16,12 +16,11 @@ const (
 	SerAUY10    = "au_y10"    // доходность 10 лет, %, помесячно (FRED, зеркало ОЭСР)
 	SerBRPolicy = "br_policy" // ставка Selic (BIS), % — только даты смены значения
 	SerBRCPI    = "br_cpi"    // инфляция CPI г/г, % (BIS)
-	SerBRY10    = "br_y10"    // доходность 10 лет, %, помесячно (FRED, зеркало ОЭСР)
 )
 
 var (
 	auSeries = []string{SerAUPolicy, SerAUCPI, SerAUUnrate, SerAUY10, SerWM("au")}
-	brSeries = []string{SerBRPolicy, SerBRCPI, SerBRY10, SerWM("br")}
+	brSeries = []string{SerBRPolicy, SerBRCPI, SerWM("br")}
 )
 
 // Australia — ряды Австралии. Сбой части (FRED, BIS, Yahoo) и отдельного ряда не трогает остальное.
@@ -34,9 +33,7 @@ func (c *Client) Australia(ctx context.Context, rep Reporter) ([]SeriesPoint, Re
 
 // Brazil — ряды Бразилии.
 func (c *Client) Brazil(ctx context.Context, rep Reporter) ([]SeriesPoint, Result) {
-	return c.countryPack(ctx, rep, SourceBR, "^BVSP", SerWM("br"), []fredSeries{
-		{"IRLTLT01BRM156N", SerBRY10, "доходность 10 лет Бразилии"},
-	}, bisPolicy(SerBRPolicy, "BR"), bisCPIJob(SerBRCPI, "BR"))
+	return c.countryPack(ctx, rep, SourceBR, "^BVSP", SerWM("br"), nil, bisPolicy(SerBRPolicy, "BR"), bisCPIJob(SerBRCPI, "BR"))
 }
 
 // countryPack — пакет страны из трёх частей: FRED, BIS (ставка, инфляция) и индекс биржи с Yahoo. Часть без адреса источника пропускается.
