@@ -34,6 +34,7 @@ const (
 	SerAUDUAH = "aud_uah" // гривен за 1 австралийский доллар
 	SerAEDUAH = "aed_uah" // гривен за 1 дирхам ОАЭ
 	SerSARUAH = "sar_uah" // гривен за 1 саудовский риял
+	SerINRUAH = "inr_uah" // гривен за 1 индийскую рупию
 
 	fxFirstYear = 1996
 	fxWindow    = 10
@@ -63,6 +64,7 @@ var fxCodes = []struct{ code, series string }{
 	{"aud", SerAUDUAH},
 	{"aed", SerAEDUAH},
 	{"sar", SerSARUAH},
+	{"inr", SerINRUAH},
 }
 
 // FXNBU — курсы USD, EUR и золота к гривне за всю историю. Сбой одного ряда не убивает остальные: что скачалось — возвращается.

@@ -25,6 +25,8 @@ func aubrServer(t *testing.T, failSub string) *httptest.Server {
 			w.Write([]byte("observation_date,X\n2026-07-01,4.0\n2026-08-01,4.1\n"))
 		case strings.Contains(p, "IRLTLT01"):
 			w.Write([]byte("observation_date,X\n2026-08-01,4.3\n2026-09-01,4.4\n"))
+		case strings.Contains(p, "BSESN"):
+			w.Write([]byte(yahooJSON(2800)))
 		case strings.Contains(p, "TASI"):
 			w.Write([]byte(yahooJSON(2600)))
 		case strings.Contains(p, "DFMGI"):
