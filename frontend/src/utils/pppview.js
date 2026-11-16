@@ -33,8 +33,11 @@ export const cpiPoints = (series, cc) => (cc === 'us' ? series?.ppp_us_cpi : ser
 export const convPoints = (series, cc) => series?.[`ppp_conv_${base(cc)}`] || []
 export const fxPoints = (series, cc) => series?.[`ppp_fx_${cc}`] || []
 
-// Окно: сколько лет назад (от года today), точка отсчёта — 1 июля того года (на неё приходится годовая точка Всемирного банка)
+// Окно страницы — вся история страны: от первой точки её индекса цен (у каждой страны своя, поэтому линии разной длины не обрываются).
+// startIso нужен только блоку «реальная доходность вклада»: там окно — последние N лет, и у короткого ряда оно сужается до начала данных.
+export const firstDate = (points) => points?.[0]?.d || null
 export const startIso = (today, years) => `${Number(today.slice(0, 4)) - years}-07-01`
+export const yearsBetween = (from, to) => (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / (365.25 * 86400000)
 
 // Темп инфляции для продолжения индекса после последней годовой точки: у Украины — текущая годовая инфляция НБУ (cpi_yoy), у остальных — по их же ряду
 export function growthOf(cc, macro) {
@@ -52,6 +55,7 @@ function powerSeries(points, from, today, growth) {
     const d = `${y}-${m}-01`
     if (d >= from && d <= today) dates.push(d)
   }
+  if (dates[0] !== from) dates.unshift(from)
   if (dates[dates.length - 1] !== today) dates.push(today)
   for (const d of dates) {
     const pp = purchasingPower(points, from, d, growth)
@@ -61,23 +65,36 @@ function powerSeries(points, from, today, growth) {
 }
 
 /**
- * Что происходит с деньгами страны за окно: сумма тогда и сегодня в ценах другой даты, накопленная и среднегодовая инфляция,
- * ряд покупательной способности и реальный курс к доллару. series — ряды источника ppp, macro — ряды НБУ (для темпа Украины).
+ * Что происходит с деньгами страны за всю историю её индекса цен: сумма тогда и сегодня в ценах другой даты, накопленная и среднегодовая инфляция,
+ * ряд покупательной способности и реальный курс к доллару. series — ряды источника ppp, macro — ряды НБУ (для темпа Украины после последнего года).
+ * Реальный курс считается от даты, с которой есть и курс, и цены страны, и цены США (у курса история может быть короче цен).
  */
-export function pppModel({ series, macro, cc, years, today, amount = 1000 }) {
-  const from = startIso(today, years)
+export function pppModel({ series, macro, cc, today, amount = 1000 }) {
   const points = cpiPoints(series, cc)
+  const from = firstDate(points)
+  if (!from) return { from: null, years: 0, pp: null, needNow: null, worthThen: null, power: [], rer: [] }
   const growth = growthOf(cc, macro)
   const pp = purchasingPower(points, from, today, growth)
   const power = powerSeries(points, from, today, growth)
-  const rer = cc === 'us' ? [] : realRateIndex(fxPoints(series, cc), points, cpiPoints(series, 'us'), from)
+  const fx = fxPoints(series, cc), us = cpiPoints(series, 'us')
+  const rerFrom = [from, firstDate(fx), firstDate(us)].reduce((m, d) => (d && d > m ? d : m), from)
+  const rer = cc === 'us' || !firstDate(fx) || !firstDate(us) ? [] : realRateIndex(fx, points, us, rerFrom)
   return {
-    from, pp,
+    from, years: yearsBetween(from, today), pp,
     // сколько стоила бы сегодня корзина, которая тогда стоила amount, и сколько тогда стоило бы то, что amount покупает сегодня
     needNow: pp ? amount * (1 + pp.inflation / 100) : null,
     worthThen: pp ? amount * pp.ratio : null,
     power, rer
   }
+}
+
+/** Инфляция за последние years лет: окно сужается до начала данных, если ряд короче. { pp, years } — years фактическое окно. */
+export function trailingInflation({ series, macro, cc, years, today }) {
+  const points = cpiPoints(series, cc)
+  const first = firstDate(points)
+  if (!first) return { pp: null, years: 0 }
+  const from = [startIso(today, years), first].reduce((m, d) => (d > m ? d : m))
+  return { pp: purchasingPower(points, from, today, growthOf(cc, macro)), years: yearsBetween(from, today) }
 }
 
 /** Таблица стран: уровень цен относительно США, отклонение от PPP, доход на душу (PPP и номинальный). Последний год данных, отсортировано по уровню цен (дорогие сверху). */
