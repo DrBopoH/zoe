@@ -54,6 +54,20 @@ func main() {
 	server.SetBinance(binance.NewClient())
 	// Облигации: ОВДП и US Treasury из публичных API, обновление только по запросу
 	server.SetMarket(market.NewClient())
+	// Снимки крипто-контура (P2P-цена, комиссии сетей, доминация) копятся сами раз в MARKET_EVERY (по умолчанию час; 0 — выключено)
+	every := market.TickEvery
+	if v := os.Getenv("MARKET_EVERY"); v != "" {
+		if v == "0" {
+			every = 0
+		} else if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			every = d
+		} else {
+			log.Printf("WARNING: MARKET_EVERY=%q не разобрать (пример: 1h, 30m, 0), используется %s", v, every)
+		}
+	}
+	scheduleCtx, stopSchedule := context.WithCancel(context.Background())
+	defer stopSchedule()
+	go server.RunMarketSchedule(scheduleCtx, every)
 	if o := os.Getenv("ALLOWED_ORIGINS"); o != "" {
 		server.SetAllowedOrigins(strings.Split(o, ","))
 	}

@@ -11,6 +11,7 @@ import (
 
 	"economic/pkg/db"
 	"economic/pkg/market"
+	"economic/pkg/source"
 )
 
 func newMarketServer(t *testing.T, usUp bool) *Server {
@@ -307,5 +308,42 @@ func TestMacroSourcesHealth(t *testing.T) {
 	s.SetMarket(nil)
 	if code, body := call(t, s.HandleMacroSources, http.MethodGet, "/api/macro/sources", ""); code != 200 || !strings.Contains(string(body), `"feeds":[]`) {
 		t.Fatalf("без клиента: %d %s", code, body)
+	}
+}
+
+func TestMacroTicksEndpoint(t *testing.T) {
+	s := newMarketServer(t, true)
+	if code, _ := call(t, s.HandleMacroTicks, http.MethodPost, "/api/macro/ticks?series=p2p_ask", ""); code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST: %d", code)
+	}
+	if code, _ := call(t, s.HandleMacroTicks, http.MethodGet, "/api/macro/ticks?series=us_vix", ""); code != http.StatusBadRequest {
+		t.Fatalf("обычный ряд — не снимок: %d", code)
+	}
+	if code, _ := call(t, s.HandleMacroTicks, http.MethodGet, "/api/macro/ticks?series=p2p_ask&since=abc", ""); code != http.StatusBadRequest {
+		t.Fatalf("since: %d", code)
+	}
+	t.Setenv("ECONOMIC_SOURCES_DIR", t.TempDir())
+	slot := int64(1_800_000_000 - 1_800_000_000%3600)
+	if err := store().AppendTicks(source.SetChainTicks, 3600, slot, snapshotValues([]market.SeriesPoint{{Series: market.SerP2PAsk, Date: "2026-11-16", Value: 41.3}, {Series: "us_vix", Value: 99}})); err != nil {
+		t.Fatal(err)
+	}
+	code, body := call(t, s.HandleMacroTicks, http.MethodGet, "/api/macro/ticks?series=p2p_ask", "")
+	var r []struct {
+		T int64   `json:"t"`
+		V float64 `json:"v"`
+	}
+	if code != 200 || json.Unmarshal(body, &r) != nil || len(r) != 1 || r[0].T != slot || r[0].V != 41.3 {
+		t.Fatalf("часовая точка: %d %s", code, body)
+	}
+}
+
+func TestMarketScheduleQuietRunIsHiddenFromStatus(t *testing.T) {
+	s := newMarketServer(t, true)
+	s.mk.mu.Lock()
+	s.mk.running, s.mk.quiet = true, true
+	s.mk.mu.Unlock()
+	snap := s.marketSnapshot()
+	if snap["running"] != false {
+		t.Fatalf("фоновый опрос не виден в статусе: %+v", snap)
 	}
 }

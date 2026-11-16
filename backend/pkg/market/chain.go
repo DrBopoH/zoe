@@ -45,6 +45,36 @@ var chainSeries = []string{
 	SerFeeBTCSat, SerFeeBTCUSD, SerFeeTronUSD, SerFeeEthUSD, SerDomBTC, SerMcapTotal,
 }
 
+// SnapshotSeries — ряды-снимки: источник отдаёт только «сейчас» (истории нет). Они копятся сами: в кеше — по дням (хвостом, раньшие дни остаются),
+// и в macro_ticks — по часам (db.SaveMacroTicks). Остальные ряды контура приходят с историей и заменяются целиком.
+var SnapshotSeries = []string{SerP2PAsk, SerP2PBid, SerFeeBTCUSD, SerFeeTronUSD, SerFeeEthUSD, SerDomBTC, SerMcapTotal}
+
+// IsSnapshot — ряд из SnapshotSeries.
+func IsSnapshot(id string) bool {
+	for _, s := range SnapshotSeries {
+		if s == id {
+			return true
+		}
+	}
+	return false
+}
+
+// TickEvery — как часто сервер сам снимает снимки; точка привязана к сетке (началу часа), а не к моменту запуска сервера.
+const TickEvery = time.Hour
+
+// NextTick — сколько ждать до следующего снимка по сетке every (кратной суткам). last — время последнего сохранённого снимка (нулевое — не было).
+// Если за текущий слот сетки снимка ещё нет (сервер был выключен или только что запущен), ждать не нужно: рестарт не сдвигает и не теряет слот.
+func NextTick(now, last time.Time, every time.Duration) time.Duration {
+	if every <= 0 {
+		return 0
+	}
+	slot := now.UTC().Truncate(every)
+	if last.Before(slot) {
+		return 0
+	}
+	return slot.Add(every).Sub(now)
+}
+
 // Chain — все показатели крипто-контура.
 func (c *Client) Chain(ctx context.Context, rep Reporter) ([]SeriesPoint, Result) {
 	res := Result{Source: SourceChain}
@@ -75,6 +105,7 @@ func (c *Client) Chain(ctx context.Context, rep Reporter) ([]SeriesPoint, Result
 	part(70, "комиссии сетей", func() ([]SeriesPoint, error) { return c.networkFees(ctx, today) })
 	part(90, "доминация и капитализация", func() ([]SeriesPoint, error) { return c.global(ctx, today) })
 	res.Fetched, res.Error = len(out), strings.Join(errs, "; ")
+	res.Tail = SnapshotSeries // снимки докладываются к кешу, а не заменяют его: так копится история
 	return out, res
 }
 

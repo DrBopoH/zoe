@@ -3,12 +3,14 @@ package api
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"economic/pkg/db"
 	"economic/pkg/market"
+	"economic/pkg/source"
 )
 
 // Рыночные данные по облигациям (ОВДП НБУ, US Treasury) — отдельный процесс рядом с обходом банков: свой статус,
@@ -47,9 +49,11 @@ type marketState struct {
 
 	mu        sync.Mutex
 	running   bool
+	quiet     bool // фоновый опрос по расписанию: в статусе не виден (без панели и тостов)
 	startedAt int64
 	feeds     []*feedState
 	last      *marketResult
+	every     time.Duration  // шаг сетки снимков по расписанию (0 — market.TickEvery)
 	wg        sync.WaitGroup // идущий опрос; abortSync ждёт его перед сбросом кеша
 }
 
@@ -58,6 +62,9 @@ func (s *Server) marketSnapshot() map[string]any {
 	m := &s.mk
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.quiet { // фоновый опрос по расписанию не должен каждый час открывать панель и сыпать тостами
+		return map[string]any{"running": false, "started_at": 0, "feeds": []feedState{}, "last": m.last}
+	}
 	feeds := make([]feedState, len(m.feeds))
 	for i, f := range m.feeds {
 		feeds[i] = *f
@@ -67,7 +74,8 @@ func (s *Server) marketSnapshot() map[string]any {
 
 // startMarket запускает опрос в фоне. only — один источник (пусто — все). false: клиента нет или опрос уже идёт.
 // ctx отменяет опрос (сброс кеша); недописанное после отмены в кеш не попадает.
-func (s *Server) startMarket(ctx context.Context, only string) bool {
+// quiet — опрос по расписанию: итог не сохраняется в last и статус его не показывает.
+func (s *Server) startMarket(ctx context.Context, only string, quiet bool) bool {
 	m := &s.mk
 	if m.client == nil {
 		return false
@@ -83,7 +91,7 @@ func (s *Server) startMarket(ctx context.Context, only string) bool {
 		m.mu.Unlock()
 		return false
 	}
-	m.running, m.startedAt = true, time.Now().Unix()
+	m.running, m.quiet, m.startedAt = true, quiet, time.Now().Unix()
 	m.feeds = make([]*feedState, len(feeds))
 	for i, f := range feeds {
 		m.feeds[i] = &feedState{ID: f.ID, Title: f.Title, State: "queued", Unit: f.Unit}
@@ -115,8 +123,14 @@ func (s *Server) startMarket(ctx context.Context, only string) bool {
 					var pts []market.SeriesPoint
 					pts, res = f.Series(fctx, rep)
 					if ctx.Err() == nil && len(pts) > 0 {
-						if err := s.storage.SaveMacroSeries(pts, time.Now().Unix(), res.Tail...); err != nil {
+						now := time.Now().Unix()
+						if err := s.storage.SaveMacroSeries(pts, now, res.Tail...); err != nil {
 							res.Error = strings.TrimSpace(res.Error + " сохранение: " + err.Error())
+						}
+						// снимки (P2P, комиссии, доминация) заодно копятся по часам в файле группы «Экономика»: заново их не получить
+						step := int64(s.tickEvery().Seconds())
+						if err := store().AppendTicks(source.SetChainTicks, step, now-now%step, snapshotValues(pts)); err != nil {
+							res.Error = strings.TrimSpace(res.Error + " часовые точки: " + err.Error())
 						}
 					}
 				} else {
@@ -143,7 +157,11 @@ func (s *Server) startMarket(ctx context.Context, only string) bool {
 		defer m.mu.Unlock()
 		m.running = false
 		if ctx.Err() != nil { // сброс кеша: итог не нужен, панель очищена
-			m.feeds, m.last = nil, nil
+			m.feeds, m.last, m.quiet = nil, nil, false
+			return
+		}
+		if m.quiet { // расписание: прошлый итог пользовательского опроса остаётся как был
+			m.quiet = false
 			return
 		}
 		res := &marketResult{FinishedAt: time.Now().Unix(), Feeds: make([]feedState, len(m.feeds))}
@@ -207,13 +225,7 @@ func (s *Server) HandleMarketSync(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "source: nbu, ust, macro, fx, us, usecon, uscurve, usreal, usprices, usjobs, usact, usliq, uscredit, ez, gb, ch, jp, cn, ru, eg, pl, tr, no, se, ca, commodities, world, chain, ppp, crypto или stocks")
 		return
 	}
-	s.syncMutex.Lock()
-	if s.marketCtx == nil {
-		s.marketCtx, s.marketCancel = context.WithCancel(context.Background())
-	}
-	ctx := s.marketCtx
-	s.syncMutex.Unlock()
-	if !s.startMarket(ctx, src) {
+	if !s.startMarket(s.marketContext(), src, false) {
 		fail(w, http.StatusConflict, "обновление уже идёт")
 		return
 	}
@@ -384,4 +396,86 @@ func (s *Server) HandleMacroSources(w http.ResponseWriter, r *http.Request) {
 		sh = []market.SeriesHealth{}
 	}
 	writeJSON(w, map[string]any{"feeds": fh, "series": sh, "running": running})
+}
+
+// marketContext — общий контекст опросов рынка: его отменяет сброс кеша.
+func (s *Server) marketContext() context.Context {
+	s.syncMutex.Lock()
+	defer s.syncMutex.Unlock()
+	if s.marketCtx == nil {
+		s.marketCtx, s.marketCancel = context.WithCancel(context.Background())
+	}
+	return s.marketCtx
+}
+
+// tickEvery — шаг сетки часовых снимков.
+func (s *Server) tickEvery() time.Duration {
+	if s.mk.every > 0 {
+		return s.mk.every
+	}
+	return market.TickEvery
+}
+
+// scheduleRetry — пауза после попытки опроса по расписанию: опрос идёт в фоне, снимок появляется через десятки секунд,
+// а при сбое (нет сети, опрос занят) следующая попытка — через эту паузу, а не мгновенно.
+const scheduleRetry = 2 * time.Minute
+
+// RunMarketSchedule раз в every (по сетке, кратной суткам; 0 — выключено) сам снимает снимки крипто-контура (P2P, комиссии, доминация),
+// чтобы у них копилась история без участия пользователя. Привязка к сетке и последнему сохранённому слоту (market.NextTick): рестарт сервера
+// не сдвигает расписание, пропущенный час снимается сразу при запуске. Пока идёт опрос пользователя, слот ждёт. Работает до отмены ctx.
+func (s *Server) RunMarketSchedule(ctx context.Context, every time.Duration) {
+	if every <= 0 {
+		return
+	}
+	s.mk.every = every
+	for {
+		wait := market.NextTick(time.Now(), time.Unix(store().LastTick(source.SetChainTicks), 0), every)
+		if wait > 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(wait):
+			}
+			continue // слот мог наступить, а мог сдвинуться: пересчитываем по сетке
+		}
+		s.startMarket(s.marketContext(), market.SourceChain, true)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(scheduleRetry):
+		}
+	}
+}
+
+// GET /api/macro/ticks?series=p2p_ask&since=unix — часовые точки ряда-снимка: [{"t":unix,"v":значение}] по возрастанию времени.
+func (s *Server) HandleMacroTicks(w http.ResponseWriter, r *http.Request) {
+	if !allow(w, r, http.MethodGet) {
+		return
+	}
+	id := strings.TrimSpace(r.URL.Query().Get("series"))
+	if !market.IsSnapshot(id) {
+		fail(w, http.StatusBadRequest, "series: "+strings.Join(market.SnapshotSeries, ", "))
+		return
+	}
+	var since int64
+	if v := r.URL.Query().Get("since"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n < 0 {
+			fail(w, http.StatusBadRequest, "since: unix-время секунд")
+			return
+		}
+		since = n
+	}
+	writeJSON(w, store().ReadTicks(source.SetChainTicks, id, since))
+}
+
+// snapshotValues — значения рядов-снимков из опроса (по последней точке ряда).
+func snapshotValues(pts []market.SeriesPoint) map[string]float64 {
+	out := map[string]float64{}
+	for _, p := range pts {
+		if market.IsSnapshot(p.Series) {
+			out[p.Series] = p.Value
+		}
+	}
+	return out
 }
