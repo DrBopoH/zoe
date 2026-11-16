@@ -1,4 +1,5 @@
 <script setup>
+import { intText } from '../utils/numfmt.js'
 import { computed, ref } from 'vue'
 import MarketHeader from '../components/MarketHeader.vue'
 import { apiGetJson, apiSend, q } from '../utils/api.js'
@@ -74,7 +75,7 @@ const TONE = { error: 'text-rose-400', empty: 'text-slate-500', stale: 'text-amb
             <td class="px-3 py-1.5 text-slate-300">{{ f.title }}<div v-if="f.error" class="mt-0.5 text-rose-400/80">{{ f.error }}</div></td>
             <td class="px-3 py-1.5 font-bold" :class="TONE[feedStatus(f)]">{{ STATUS_TEXT[feedStatus(f)] }}<span v-if="f.stale" class="ml-1 font-normal text-slate-500">({{ f.stale }})</span></td>
             <td class="px-3 py-1.5 text-right text-slate-300">{{ f.cached }} / {{ f.series }}</td>
-            <td class="px-3 py-1.5 text-right text-slate-400">{{ f.points.toLocaleString('ru-RU') }}</td>
+            <td class="px-3 py-1.5 text-right text-slate-400">{{ intText(f.points) }}</td>
             <td class="px-3 py-1.5 text-right text-slate-300">{{ f.last_date ? dateOf(f.last_date) : '—' }}</td>
             <td class="px-3 py-1.5 text-right text-slate-400">{{ agoText(f.updated_at) }}</td>
             <td class="px-3 py-1.5 text-right"><button type="button" class="ui-btn ui-btn--sm ui-btn--outline" :disabled="running" @click="start(f.id)">Обновить</button></td>
@@ -114,7 +115,7 @@ const TONE = { error: 'text-rose-400', empty: 'text-slate-500', stale: 'text-amb
               <td class="px-3 py-1.5"><span class="text-slate-200">{{ r.label || r.id }}</span><div v-if="r.label" class="text-slate-500">{{ r.id }}</div></td>
               <td class="px-3 py-1.5 text-slate-400">{{ r.feedTitle || '—' }}</td>
               <td class="px-3 py-1.5 text-slate-400">{{ r.freq }}</td>
-              <td class="px-3 py-1.5 text-right text-slate-400">{{ r.points.toLocaleString('ru-RU') }}</td>
+              <td class="px-3 py-1.5 text-right text-slate-400">{{ intText(r.points) }}</td>
               <td class="px-3 py-1.5 text-right text-slate-400">{{ dateOf(r.from) }}</td>
               <td class="px-3 py-1.5 text-right text-slate-300">{{ dateOf(r.to) }}</td>
               <td class="px-3 py-1.5 text-right" :class="r.stale ? 'text-amber-300' : 'text-slate-400'">{{ lagText(r.lag_days) }}</td>

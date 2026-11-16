@@ -1,4 +1,5 @@
 import { SERIES } from './macro.js'
+import { numText } from './numfmt.js'
 
 // Страница «Источники»: здоровье источников и каталог рядов. Свежесть и частоту считает сервер (GET /api/macro/sources), здесь — подписи, поиск и CSV.
 
@@ -24,7 +25,7 @@ export function agoText(unix, nowMs = Date.now()) {
 /** Отставание последней точки: «сегодня», «3 дн.», «5 мес.». */
 export function lagText(days) {
   if (!(days > 0)) return 'сегодня'
-  if (days >= 365) return `${String(Math.round((days / 365) * 10) / 10).replace('.', ',')} г.`
+  if (days >= 365) return `${numText(days / 365, 1)} г.`
   return days >= 60 ? `${Math.round(days / 30)} мес.` : `${days} дн.`
 }
 

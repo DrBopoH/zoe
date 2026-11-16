@@ -1,4 +1,5 @@
 <script setup>
+import { fixedText } from '../utils/numfmt.js'
 import { computed } from 'vue'
 import { buildGrowthChart, autoView, yRanges, GROWTH_PAD, MIN_SPAN, MAX_SPAN } from '../utils/growthChart.js'
 import { useChartView } from '../composables/useChartView.js'
@@ -119,7 +120,7 @@ const hoverInfo = computed(() => {
       <div class="text-[10px] text-slate-600">Колесо — масштаб по времени, Shift+колесо — масштаб суммы, перетаскивание — сдвиг (вбок — время, вверх/вниз — сумма), двойной клик — сбросить.</div>
       <div v-if="spreads.length" class="ml-auto text-right text-[11px] text-slate-400 space-y-0.5" title="На сколько процентов результат за 10 лет у Топ 1 выше, чем у Топ 5 в той же валюте">
         <div class="text-[9px] uppercase tracking-wider text-slate-600 font-bold">Топ 1 vs Топ 5 за 10 л.</div>
-        <div v-for="s in spreads" :key="s.currency"><span class="text-slate-500">{{ s.currency }}</span> <span class="text-slate-200 font-bold">+{{ s.pct.toFixed(1).replace('.', ',') }} %</span></div>
+        <div v-for="s in spreads" :key="s.currency"><span class="text-slate-500">{{ s.currency }}</span> <span class="text-slate-200 font-bold">+{{ fixedText(s.pct, 1) }} %</span></div>
       </div>
     </div>
   </section>

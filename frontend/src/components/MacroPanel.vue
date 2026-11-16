@@ -1,4 +1,5 @@
 <script setup>
+import { dmy } from '../utils/numfmt.js'
 import { computed } from 'vue'
 import { SERIES, MACRO_PAD, MACRO_MIN_SPAN, MACRO_MAX_SPAN, buildMacroChart, macroWindow, macroRanges, isoAt, valueAt, unitText, axisText } from '../utils/macro.js'
 import { BENNER, bennerPhase } from '../utils/benner.js'
@@ -76,7 +77,7 @@ const hover = computed(() => {
   if (kv.hoverX.value === null || kv.hoverX.value > 0.05) return null
   const iso = isoAt(kv.hoverX.value, props.today)
   const rows = IDS.value.map((id) => ({ id, label: SERIES[id].label, color: SERIES[id].color, v: valueAt(props.series[id], iso) })).filter((r) => r.v !== null)
-  return rows.length ? { date: iso.split('-').reverse().join('.'), rows } : null
+  return rows.length ? { date: dmy(iso), rows } : null
 })
 </script>
 

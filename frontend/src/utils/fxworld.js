@@ -1,4 +1,5 @@
 import { valueAt, lastPoint, isoAt } from './macro.js'
+import { fixedText } from './numfmt.js'
 
 // Мировые валюты из курсов НБУ (гривен за единицу, ряды <ccy>_uah) и реестра стран с сервера. Кросс-курс = через гривну: A/B = (A к гривне) / (B к гривне).
 // Чистые функции, без интерфейса. «Растёт» везде значит: валюта дорожает к доллару.
@@ -20,7 +21,7 @@ export function crossRate(series, idA, idB, iso) {
 export function rateText(v) {
   if (v === null || v === undefined || !isFinite(v)) return '—'
   const digits = v >= 100 ? 2 : v >= 1 ? 4 : v >= 0.01 ? 5 : 6
-  return v.toFixed(digits).replace('.', ',')
+  return fixedText(v, digits)
 }
 
 // Матрица: строка A, столбец B — «1 A = x B». Диагональ — null.

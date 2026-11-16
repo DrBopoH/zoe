@@ -1,5 +1,6 @@
 import { scaleTicks, timeTicks } from './growthChart.js'
 import { robustRanges, scaleOf } from './chartView.js'
+import { dmy, numText } from './numfmt.js'
 
 // Макро НБУ: ключевые ставки и инфляция (ряды из /api/macro). Чистые функции — без интерфейса.
 // Ставки приходят датами смены значения (значение действует до следующей точки), инфляция — помесячно.
@@ -287,7 +288,7 @@ export function unitText(v, unit = '%') {
   if (v === null || v === undefined || !isFinite(v)) return '—'
   if (unit === '%') return plainPct(v)
   const abs = Math.abs(v)
-  const body = abs >= 10000 ? `${Math.round(v / 1000)} тыс.` : abs >= 100 ? String(Math.round(v)) : String(Math.round(v * 100) / 100).replace('.', ',')
+  const body = abs >= 10000 ? `${Math.round(v / 1000)} тыс.` : abs >= 100 ? String(Math.round(v)) : numText(v, 2)
   return `${body} ${unit}`
 }
 // Метка оси: то же, но короче (без десятых у дробных, чтобы подписи не слипались)
@@ -337,7 +338,7 @@ export function valueAt(points, iso) {
 export const lastPoint = (points) => (points && points.length ? points[points.length - 1] : null)
 
 // «2026-11-13» → «13.11.2026»; пусто для пустой даты
-export const dateOf = (iso) => (iso ? iso.split('-').reverse().join('.') : '')
+export const dateOf = dmy
 // Есть ли хоть одна точка хоть в одном ряду (пока нет — на экране подсказка «Нажми Обновить»)
 export const hasPoints = (series) => Object.values(series || {}).some((a) => a && a.length)
 
@@ -360,10 +361,10 @@ export const currentInflation = (series) => lastPoint(series && series.cpi_yoy)?
 export function signedPct(v) {
   if (v === null || v === undefined || !isFinite(v)) return '—'
   const r = Math.round(v * 10) / 10
-  const s = String(Math.abs(r)).replace('.', ',')
+  const s = numText(Math.abs(r), 1)
   return `${r > 0 ? '+' : r < 0 ? '−' : ''}${s} %`
 }
-export const plainPct = (v) => (v === null || v === undefined || !isFinite(v) ? '—' : `${String(Math.round(v * 100) / 100).replace('.', ',')} %`)
+export const plainPct = (v) => (v === null || v === undefined || !isFinite(v) ? '—' : `${numText(v, 2)} %`)
 
 // Сводка для шапки блока: текущие значения и разрыв «ставка − инфляция»
 export function macroSummary(series, todayIso) {
@@ -605,7 +606,7 @@ export const FED_INFLATION_TARGET = 2
 export function billionsText(v) {
   if (v === null || v === undefined || !isFinite(v)) return '—'
   const a = Math.abs(v)
-  return a >= 1000 ? `${String(Math.round((v / 1000) * 100) / 100).replace('.', ',')} трлн $` : `${String(Math.round(v)).replace('.', ',')} млрд $`
+  return a >= 1000 ? `${numText(v / 1000, 2)} трлн $` : `${numText(v, 0)} млрд $`
 }
 
 /** Спред высокодоходных облигаций к Treasury (п. п.) словами: до 4 — спокойно, до 6 — настороженно, выше — стресс. null — нет данных. */

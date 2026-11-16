@@ -1,4 +1,5 @@
 <script setup>
+import { dmy, numText } from '../utils/numfmt.js'
 import { computed } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
 import MarketHeader from '../components/MarketHeader.vue'
@@ -40,7 +41,7 @@ const policy = computed(() => valueAt(props.macro.policy_rate, props.today))
 // Гривневая ставка в долларах, если гривна и дальше будет дешеветь так же, как в среднем за период
 const inUsd = (years) => (policy.value !== null && dep(years) !== null ? realRate(policy.value, dep(years)) : null)
 const goldGrowth = (years) => annualChange(all.value.xau_usd, props.today, years)
-const dateText = (iso) => (iso ? iso.split('-').reverse().join('.') : '')
+const dateText = (iso) => (iso ? dmy(iso) : '')
 </script>
 
 <template>
@@ -91,7 +92,7 @@ const dateText = (iso) => (iso ? iso.split('-').reverse().join('.') : '')
             <td class="px-2 text-right" :class="chgClass(r.chg1y)">{{ r.chg1y === null ? '—' : signedPct(r.chg1y) }}</td>
             <td class="px-2 text-right text-slate-300">{{ r.policy === null ? '—' : plainPct(r.policy) }}</td>
             <td class="px-2 text-right" :class="chgClass(r.carry)">{{ r.carry === null ? '—' : signedPct(r.carry) }}</td>
-            <td class="px-2 text-right text-slate-300">{{ r.reer === null ? '—' : String(Math.round(r.reer * 10) / 10).replace('.', ',') }}</td>
+            <td class="px-2 text-right text-slate-300">{{ r.reer === null ? '—' : numText(r.reer, 1) }}</td>
             <td class="px-3 text-right" :class="chgClass(r.reerChg1y)">{{ r.reerChg1y === null ? '—' : signedPct(r.reerChg1y) }}</td>
           </tr>
         </tbody>

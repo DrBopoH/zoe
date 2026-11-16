@@ -1,4 +1,5 @@
 import { lastPoint, valueAt, isoAt, realRate, sahmRule, technicalRecession, curveState, vixLevel, creditLevel, FED_INFLATION_TARGET } from './macro.js'
+import { numText } from './numfmt.js'
 
 // Скоркард: всё считается на экране из рядов, которые уже есть в кеше. Это сводка и правила «если — то», а не прогноз и не торговый сигнал:
 // каждый вывод показывает, из чего он получен.
@@ -146,4 +147,4 @@ export function regime(series, today) {
   const key = contracting ? (high ? 'stagflation' : 'recession') : high ? 'overheating' : weak && falling ? 'disinflation' : 'goldilocks'
   return { key, ...REGIMES[key], why }
 }
-const fmt = (v) => String(round(v, 1)).replace('.', ',')
+const fmt = (v) => numText(v, 1)

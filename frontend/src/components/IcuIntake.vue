@@ -1,4 +1,5 @@
 <script setup>
+import { dmy } from '../utils/numfmt.js'
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import UiButton from './ui/UiButton.vue'
 import { parseIcuScreen, mergeEntries } from '../utils/icuOcr.js'
@@ -74,7 +75,7 @@ const soon = (r) => !!r.maturity && (Date.parse(`${r.maturity}T00:00:00Z`) - Dat
 const notes = (r) => [...r.flags.map((f) => FLAG_TEXT[f] || f), ...(soon(r) ? ['гасится меньше чем через месяц: годовая доходность условна'] : [])]
 const bad = (r) => r.flags.includes('not-in-registry') || r.flags.includes('isin-ambiguous') || r.flags.includes('isin-weak')
 const included = computed(() => rows.value.filter((r) => r.include))
-const dateText = (iso) => (iso ? iso.split('-').reverse().join('.') : '—')
+const dateText = (iso) => (iso ? dmy(iso) : '—')
 
 const saveShots = async () => {
   try {

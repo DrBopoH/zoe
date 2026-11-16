@@ -1,4 +1,5 @@
 <script setup>
+import { numText } from '../utils/numfmt.js'
 import { computed } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
 import MarketHeader from '../components/MarketHeader.vue'
@@ -23,7 +24,7 @@ const buf = computed(() => lastPoint(props.world.val_buffett))
 const cape = computed(() => lastPoint(props.world.val_cape))
 const divy = computed(() => lastPoint(props.world.val_divy))
 const chg = (v) => (v === null ? 'text-slate-500' : v >= 0 ? 'text-emerald-400' : 'text-rose-400')
-const num = (v) => String(Math.round(v * 10) / 10).replace('.', ',')
+const num = (v) => numText(v, 1)
 </script>
 
 <template>

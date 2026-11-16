@@ -1,4 +1,5 @@
 <script setup>
+import { fixedText } from '../utils/numfmt.js'
 import { computed } from 'vue'
 import MacroPanel from '../components/MacroPanel.vue'
 import MarketHeader from '../components/MarketHeader.vue'
@@ -28,7 +29,7 @@ const fEth = computed(() => lastPoint(props.chain.fund_eth))
 const dom = computed(() => lastPoint(props.chain.dom_btc))
 const mcap = computed(() => lastPoint(props.chain.mcap_total))
 const usdt = computed(() => lastPoint(props.chain.stable_usdt))
-const money = (v, d = 2) => (v === null ? '—' : String(v.toFixed(d)).replace('.', ','))
+const money = (v, d = 2) => (v === null ? '—' : fixedText(v, d))
 </script>
 
 <template>
