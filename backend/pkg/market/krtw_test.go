@@ -133,7 +133,7 @@ func TestKoreaTaiwanRegistered(t *testing.T) {
 	for _, c := range Countries() {
 		by[c.CC] = c
 	}
-	if by["kr"].Source != SourceKR || by["kr"].Metrics["policy"] != SerKRPolicy || by["tw"].Source != SourceTW || by["tw"].Metrics["reer"] != SerREER("tw") {
+	if by["kr"].Source != SourceKR || by["kr"].Metrics["policy"] != SerKRPolicy || by["tw"].Source != SourceTW || by["tw"].Metrics["stock"] != SerWM("tw") {
 		t.Fatalf("карточки стран: %+v %+v", by["kr"], by["tw"])
 	}
 }
