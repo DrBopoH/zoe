@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -265,9 +266,13 @@ func TestMacroCatalog(t *testing.T) {
 			CC      string   `json:"cc"`
 			Sources []string `json:"sources"`
 		} `json:"countries"`
+		Snapshots []string `json:"snapshots"`
 	}
 	if json.Unmarshal(body, &r) != nil || len(r.Feeds["us"]) != 5 || r.Feeds["us"][0] != "fed_funds" || len(r.Feeds["stocks"]) != 3 {
 		t.Fatalf("каталог: %s", body)
+	}
+	if strings.Join(r.Snapshots, ",") != strings.Join(market.SnapshotSeries, ",") || !slices.Contains(r.Snapshots, "p2p_ask") {
+		t.Fatalf("ряды-снимки для часовой истории: %v", r.Snapshots)
 	}
 	for _, c := range r.Countries {
 		if c.CC == "tw" && strings.Join(c.Sources, ",") != "tw,fx" {

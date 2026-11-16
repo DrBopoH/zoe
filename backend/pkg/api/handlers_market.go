@@ -358,7 +358,8 @@ func (s *Server) HandleMacroCatalog(w http.ResponseWriter, r *http.Request) {
 	if c := s.mk.client; c != nil {
 		feeds = c.Catalog()
 	}
-	writeJSON(w, map[string]any{"feeds": feeds, "countries": market.WithSources(market.Countries(), feeds)})
+	// snapshots — ряды-снимки: у них есть часовая история (GET /api/macro/ticks), фронт свой список не держит
+	writeJSON(w, map[string]any{"feeds": feeds, "countries": market.WithSources(market.Countries(), feeds), "snapshots": market.SnapshotSeries})
 }
 
 // GET /api/macro/sources — здоровье источников: что обещает каждый, что лежит в кеше, когда обновлялось, какие ряды устарели, последняя ошибка.
