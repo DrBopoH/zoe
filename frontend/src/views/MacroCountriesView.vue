@@ -19,7 +19,7 @@ const props = defineProps({
 const KEY = 'economic_market_country'
 const cc = ref(storageGet(KEY))
 const country = computed(() => props.countries.find((c) => c.cc === cc.value) || props.countries[0] || null)
-const { refresh } = useMarketRefresh(() => 'countries', () => country.value?.source)
+const { refresh } = useMarketRefresh(() => 'countries', () => country.value?.sources?.join(',') || country.value?.source)
 watch(country, (c) => { if (c) storageSet(KEY, c.cc) })
 const rows = computed(() => countryRows(country.value, props.series))
 const pick = ref('')
