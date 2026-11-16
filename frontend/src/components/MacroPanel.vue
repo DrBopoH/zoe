@@ -1,7 +1,7 @@
 <script setup>
 import { dmy } from '../utils/numfmt.js'
 import { computed } from 'vue'
-import { SERIES, MACRO_PAD, MACRO_MIN_SPAN, MACRO_MAX_SPAN, buildMacroChart, macroWindow, macroRanges, isoAt, valueAt, unitText, axisText } from '../utils/macro.js'
+import { SERIES, MACRO_PAD, MACRO_MIN_SPAN, MACRO_MAX_SPAN, buildMacroChart, macroWindow, macroRanges, isoAt, stampAt, valueAt, unitText, axisText } from '../utils/macro.js'
 import { BENNER, bennerPhase } from '../utils/benner.js'
 import BennerBands from './BennerBands.vue'
 import { useChartView } from '../composables/useChartView.js'
@@ -17,6 +17,7 @@ const props = defineProps({
   empty: { type: String, default: 'Нет данных. Нажми «Обновить»: подтянутся ставки и инфляция НБУ' },
   benner: { type: Boolean, default: false }, // цикл Беннера (колонки и полоса лет): только на графиках фондового рынка
   log: { type: Boolean, default: false }, // стартовая шкала значения — логарифмическая (цены на десятилетия; переключатель остаётся)
+  minSpan: { type: Number, default: MACRO_MIN_SPAN }, // самое узкое окно в годах: у часовых снимков крипто-контура — полтора дня
   hint: { type: String, default: 'Колесо: масштаб, перетаскивание: сдвиг, двойной клик: сброс' }
 })
 
@@ -33,7 +34,7 @@ const canLog = computed(() => {
 })
 
 // Окно по умолчанию — весь период данных; дальше колесо и перетаскивание
-const windowAll = () => macroWindow({ series: props.series, ids: IDS.value, todayIso: props.today, years: 0 })
+const windowAll = () => macroWindow({ series: props.series, ids: IDS.value, todayIso: props.today, years: 0, minSpan: props.minSpan })
 const kv = useChartView({
   width: WIDTH,
   height: HEIGHT,
@@ -42,7 +43,7 @@ const kv = useChartView({
   ranges: (view, scale) => macroRanges({ series: props.series, ids: IDS.value, view, todayIso: props.today, floor: props.unit === '%' ? 0 : null, log: scale === 'log' }),
   scale: props.log ? 'log' : 'linear',
   canLog: () => canLog.value,
-  spans: { minSpan: MACRO_MIN_SPAN, maxSpan: MACRO_MAX_SPAN },
+  spans: { minSpan: props.minSpan, maxSpan: MACRO_MAX_SPAN },
   resetOn: () => [props.series, props.ids]
 })
 const { svgRef, onWheel, onDown, onMove, onUp, onLeave, reset, zoomed } = kv
@@ -75,9 +76,9 @@ const bennerNow = computed(() => {
 // Подсказка под курсором: дата и значения рядов на неё
 const hover = computed(() => {
   if (kv.hoverX.value === null || kv.hoverX.value > 0.05) return null
-  const iso = isoAt(kv.hoverX.value, props.today)
+  const iso = stampAt(kv.hoverX.value, props.today)
   const rows = IDS.value.map((id) => ({ id, label: SERIES[id].label, color: SERIES[id].color, v: valueAt(props.series[id], iso) })).filter((r) => r.v !== null)
-  return rows.length ? { date: dmy(iso), rows } : null
+  return rows.length ? { date: props.minSpan < 0.05 && kv.view.value.x1 - kv.view.value.x0 < 0.15 ? `${dmy(iso)} ${iso.slice(11)}` : dmy(iso), rows } : null
 })
 </script>
 

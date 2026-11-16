@@ -19,4 +19,4 @@ export const fixedText = (v, d = 2) => (bad(v) ? '—' : Number(v).toFixed(d).re
 export const intText = (v) => (bad(v) ? '—' : new Intl.NumberFormat('ru-RU').format(Math.round(v)))
 
 // ГГГГ-ММ-ДД → ДД.ММ.ГГГГ; пусто — пустая строка (экран сам решает, писать ли «—»).
-export const dmy = (iso) => (iso ? String(iso).split('-').reverse().join('.') : '')
+export const dmy = (iso) => (iso ? String(iso).slice(0, 10).split('-').reverse().join('.') : '') // «ГГГГ-ММ-ДДTЧЧ:ММ» (часовые точки) — тоже только дата

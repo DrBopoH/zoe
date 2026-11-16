@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { valueAt, realRate, signedPct, plainPct, currentInflation, macroSummary, inflationFor, buildMacroChart, macroWindow, macroRanges, yearsFrom, isoAt, goldUsd, annualChange, unitText, axisText, dateOf, hasPoints } from '../src/utils/macro.js'
+import { withTicks, localStamp, stampAt, valueAt, realRate, signedPct, plainPct, currentInflation, macroSummary, inflationFor, buildMacroChart, macroWindow, macroRanges, yearsFrom, isoAt, goldUsd, annualChange, unitText, axisText, dateOf, hasPoints } from '../src/utils/macro.js'
 import { sortBonds } from '../src/utils/marketTable.js'
 
 const rate = [{ d: '2024-12-12', v: 13.5 }, { d: '2025-01-23', v: 14.5 }, { d: '2026-01-01', v: 15.5 }]
@@ -181,4 +181,25 @@ test('график: ряд из одной точки рисуется марк�
   const many = chartOf({ p2p_ask: [{ d: '2026-11-10', v: 47.4 }, { d: '2026-11-12', v: 47.5 }] }, ['p2p_ask'], 0).chart.lines[0]
   assert.equal(many.dot, null)
   assert.ok(many.d.includes('L'))
+})
+
+test('часовые точки: хвост дневного ряда заменяется, дни до первой точки остаются, ряд без точек не трогается', () => {
+  const t0 = Date.UTC(2026, 10, 16, 12, 0) / 1000 // 16.11 полдень UTC: местная дата 16.11 в любом поясе от −11 до +11
+  const series = { p2p_ask: [{ d: '2026-11-14', v: 46 }, { d: '2026-11-15', v: 46.2 }, { d: '2026-11-16', v: 46.5 }], fee: [{ d: '2026-11-16', v: 2 }] }
+  const out = withTicks(series, { p2p_ask: [{ t: t0, v: 46.4 }, { t: t0 + 3600, v: 46.5 }], fee: [] })
+  assert.equal(localStamp(t0).slice(0, 10), '2026-11-16')
+  assert.equal(out.p2p_ask.length, 4, '14 и 15 ноября остались, дневная точка 16-го заменена двумя часовыми')
+  assert.deepEqual(out.p2p_ask.slice(-2).map((p) => p.v), [46.4, 46.5])
+  assert.ok(out.p2p_ask.every((p, i, a) => i === 0 || a[i - 1].d < p.d), 'по возрастанию')
+  assert.equal(out.fee, series.fee)
+  assert.equal(series.p2p_ask.length, 3, 'исходные ряды не меняются')
+  assert.deepEqual(withTicks(series, null), series)
+  assert.equal(stampAt(0.5 / 365.25, '2026-11-16'), '2026-11-16T12:00')
+})
+
+test('окно по умолчанию вытягивается вправо до сегодняшних часовых точек', () => {
+  const s = { a: [{ d: '2026-11-16', v: 1 }, { d: '2026-11-17T05:00', v: 2 }] }
+  const w = macroWindow({ series: s, ids: ['a'], todayIso: '2026-11-17', years: 0, minSpan: 0.004 })
+  assert.ok(w.x1 > 5 / 24 / 365.25, 'точка 05:00 в окне')
+  assert.equal(macroWindow({ series: { a: [{ d: '2026-11-10', v: 1 }] }, ids: ['a'], todayIso: '2026-11-12', years: 0 }).x1 > 0, true)
 })

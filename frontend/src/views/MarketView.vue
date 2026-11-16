@@ -64,7 +64,7 @@ const stocks = useMacro('stocks')
 // Сырьё: цены лежат в источнике «commodities», металлы и курс доллара — в «fx», поэтому берутся сверх рядов источника
 const world = useMacro('world')
 // Крипто-контур сравнивает P2P с официальным курсом доллара (источник «fx»)
-const chain = useMacro('chain', ['usd_uah'])
+const chain = useMacro('chain', ['usd_uah'], { ticks: true })
 const ppp = useMacro('ppp')
 const score = useMacro('usecon', ['fed_funds', 'us_cpi_yoy', 'us_pce_yoy', 'us_corecpi_yoy', 'us_claims', 'us_hy', 'us_nfci', 'us_usd'])
 const sources = useSources()

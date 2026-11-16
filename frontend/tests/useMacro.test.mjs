@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { feedSeries, countryList, resetCatalog } from '../src/composables/useMacro.js'
+import { feedSeries, countryList, snapshotIds, loadTicks, resetCatalog } from '../src/composables/useMacro.js'
 
 test('каталог спрашивается один раз на все источники', async () => {
   resetCatalog()
@@ -27,4 +27,21 @@ test('реестр стран приходит из того же каталог
   assert.equal(calls, 1)
   resetCatalog()
   assert.deepEqual(await countryList(async () => ({ feeds: {} })), [])
+})
+
+test('часовые точки запрашиваются только для рядов-снимков из каталога; сбой одного ряда не ломает остальные', async () => {
+  resetCatalog()
+  const asked = []
+  const get = async (path) => {
+    if (path === '/macro/catalog') return { feeds: { chain: ['p2p_ask', 'p2p_bid', 'fund_btc'] }, snapshots: ['p2p_ask', 'p2p_bid', 'dom_btc'] }
+    asked.push(path)
+    if (path.endsWith('p2p_bid')) throw new Error('нет')
+    return [{ t: 1, v: 2 }]
+  }
+  assert.deepEqual(await snapshotIds(get), ['p2p_ask', 'p2p_bid', 'dom_btc'])
+  const r = await loadTicks(['p2p_ask', 'p2p_bid', 'fund_btc'], get)
+  assert.deepEqual(asked.sort(), ['/macro/ticks?series=p2p_ask', '/macro/ticks?series=p2p_bid'])
+  assert.deepEqual(r, { p2p_ask: [{ t: 1, v: 2 }], p2p_bid: [] })
+  resetCatalog()
+  assert.deepEqual(await snapshotIds(async () => ({ feeds: {} })), [])
 })

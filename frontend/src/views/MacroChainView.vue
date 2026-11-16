@@ -18,6 +18,7 @@ const props = defineProps({
   running: { type: Boolean, default: false }
 })
 const { refresh } = useMarketRefresh(() => 'chain')
+const HOURLY = 0.004 // часовые снимки: окно не уже полутора суток
 const EMPTY = 'Нет данных. Нажми «Обновить»: подтянутся цены P2P, комиссии сетей и показатели фьючерсов'
 const all = computed(() => ({ ...props.chain, ...p2pDerived(props.chain) }))
 const has = computed(() => hasPoints({ ...props.chain, usd_uah: [] }))
@@ -37,7 +38,7 @@ const money = (v, d = 2) => (v === null ? '—' : fixedText(v, d))
 <template>
   <div class="space-y-4">
     <MarketHeader title="Крипто-контур" :running="running" @refresh="refresh">
-      <span v-if="ask" class="text-slate-500">P2P на {{ dateOf(ask.d) }}</span>
+      <span v-if="ask" class="text-slate-500">P2P на {{ dateOf(ask.d) }}{{ ask.d.length > 10 ? ' ' + ask.d.slice(11) : '' }}</span>
     </MarketHeader>
 
     <UiCard class="p-3 text-xs">
@@ -68,9 +69,9 @@ const money = (v, d = 2) => (v === null ? '—' : fixedText(v, d))
       </table>
     </UiCard>
 
-    <MacroPanel title="P2P: цена USDT в гривнах" unit="₴" :series="all" :today="today" :ids="['p2p_ask', 'p2p_bid']" :empty="EMPTY" hint="Каждое «Обновить» добавляет точку за день: история копится с первого запуска" />
-    <MacroPanel title="P2P: переплата и спред, %" unit="%" :series="all" :today="today" :ids="['p2p_prem_ask', 'p2p_prem_bid', 'p2p_spread']" :empty="EMPTY" hint="Покупка и продажа USDT относительно официального курса НБУ и спред между ними" />
-    <MacroPanel title="Комиссия перевода, $" unit="$" :series="all" :today="today" :ids="['fee_tron_usd', 'fee_eth_usd', 'fee_btc_usd']" :empty="EMPTY" hint="Снимки: график заполняется по мере обновлений" />
+    <MacroPanel title="P2P: цена USDT в гривнах" unit="₴" :series="all" :today="today" :ids="['p2p_ask', 'p2p_bid']" :min-span="HOURLY" :empty="EMPTY" hint="Сервер сам снимает цену раз в час: история копится с первого запуска. Колесо — масштаб до часов" />
+    <MacroPanel title="P2P: переплата и спред, %" unit="%" :series="all" :today="today" :ids="['p2p_prem_ask', 'p2p_prem_bid', 'p2p_spread']" :min-span="HOURLY" :empty="EMPTY" hint="Покупка и продажа USDT относительно официального курса НБУ и спред между ними" />
+    <MacroPanel title="Комиссия перевода, $" unit="$" :series="all" :today="today" :ids="['fee_tron_usd', 'fee_eth_usd', 'fee_btc_usd']" :min-span="HOURLY" :empty="EMPTY" hint="Снимки раз в час: график заполняется сам, пока работает сервер" />
     <MacroPanel title="Комиссия Bitcoin: медиана блоков, сат/vB" unit="сат/vB" :series="all" :today="today" :ids="['fee_btc_sat']" :empty="EMPTY" hint="Среднее за сутки из медианы комиссий блоков (mempool.space), 3 месяца" />
 
     <MacroPanel title="Фандинг бессрочных фьючерсов, % годовых" unit="%" :series="all" :today="today" :ids="['fund_btc', 'fund_eth']" :empty="EMPTY" hint="Binance, среднее за сутки × 3 выплаты × 365. Плюс: лонги платят шортам, минус — наоборот">
@@ -86,7 +87,7 @@ const money = (v, d = 2) => (v === null ? '—' : fixedText(v, d))
         <span v-if="usdt" class="text-slate-400">USDT <b class="text-emerald-400 tabular-nums">{{ unitText(usdt.v, '$ млрд') }}</b></span>
       </template>
     </MacroPanel>
-    <MacroPanel title="Доля Bitcoin и капитализация рынка" unit="%" :series="all" :today="today" :ids="['dom_btc']" :empty="EMPTY" hint="CoinGecko, снимки по обновлениям">
+    <MacroPanel title="Доля Bitcoin и капитализация рынка" unit="%" :series="all" :today="today" :ids="['dom_btc']" :min-span="HOURLY" :empty="EMPTY" hint="CoinGecko, снимки раз в час">
       <template #summary>
         <span v-if="dom" class="text-slate-400">Доля BTC <b class="text-orange-300 tabular-nums">{{ plainPct(dom.v) }}</b></span>
         <span v-if="mcap" class="text-slate-400">Рынок <b class="text-sky-300 tabular-nums">{{ unitText(mcap.v, '$ трлн') }}</b></span>
