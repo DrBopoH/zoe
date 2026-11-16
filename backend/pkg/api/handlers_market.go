@@ -25,7 +25,7 @@ func (s *Server) SetMarket(c *market.Client) {
 	s.mk.client = c
 }
 
-const marketFeedTimeout = 90 * time.Second
+const marketFeedTimeout = 3 * time.Minute // с запасом на повторы запросов (market.Client.Retries): источник может отвечать медленно
 
 type feedState struct {
 	ID      string `json:"id"`
