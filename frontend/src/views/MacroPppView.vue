@@ -82,7 +82,7 @@ const tone = (v) => (v === null ? 'text-slate-500' : v >= 0 ? 'text-emerald-400'
       <div v-else class="mt-3 text-slate-500">По этой стране нет индекса цен.</div>
     </UiCard>
 
-    <MacroPanel :title="`Сколько осталось от покупательной способности денег (старт = 100 %)`" unit="%" :series="charts" :today="today" :ids="powerIds" :empty="EMPTY" hint="Деньги дешевеют на размер накопленной инфляции. Вторая линия — страна для сравнения ниже" />
+    <MacroPanel :title="`Сколько осталось от покупательной способности денег (старт = 100 %)`" unit="%" :series="charts" :today="today" :ids="powerIds" :empty="EMPTY" log hint="Деньги дешевеют на размер накопленной инфляции. Шкала логарифмическая: после гиперинфляции 90-х обычная прижала бы линию к нулю (переключатель справа вверху). Вторая линия — страна для сравнения ниже" />
     <MacroPanel v-if="cc !== 'us'" :title="`Реальный курс к доллару: ${country?.name} (старт = 100)`" unit="п." :series="charts" :today="today" :ids="[`rerusd_${cc}`]" :empty="EMPTY" hint="Курс с поправкой на инфляцию двух стран. Выше 100 — валюта реально дешевле, чем в начале ряда; ниже — дороже" />
 
     <UiCard class="overflow-x-auto">
