@@ -52,6 +52,10 @@ func newMarketServer(t *testing.T, usUp bool) *Server {
 			w.Write([]byte("Date,SP500\n1871-01-01,4.44\n"))
 		case "/api/v3/klines":
 			w.Write([]byte(`[[1793577600000,"100","110","90","105.5","1",1794182399999]]`))
+		case "/api/screener/stocks":
+			w.Write([]byte(`{"data":{"rows":[{"symbol":"TSLA","name":"Tesla, Inc. Common Stock","lastsale":"$420.50","marketCap":"1300000000000.00","country":"United States","ipoyear":"2010","sector":"Consumer Discretionary","industry":"Auto Manufacturers"},{"symbol":"AAPL","name":"Apple Inc. Common Stock","lastsale":"$300.00","marketCap":"4500000000000.00","country":"United States","ipoyear":"1980","sector":"Technology","industry":"Computer Manufacturing"},{"symbol":"NOSEC","name":"Нет в SEC","lastsale":"$1.00","marketCap":"1000.00"}]}}`))
+		case "/files/company_tickers_exchange.json":
+			w.Write([]byte(`{"data":[[320193,"Apple Inc.","AAPL","Nasdaq"],[1318605,"Tesla, Inc.","TSLA","Nasdaq"]]}`))
 		case "/fng/":
 			w.Write([]byte(`{"data":[{"value":"40","timestamp":"1794009600"}]}`))
 		case "/v1/accounting/od/auctions_query":
@@ -72,7 +76,7 @@ func newMarketServer(t *testing.T, usUp bool) *Server {
 	s := NewServer(st, nil, nil)
 	c := market.NewClient()
 	c.NBUBase, c.USTBase, c.FREDBase, c.BinanceBase, c.FNGBase, c.ShillerBase, c.EurostatBase, c.ECBBase, c.BoEBase, c.ONSBase, c.BISBase, c.WBBase, c.AuctionDays = up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, 1
-	c.P2PBase, c.FuturesBase, c.LlamaBase, c.MempoolBase, c.TronBase, c.EthRPCBase, c.GeckoBase, c.YahooBase = up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL
+	c.P2PBase, c.FuturesBase, c.LlamaBase, c.MempoolBase, c.TronBase, c.EthRPCBase, c.GeckoBase, c.YahooBase, c.NasdaqBase, c.SECBase = up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL
 	s.SetMarket(c)
 	return s
 }
@@ -171,8 +175,22 @@ func TestFullSyncStartsMarketToo(t *testing.T) {
 		t.Fatalf("sync/full: %d", code)
 	}
 	last := waitMarketLast(t, s)
-	if len(last["feeds"].([]any)) != 39 || feedByID(last, "stocks")["state"] != "done" || feedByID(last, "crypto")["state"] != "done" || feedByID(last, "usecon")["state"] != "done" || feedByID(last, "us")["state"] != "done" || feedByID(last, "fx")["state"] != "done" || feedByID(last, "ust")["state"] != "done" || feedByID(last, "nbu")["state"] != "done" || feedByID(last, "macro")["state"] != "done" {
+	if len(last["feeds"].([]any)) != 40 || feedByID(last, "stocks")["state"] != "done" || feedByID(last, "crypto")["state"] != "done" || feedByID(last, "usecon")["state"] != "done" || feedByID(last, "us")["state"] != "done" || feedByID(last, "fx")["state"] != "done" || feedByID(last, "ust")["state"] != "done" || feedByID(last, "nbu")["state"] != "done" || feedByID(last, "macro")["state"] != "done" {
 		t.Fatalf("все фиды должны отработать: %+v", last)
+	}
+	if f := feedByID(last, "companies"); f["state"] != "done" || f["unit"] != "компаний" || f["fetched"].(float64) != 2 || f["skipped"].(float64) != 1 {
+		t.Fatalf("companies: Apple и Tesla сошлись с SEC, строка без пары пропущена: %+v", f)
+	}
+	ccode, cbody := call(t, s.HandleMarketCompanies, http.MethodGet, "/api/market/companies", "")
+	var cs []market.Company
+	if ccode != 200 || json.Unmarshal(cbody, &cs) != nil || len(cs) != 2 || cs[0].Ticker != "AAPL" || cs[0].CIK != 320193 || cs[1].Ticker != "TSLA" {
+		t.Fatalf("список компаний: %d %s", ccode, cbody)
+	}
+	if _, cbody = call(t, s.HandleMarketCompanies, http.MethodGet, "/api/market/companies?q=tes&limit=1", ""); !strings.Contains(string(cbody), `"TSLA"`) || strings.Contains(string(cbody), `"AAPL"`) {
+		t.Fatalf("поиск по части названия: %s", cbody)
+	}
+	if ccode, _ = call(t, s.HandleMarketCompanies, http.MethodGet, "/api/market/companies?limit=-1", ""); ccode != http.StatusBadRequest {
+		t.Fatalf("limit<0: %d", ccode)
 	}
 	if m := feedByID(last, "macro"); m["unit"] != "точек" || m["fetched"].(float64) != 8 {
 		t.Fatalf("macro: ставка (1 точка смены) + инфляция (1 точка) + еврозона (1 точка) + резервы, M0, M3, текущий счёт, баланс товаров и услуг (по точке): %+v", m)

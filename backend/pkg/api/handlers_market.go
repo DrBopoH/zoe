@@ -139,6 +139,14 @@ func (s *Server) startMarket(ctx context.Context, only string, quiet bool) bool 
 							res.Error = strings.TrimSpace(res.Error + " часовые точки: " + err.Error())
 						}
 					}
+				} else if f.Companies != nil {
+					var list []market.Company
+					list, res = f.Companies(fctx, rep)
+					if ctx.Err() == nil && len(list) > 0 {
+						if err := s.storage.SaveMarketCompanies(list, time.Now().Unix()); err != nil {
+							res.Error = strings.TrimSpace(res.Error + " сохранение: " + err.Error())
+						}
+					}
 				} else {
 					var list []market.Security
 					list, res = f.Fetch(fctx, rep)
@@ -216,7 +224,30 @@ func (s *Server) HandleMarketBonds(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, list)
 }
 
-// POST /api/market/sync[?source=<источник>[,<источник>…]; список источников:  nbu|ust|macro|fx|us|usecon|uscurve|usreal|usprices|usjobs|usact|usliq|uscredit|ez|gb|ch|jp|cn|ru|eg|pl|tr|no|se|ca|crypto|stocks] — запустить опрос отдельно от «Разведать». Ответ сразу, ход и итог —
+// GET /api/market/companies?q=…&limit=N — список компаний для раздела «Акции» (Nasdaq + SEC), крупные по капитализации первыми.
+// q — часть тикера или названия, limit — сколько вернуть (0 или нет — все).
+func (s *Server) HandleMarketCompanies(w http.ResponseWriter, r *http.Request) {
+	if !allow(w, r, http.MethodGet) {
+		return
+	}
+	limit := 0
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			fail(w, http.StatusBadRequest, "limit: целое число, 0 — все")
+			return
+		}
+		limit = n
+	}
+	list, err := s.storage.MarketCompanies(r.URL.Query().Get("q"), limit)
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	writeJSON(w, list)
+}
+
+// POST /api/market/sync[?source=<источник>[,<источник>…]; список источников:  nbu|ust|macro|fx|us|usecon|uscurve|usreal|usprices|usjobs|usact|usliq|uscredit|ez|gb|ch|jp|cn|ru|eg|pl|tr|no|se|ca|crypto|stocks|companies] — запустить опрос отдельно от «Разведать». Ответ сразу, ход и итог —
 // в "market" из /api/sync/status. Уже идёт — 409.
 func (s *Server) HandleMarketSync(w http.ResponseWriter, r *http.Request) {
 	if !allow(w, r, http.MethodPost) {
@@ -228,7 +259,7 @@ func (s *Server) HandleMarketSync(w http.ResponseWriter, r *http.Request) {
 	}
 	src := strings.ToLower(r.URL.Query().Get("source"))
 	if !market.IsSources(src) {
-		fail(w, http.StatusBadRequest, "source: nbu, ust, macro, fx, us, usecon, uscurve, usreal, usprices, usjobs, usact, usliq, uscredit, ez, gb, ch, jp, cn, ru, eg, pl, tr, no, se, ca, commodities, world, chain, ppp, crypto или stocks")
+		fail(w, http.StatusBadRequest, "source: nbu, ust, macro, fx, us, usecon, uscurve, usreal, usprices, usjobs, usact, usliq, uscredit, ez, gb, ch, jp, cn, ru, eg, pl, tr, no, se, ca, commodities, world, chain, ppp, crypto, stocks или companies")
 		return
 	}
 	if !s.startMarket(s.marketContext(), src, false) {

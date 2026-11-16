@@ -19,7 +19,9 @@ type Feed struct {
 	Unit     string
 	Provides []string
 	Fetch    func(ctx context.Context, rep Reporter) ([]Security, Result)
-	Series   func(ctx context.Context, rep Reporter) ([]SeriesPoint, Result)
+	// Companies — источник списка компаний (раздел «Акции»): третий вид после облигаций (Fetch) и числовых рядов (Series)
+	Companies func(ctx context.Context, rep Reporter) ([]Company, Result)
+	Series    func(ctx context.Context, rep Reporter) ([]SeriesPoint, Result)
 }
 
 // Catalog — какие ряды даёт каждый числовой источник: источник → id рядов, в порядке показа.
@@ -36,7 +38,7 @@ func (c *Client) Catalog() map[string][]string {
 // IsSource — известен ли такой источник (для ?source=… в маршрутах).
 func IsSource(id string) bool {
 	switch id {
-	case SourceNBU, SourceUST, SourceMacro, SourceFX, SourceUS, SourceUSEcon, SourceUSCurve, SourceUSReal, SourceUSPrices, SourceUSJobs, SourceUSAct, SourceUSLiq, SourceUSCredit, SourceEZ, SourceGB, SourceCH, SourceJP, SourceCN, SourceRU, SourceEG, SourcePL, SourceTR, SourceNO, SourceSE, SourceCA, SourceKR, SourceTW, SourceAU, SourceBR, SourceSA, SourceAE, SourceIR, SourceIN, SourceCommodities, SourceWorld, SourceChain, SourcePPP, SourceCrypto, SourceStocks:
+	case SourceNBU, SourceUST, SourceMacro, SourceFX, SourceUS, SourceUSEcon, SourceUSCurve, SourceUSReal, SourceUSPrices, SourceUSJobs, SourceUSAct, SourceUSLiq, SourceUSCredit, SourceEZ, SourceGB, SourceCH, SourceJP, SourceCN, SourceRU, SourceEG, SourcePL, SourceTR, SourceNO, SourceSE, SourceCA, SourceKR, SourceTW, SourceAU, SourceBR, SourceSA, SourceAE, SourceIR, SourceIN, SourceCommodities, SourceWorld, SourceChain, SourcePPP, SourceCrypto, SourceStocks, SourceCompanies:
 		return true
 	}
 	return false
@@ -122,5 +124,6 @@ func (c *Client) Feeds() []Feed {
 		{ID: SourcePPP, Title: "Покупательная способность: цены, PPP, Big Mac · Всемирный банк, FRED", Unit: "точек", Provides: pppSeries, Series: c.PPP},
 		{ID: SourceCrypto, Title: "Крипто · Binance", Unit: "точек", Provides: []string{SerCryptoBTC, SerCryptoETH, SerCryptoBNB, SerCryptoSOL, SerCryptoFNG}, Series: c.Crypto},
 		{ID: SourceStocks, Title: "Биржа США · FRED", Unit: "точек", Provides: []string{SerStockSP500, SerStockNasdaq, SerStockDow}, Series: c.Stocks},
+		{ID: SourceCompanies, Title: "Акции: список компаний · Nasdaq, SEC", Unit: "компаний", Companies: c.Companies},
 	}
 }
