@@ -112,7 +112,7 @@ type Client struct {
 var DefaultRetryWait = time.Second
 
 func NewClient() *Client {
-	return &Client{HTTP: &http.Client{Timeout: 30 * time.Second}, NBUBase: DefaultNBUBase, USTBase: DefaultUSTBase, FREDBase: DefaultFREDBase, BinanceBase: DefaultBinanceBase, FNGBase: DefaultFNGBase, ShillerBase: DefaultShillerBase, EurostatBase: DefaultEurostatBase, ECBBase: DefaultECBBase, BoEBase: DefaultBoEBase, ONSBase: DefaultONSBase, BISBase: DefaultBISBase, WBBase: DefaultWBBase, P2PBase: DefaultP2PBase, FuturesBase: DefaultFuturesBase, LlamaBase: DefaultLlamaBase, MempoolBase: DefaultMempoolBase, TronBase: DefaultTronBase, EthRPCBase: DefaultEthRPCBase, GeckoBase: DefaultGeckoBase, Now: time.Now, Limiter: NewHostLimiter(DefaultHostGaps()), Retries: 2, RetryWait: DefaultRetryWait}
+	return &Client{HTTP: &http.Client{Timeout: 30 * time.Second}, NBUBase: DefaultNBUBase, USTBase: DefaultUSTBase, FREDBase: DefaultFREDBase, BinanceBase: DefaultBinanceBase, FNGBase: DefaultFNGBase, ShillerBase: DefaultShillerBase, EurostatBase: DefaultEurostatBase, ECBBase: DefaultECBBase, BoEBase: DefaultBoEBase, ONSBase: DefaultONSBase, BISBase: DefaultBISBase, WBBase: DefaultWBBase, P2PBase: DefaultP2PBase, FuturesBase: DefaultFuturesBase, LlamaBase: DefaultLlamaBase, MempoolBase: DefaultMempoolBase, TronBase: DefaultTronBase, EthRPCBase: DefaultEthRPCBase, GeckoBase: DefaultGeckoBase, Now: time.Now, Limiter: NewHostLimiter(DefaultHostGaps()).WithSlots(DefaultHostSlots()), Retries: 2, RetryWait: DefaultRetryWait}
 }
 
 func (c *Client) now() time.Time {
@@ -168,9 +168,11 @@ func (c *Client) once(ctx context.Context, method, url string, payload []byte, h
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	if err := c.Limiter.Wait(ctx, req.URL.Host); err != nil {
+	release, err := c.Limiter.Acquire(ctx, req.URL.Host)
+	if err != nil {
 		return nil, false, err
 	}
+	defer release()
 	h := c.HTTP
 	if h == nil {
 		h = http.DefaultClient

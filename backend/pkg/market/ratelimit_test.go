@@ -51,3 +51,34 @@ func TestDefaultClientHasLimiter(t *testing.T) {
 		t.Fatal("у боевого клиента лимитер включён")
 	}
 }
+
+func TestAcquireCapsConcurrentRequestsPerHost(t *testing.T) {
+	l := NewHostLimiter(nil).WithSlots(map[string]int{"slow.test": 2})
+	ctx := context.Background()
+	r1, err1 := l.Acquire(ctx, "slow.test")
+	r2, err2 := l.Acquire(ctx, "slow.test")
+	if err1 != nil || err2 != nil {
+		t.Fatal(err1, err2)
+	}
+	// третий ждёт свободного места; отмена прерывает ожидание
+	cctx, cancel := context.WithTimeout(ctx, 30*time.Millisecond)
+	defer cancel()
+	if _, err := l.Acquire(cctx, "slow.test"); err == nil {
+		t.Fatal("третий запрос должен ждать, пока оба заняты")
+	}
+	r1()
+	r3, err := l.Acquire(ctx, "slow.test")
+	if err != nil {
+		t.Fatalf("после release место свободно: %v", err)
+	}
+	r2()
+	r3()
+	// хост без записи и nil-лимитер не ограничивают
+	if rel, err := l.Acquire(ctx, "other.test"); err != nil || rel == nil {
+		t.Fatalf("хост без ограничения: %v", err)
+	}
+	var nilLim *HostLimiter
+	if rel, err := nilLim.Acquire(ctx, "x"); err != nil || rel == nil {
+		t.Fatalf("nil-лимитер: %v", err)
+	}
+}
