@@ -455,7 +455,8 @@ func (s *Storage) initCore() error {
 	return nil
 }
 
-// WipeCache сносит ТОЛЬКО кеш. Статика остаётся нетронутой.
+// WipeCache сносит ТОЛЬКО кеш (всю cache.db: счета, рыночные и макро-ряды). Статика и файлы-источники остаются нетронутыми:
+// кеш собирается из них заново («Загрузить», RestoreEconomy).
 func (s *Storage) WipeCache() error {
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
@@ -463,7 +464,7 @@ func (s *Storage) WipeCache() error {
 	if _, err := s.cacheDB.Exec(`DELETE FROM transactions`); err != nil {
 		return err
 	}
-	for _, t := range []string{"sync_coverage", "binance_minutes", "binance_state", "binance_ledger", "binance_p2p", "icu_flows", "market_bonds", "accounts"} {
+	for _, t := range []string{"sync_coverage", "binance_minutes", "binance_state", "binance_ledger", "binance_p2p", "icu_flows", "market_bonds", "macro_series", "accounts"} {
 		if _, err := s.cacheDB.Exec(`DELETE FROM ` + t); err != nil {
 			return err
 		}

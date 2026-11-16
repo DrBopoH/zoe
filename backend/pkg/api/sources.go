@@ -115,6 +115,17 @@ func (s *Server) HandleLoadSources(w http.ResponseWriter, r *http.Request) {
 	}
 	want := readAccounts(r)
 	_, failed := migrateLegacy()
+	// Макро-кеш собирается из файлов «Экономики» первым: курс доллара нужен при загрузке Binance. Только при полной загрузке
+	// (не по выбранным счетам) и только недостающие ряды.
+	economy := 0
+	if want == nil {
+		n, err := s.RestoreEconomy()
+		if err != nil {
+			log.Printf("[Sources] экономика: %v", err)
+			failed = append(failed, loadFailure{"Экономика", err.Error()})
+		}
+		economy = n
+	}
 	entries, bad := store().List()
 	for p, why := range bad {
 		failed = append(failed, loadFailure{filepath.Base(p), why})
@@ -145,7 +156,7 @@ func (s *Server) HandleLoadSources(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, map[string]interface{}{
-		"status": "success", "total": total, "loaded": loaded, "transactions": txCount, "failed": failed, "dir": sourcesDir(),
+		"status": "success", "total": total, "loaded": loaded, "transactions": txCount, "failed": failed, "dir": sourcesDir(), "economy": economy,
 	})
 }
 
