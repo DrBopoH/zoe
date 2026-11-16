@@ -78,6 +78,9 @@ func TestChainBuildsAllSeries(t *testing.T) {
 	if res.Error != "" || res.Source != SourceChain || res.Fetched != len(pts) {
 		t.Fatalf("%+v", res)
 	}
+	if len(res.Tail) != len(SnapshotSeries) || !IsSnapshot(SerP2PAsk) || IsSnapshot(SerFundBTC) {
+		t.Fatalf("снимки идут хвостом, чтобы копить историю: %v", res.Tail)
+	}
 	by := byID(pts)
 	for _, id := range chainSeries {
 		if len(by[id]) == 0 {
@@ -156,5 +159,29 @@ func TestP2PRejectsEmptyAds(t *testing.T) {
 	c := chainClient(srv)
 	if _, err := c.p2pPrice(context.Background(), "BUY"); err == nil {
 		t.Fatal("пустая выдача — ошибка, а не нулевая цена")
+	}
+}
+
+func TestNextTickFollowsGridAcrossRestarts(t *testing.T) {
+	h := time.Hour
+	at := func(hh, mm int) time.Time { return time.Date(2026, 11, 16, hh, mm, 0, 0, time.UTC) }
+	cases := []struct {
+		name      string
+		now, last time.Time
+		want      time.Duration
+	}{
+		{"снимка не было — сразу", at(12, 40), time.Time{}, 0},
+		{"слот 12:00 уже снят — ждать до 13:00", at(12, 40), at(12, 0), 20 * time.Minute},
+		{"рестарт в 12:50, снят 11:00 — снять сразу", at(12, 50), at(11, 0), 0},
+		{"точно на границе, предыдущий слот снят", at(13, 0), at(12, 0), 0},
+		{"только что снят слот", at(13, 0), at(13, 0), time.Hour},
+	}
+	for _, c := range cases {
+		if got := NextTick(c.now, c.last, h); got != c.want {
+			t.Errorf("%s: %v, ждали %v", c.name, got, c.want)
+		}
+	}
+	if NextTick(at(1, 0), time.Time{}, 0) != 0 {
+		t.Error("нулевой шаг — не ждать")
 	}
 }
