@@ -26,7 +26,7 @@ const merged = computed(() => ({ ...props.cseries, ...props.fx }))
 const rows = computed(() => fxWorldRows(props.countries, merged.value, props.today))
 const matrix = computed(() => crossMatrix(props.fx, props.today))
 const REER_MAJOR = ['reer_us', 'reer_ez', 'reer_gb', 'reer_jp', 'reer_cn', 'reer_ch']
-const REER_OTHER = ['reer_tr', 'reer_ru', 'reer_pl', 'reer_ca', 'reer_no', 'reer_se', 'reer_kr', 'reer_tw', 'reer_au', 'reer_br']
+const REER_OTHER = ['reer_tr', 'reer_ru', 'reer_pl', 'reer_ca', 'reer_no', 'reer_se', 'reer_kr', 'reer_tw', 'reer_au', 'reer_br', 'reer_sa', 'reer_ae']
 const DXY_ID = ['fx_dxy']
 const dxyLast = computed(() => lastPoint(all.value.fx_dxy))
 const chgClass = (v) => (v === null ? 'text-slate-500' : v >= 0 ? 'text-emerald-400' : 'text-rose-400')
