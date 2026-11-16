@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { PPP_COUNTRIES, countryOf, cpiPoints, convPoints, startIso, growthOf, pppModel, levelRows, burgerRows, compareCountries, realReturn } from '../src/utils/pppview.js'
+import { PPP_COUNTRIES, countryOf, cpiPoints, convPoints, startIso, growthOf, pppModel, trailingInflation, levelRows, burgerRows, compareCountries, realReturn } from '../src/utils/pppview.js'
 import { SERIES } from '../src/utils/macro.js'
 import { MARKET_SECTIONS, feedOf } from '../src/utils/marketNav.js'
 
@@ -37,8 +37,9 @@ test('темп инфляции для продолжения: у Украины
 })
 
 test('модель: деньги теряют покупательную способность, суммы тогда и сегодня согласованы', () => {
-  const m = pppModel({ series, macro: {}, cc: 'ua', years: 10, today: '2025-07-01', amount: 1000 })
-  assert.equal(m.from, '2015-07-01')
+  const m = pppModel({ series, macro: {}, cc: 'ua', today: '2025-07-01', amount: 1000 })
+  assert.equal(m.from, '2015-07-01') // окно — вся история ряда, а не выбранное число лет
+  assert.ok(Math.abs(m.years - 10) < 0.01)
   assert.ok(Math.abs(m.pp.inflation - 100) < 1e-6)
   assert.ok(Math.abs(m.needNow - 2000) < 1e-6)
   assert.ok(Math.abs(m.worthThen - 500) < 1e-6)
@@ -51,8 +52,8 @@ test('модель: деньги теряют покупательную спо�
 })
 
 test('модель: США — без реального курса к доллару; нет данных — пусто', () => {
-  assert.deepEqual(pppModel({ series, macro: {}, cc: 'us', years: 10, today: '2025-07-01' }).rer, [])
-  const m = pppModel({ series: {}, macro: {}, cc: 'ua', years: 10, today: TODAY })
+  assert.deepEqual(pppModel({ series, macro: {}, cc: 'us', today: '2025-07-01' }).rer, [])
+  const m = pppModel({ series: {}, macro: {}, cc: 'ua', today: TODAY })
   assert.equal(m.pp, null)
   assert.equal(m.needNow, null)
   assert.deepEqual(m.power, [])
@@ -104,4 +105,26 @@ test('подписи рядов страницы и раздел в навига
   }
   assert.ok(MARKET_SECTIONS.includes('ppp'))
   assert.equal(feedOf('ppp'), 'ppp')
+})
+
+test('окно — вся история страны: короткий ряд не обрывает линию, у каждой страны старт 100 на своей первой точке', () => {
+  const short = { ppp_cpi_ua: [{ d: '2020-07-01', v: 100 }, { d: '2025-07-01', v: 150 }], ppp_us_cpi: [{ d: '2000-01-01', v: 100 }, { d: '2025-07-01', v: 200 }], ppp_fx_ua: [{ d: '2022-07-01', v: 30 }, { d: '2025-07-01', v: 40 }] }
+  const m = pppModel({ series: short, macro: {}, cc: 'ua', today: '2025-07-01', amount: 1000 })
+  assert.equal(m.from, '2020-07-01')
+  assert.equal(m.power[0].d, '2020-07-01')
+  assert.equal(m.power[0].v, 100)
+  assert.ok(m.power.length > 2)
+  // реальный курс стартует там, где есть и курс, и цены двух стран
+  assert.equal(m.rer[0].d, '2022-07-01')
+  assert.equal(m.rer[0].v, 100)
+  // индекс США помесячный и длиннее: его линия идёт с января 2000-го
+  assert.equal(pppModel({ series: short, macro: {}, cc: 'us', today: '2025-07-01' }).power[0].d, '2000-01-01')
+})
+
+test('вклад: окно последних лет сужается до начала данных, без данных — пусто', () => {
+  const short = { ppp_cpi_ua: [{ d: '2020-07-01', v: 100 }, { d: '2025-07-01', v: 150 }] }
+  const t = trailingInflation({ series: short, macro: {}, cc: 'ua', years: 25, today: '2025-07-01' })
+  assert.ok(t.pp && Math.abs(t.years - 5) < 0.01)
+  assert.ok(Math.abs(t.pp.inflation - 50) < 1e-6)
+  assert.deepEqual(trailingInflation({ series: {}, macro: {}, cc: 'ua', years: 10, today: '2025-07-01' }), { pp: null, years: 0 })
 })
