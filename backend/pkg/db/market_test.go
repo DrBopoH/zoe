@@ -51,6 +51,62 @@ func TestMarketCompaniesSnapshotReplacesAndSearches(t *testing.T) {
 	}
 }
 
+func TestStockPricesReplaceAndPickStaleTop(t *testing.T) {
+	d := t.TempDir()
+	s, err := NewStorage(filepath.Join(d, "c.db"), filepath.Join(d, "k.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.SaveMarketCompanies([]market.Company{
+		{Ticker: "AAPL", Name: "Apple", CIK: 1, MarketCap: 4e12, Price: 1},
+		{Ticker: "NVDA", Name: "Nvidia", CIK: 2, MarketCap: 3e12, Price: 1},
+		{Ticker: "TSLA", Name: "Tesla", CIK: 3, MarketCap: 1e12, Price: 1},
+	}, 1); err != nil {
+		t.Fatal(err)
+	}
+	now := int64(1_000_000)
+	// до истории — все из топ-2 просрочены, крупные первыми
+	if got, err := s.StockTickersToFetch(2, 20*time.Hour, now); err != nil || len(got) != 2 || got[0] != "AAPL" || got[1] != "NVDA" {
+		t.Fatalf("топ-2 без истории: %v %v", err, got)
+	}
+	if err := s.SaveStockPrices([]market.PriceBar{{Ticker: "aapl", Date: "2026-09-01", Close: 100, Adj: 99}, {Ticker: "aapl", Date: "2026-10-01", Close: 110, Adj: 109}}, now-3600); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.StockTickersToFetch(2, 20*time.Hour, now); len(got) != 1 || got[0] != "NVDA" {
+		t.Fatalf("свежая история AAPL не перекачивается: %v", got)
+	}
+	if got, _ := s.StockTickersToFetch(3, 20*time.Hour, now+30*3600); len(got) != 3 || got[0] != "AAPL" {
+		t.Fatalf("через сутки с лишним снова всё: %v", got)
+	}
+	// новая история заменяет прежнюю целиком (сплит пересчитал прошлые цены)
+	if err := s.SaveStockPrices([]market.PriceBar{{Ticker: "AAPL", Date: "2026-10-01", Close: 55, Adj: 54.5}}, now); err != nil {
+		t.Fatal(err)
+	}
+	bars, at, err := s.StockPrices("aapl")
+	if err != nil || at != now || len(bars) != 1 || bars[0].Close != 55 || bars[0].Adj != 54.5 || bars[0].Ticker != "AAPL" {
+		t.Fatalf("замена истории: %v %d %+v", err, at, bars)
+	}
+	if bars, at, _ = s.StockPrices("NONE"); len(bars) != 0 || at != 0 {
+		t.Fatalf("нет истории: %+v %d", bars, at)
+	}
+	if err := s.SaveStockPrices(nil, now); err != nil {
+		t.Fatal(err)
+	}
+	if c, ok, err := s.MarketCompany("nvda"); err != nil || !ok || c.CIK != 2 {
+		t.Fatalf("компания по тикеру без учёта регистра: %v %v %+v", err, ok, c)
+	}
+	if _, ok, _ := s.MarketCompany("ZZZ"); ok {
+		t.Fatal("чужого тикера нет")
+	}
+	if err := s.WipeCache(); err != nil {
+		t.Fatal(err)
+	}
+	if bars, at, _ = s.StockPrices("AAPL"); len(bars) != 0 || at != 0 {
+		t.Fatalf("«стереть кеш» уносит и историю: %+v", bars)
+	}
+}
+
 func TestMarketBondsMergeKeepsKnownAndFeedsICUTerms(t *testing.T) {
 	d := t.TempDir()
 	s, err := NewStorage(filepath.Join(d, "c.db"), filepath.Join(d, "k.db"))

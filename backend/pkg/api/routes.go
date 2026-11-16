@@ -23,6 +23,7 @@ func (s *Server) Handler() http.Handler {
 		// Рыночные облигации: ОВДП (НБУ) и US Treasury, публичные данные в кеше
 		{"/api/market/bonds", s.HandleMarketBonds},
 		{"/api/market/companies", s.HandleMarketCompanies}, // список компаний для раздела «Акции» (Nasdaq + SEC)
+		{"/api/market/stock", s.HandleMarketStock},         // компания и её месячная история цен (по требованию подтягивается с Yahoo)
 		{"/api/market/sync", s.HandleMarketSync},
 		{"/api/market/lists", s.HandleMarketLists},   // свои списки ISIN (например «icu» — доступно к покупке в брокере)
 		{"/api/market/curve", s.HandleMarketCurve},   // кривая доходности рынка (точки срок → %) для оценки бумаг без цены
