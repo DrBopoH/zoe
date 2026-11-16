@@ -95,7 +95,9 @@ type Client struct {
 	P2PBase, FuturesBase, LlamaBase, MempoolBase, TronBase, EthRPCBase, GeckoBase string
 	// YahooBase — график индекса биржи (KOSPI, TAIEX), публичный JSON без ключа; пустая строка отключает опрос (тесты)
 	YahooBase string
-	Now       func() time.Time
+	// NasdaqBase, SECBase — список компаний для раздела «Акции» (Nasdaq screener, реестр тикеров SEC); пустая строка отключает опрос (тесты)
+	NasdaqBase, SECBase string
+	Now                 func() time.Time
 	// Limiter — паузы между запросами к одному хосту (nil — без пауз)
 	Limiter *HostLimiter
 	// LastDate — до какой даты ряд уже лежит в кеше (пусто — нет такого). По ней тяжёлые дневные ряды FRED докачиваются хвостом, а не целиком.
@@ -115,7 +117,7 @@ type Client struct {
 var DefaultRetryWait = time.Second
 
 func NewClient() *Client {
-	return &Client{HTTP: &http.Client{Timeout: 30 * time.Second}, NBUBase: DefaultNBUBase, USTBase: DefaultUSTBase, FREDBase: DefaultFREDBase, BinanceBase: DefaultBinanceBase, FNGBase: DefaultFNGBase, ShillerBase: DefaultShillerBase, EurostatBase: DefaultEurostatBase, ECBBase: DefaultECBBase, BoEBase: DefaultBoEBase, ONSBase: DefaultONSBase, BISBase: DefaultBISBase, WBBase: DefaultWBBase, YahooBase: DefaultYahooBase, P2PBase: DefaultP2PBase, FuturesBase: DefaultFuturesBase, LlamaBase: DefaultLlamaBase, MempoolBase: DefaultMempoolBase, TronBase: DefaultTronBase, EthRPCBase: DefaultEthRPCBase, GeckoBase: DefaultGeckoBase, Now: time.Now, Limiter: NewHostLimiter(DefaultHostGaps()).WithSlots(DefaultHostSlots()), Retries: 2, RetryWait: DefaultRetryWait}
+	return &Client{HTTP: &http.Client{Timeout: 30 * time.Second}, NBUBase: DefaultNBUBase, USTBase: DefaultUSTBase, FREDBase: DefaultFREDBase, BinanceBase: DefaultBinanceBase, FNGBase: DefaultFNGBase, ShillerBase: DefaultShillerBase, EurostatBase: DefaultEurostatBase, ECBBase: DefaultECBBase, BoEBase: DefaultBoEBase, ONSBase: DefaultONSBase, BISBase: DefaultBISBase, WBBase: DefaultWBBase, YahooBase: DefaultYahooBase, NasdaqBase: DefaultNasdaqBase, SECBase: DefaultSECBase, P2PBase: DefaultP2PBase, FuturesBase: DefaultFuturesBase, LlamaBase: DefaultLlamaBase, MempoolBase: DefaultMempoolBase, TronBase: DefaultTronBase, EthRPCBase: DefaultEthRPCBase, GeckoBase: DefaultGeckoBase, Now: time.Now, Limiter: NewHostLimiter(DefaultHostGaps()).WithSlots(DefaultHostSlots()), Retries: 2, RetryWait: DefaultRetryWait}
 }
 
 func (c *Client) now() time.Time {

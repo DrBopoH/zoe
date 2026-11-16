@@ -101,6 +101,8 @@ func DefaultHostGaps() map[string]time.Duration {
 		"api.trongrid.io":          400 * time.Millisecond,
 		"bank.gov.ua":              100 * time.Millisecond,
 		"query1.finance.yahoo.com": 500 * time.Millisecond,
+		"api.nasdaq.com":           1000 * time.Millisecond,
+		"www.sec.gov":              200 * time.Millisecond, // SEC: не больше десяти запросов в секунду
 	}
 }
 

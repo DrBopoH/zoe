@@ -23,6 +23,20 @@ CREATE TABLE IF NOT EXISTS market_bonds (
 	PRIMARY KEY (source, id)
 );
 CREATE INDEX IF NOT EXISTS idx_market_maturity ON market_bonds(maturity);
+CREATE TABLE IF NOT EXISTS market_companies (
+	ticker TEXT NOT NULL PRIMARY KEY, -- в записи SEC и Yahoo (BRK-B)
+	name TEXT NOT NULL DEFAULT '',
+	exchange TEXT NOT NULL DEFAULT '',
+	cik INTEGER NOT NULL DEFAULT 0,
+	sector TEXT NOT NULL DEFAULT '',
+	industry TEXT NOT NULL DEFAULT '',
+	country TEXT NOT NULL DEFAULT '',
+	ipo_year INTEGER NOT NULL DEFAULT 0,
+	market_cap REAL NOT NULL DEFAULT 0,
+	price REAL NOT NULL DEFAULT 0,
+	updated_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_market_companies_cap ON market_companies(market_cap DESC);
 `
 
 // SaveMarketBonds кладёт бумаги в кеш. Пришедшее пустое (нет ставки, даты, доходности) не затирает уже известное:
@@ -84,6 +98,66 @@ func (s *Storage) MarketBonds(source string) ([]market.Security, error) {
 			return nil, err
 		}
 		list = append(list, b)
+	}
+	return list, rows.Err()
+}
+
+// SaveMarketCompanies заменяет список компаний целиком: каждый опрос даёт полный снимок (кто сошёл с биржи, того в списке больше нет).
+// Пустой список ничего не меняет: сбой источника не должен стирать прошлый снимок.
+func (s *Storage) SaveMarketCompanies(list []market.Company, nowUnix int64) error {
+	if len(list) == 0 {
+		return nil
+	}
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	defer s.bump()
+	tx, err := s.cacheDB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM market_companies`); err != nil {
+		return err
+	}
+	for _, c := range list {
+		if c.Ticker == "" {
+			continue
+		}
+		if _, err := tx.Exec(`
+			INSERT OR REPLACE INTO market_companies(ticker, name, exchange, cik, sector, industry, country, ipo_year, market_cap, price, updated_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+			strings.ToUpper(c.Ticker), c.Name, c.Exchange, c.CIK, c.Sector, c.Industry, c.Country, c.IPOYear, c.MarketCap, c.Price, nowUnix); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// MarketCompanies — список компаний, крупные по капитализации первыми. q — часть тикера или названия (без учёта регистра), limit 0 — все.
+func (s *Storage) MarketCompanies(q string, limit int) ([]market.Company, error) {
+	query := `SELECT ticker, name, exchange, cik, sector, industry, country, ipo_year, market_cap, price FROM market_companies`
+	var args []any
+	if q = strings.ToUpper(strings.TrimSpace(q)); q != "" {
+		query += ` WHERE instr(UPPER(ticker), ?) > 0 OR instr(UPPER(name), ?) > 0`
+		args = append(args, q, q)
+	}
+	query += ` ORDER BY market_cap DESC, ticker`
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	rows, err := s.cacheDB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	list := []market.Company{}
+	for rows.Next() {
+		var c market.Company
+		if err := rows.Scan(&c.Ticker, &c.Name, &c.Exchange, &c.CIK, &c.Sector, &c.Industry, &c.Country, &c.IPOYear, &c.MarketCap, &c.Price); err != nil {
+			return nil, err
+		}
+		list = append(list, c)
 	}
 	return list, rows.Err()
 }

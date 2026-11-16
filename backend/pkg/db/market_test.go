@@ -8,6 +8,49 @@ import (
 	"economic/pkg/market"
 )
 
+func TestMarketCompaniesSnapshotReplacesAndSearches(t *testing.T) {
+	d := t.TempDir()
+	s, err := NewStorage(filepath.Join(d, "c.db"), filepath.Join(d, "k.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	first := []market.Company{
+		{Ticker: "tsla", Name: "Tesla, Inc.", Exchange: "Nasdaq", CIK: 1318605, MarketCap: 1.3e12, Price: 420.5, IPOYear: 2010, Sector: "Consumer Discretionary"},
+		{Ticker: "AAPL", Name: "Apple Inc.", Exchange: "Nasdaq", CIK: 320193, MarketCap: 4.5e12, Price: 300},
+		{Ticker: "OLD", Name: "Old Corp", CIK: 1, MarketCap: 1e6, Price: 1},
+	}
+	if err := s.SaveMarketCompanies(first, 1); err != nil {
+		t.Fatal(err)
+	}
+	all, err := s.MarketCompanies("", 0)
+	if err != nil || len(all) != 3 || all[0].Ticker != "AAPL" || all[1].Ticker != "TSLA" || all[1].CIK != 1318605 || all[1].IPOYear != 2010 {
+		t.Fatalf("крупные первыми, тикер в верхнем регистре: %v %+v", err, all)
+	}
+	if got, _ := s.MarketCompanies("tes", 0); len(got) != 1 || got[0].Ticker != "TSLA" {
+		t.Fatalf("поиск по названию без регистра: %+v", got)
+	}
+	if got, _ := s.MarketCompanies("", 2); len(got) != 2 {
+		t.Fatalf("limit: %+v", got)
+	}
+	// новый снимок заменяет прежний целиком; пустой — ничего не меняет
+	if err := s.SaveMarketCompanies([]market.Company{{Ticker: "AAPL", Name: "Apple Inc.", CIK: 320193, MarketCap: 5e12, Price: 310}}, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveMarketCompanies(nil, 3); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.MarketCompanies("", 0); len(got) != 1 || got[0].MarketCap != 5e12 {
+		t.Fatalf("замена снимка: %+v", got)
+	}
+	if err := s.WipeCache(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.MarketCompanies("", 0); len(got) != 0 {
+		t.Fatalf("«стереть кеш» уносит и список компаний: %+v", got)
+	}
+}
+
 func TestMarketBondsMergeKeepsKnownAndFeedsICUTerms(t *testing.T) {
 	d := t.TempDir()
 	s, err := NewStorage(filepath.Join(d, "c.db"), filepath.Join(d, "k.db"))
