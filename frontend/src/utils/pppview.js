@@ -23,7 +23,8 @@ export const PPP_COUNTRIES = [
   { cc: 'au', name: 'Австралия', cur: 'AUD', sym: 'A$' },
   { cc: 'br', name: 'Бразилия', cur: 'BRL', sym: 'R$' },
   { cc: 'sa', name: 'Саудовская Аравия', cur: 'SAR', sym: 'SR' },
-  { cc: 'ae', name: 'ОАЭ', cur: 'AED', sym: 'DH' }
+  { cc: 'ae', name: 'ОАЭ', cur: 'AED', sym: 'DH' },
+  { cc: 'in', name: 'Индия', cur: 'INR', sym: '₹' }
 ]
 export const countryOf = (cc) => PPP_COUNTRIES.find((c) => c.cc === cc) || null
 const base = (cc) => (cc === 'ez' ? 'de' : cc) // индекс цен и PPP-коэффициент еврозоны — немецкие
