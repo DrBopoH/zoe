@@ -25,13 +25,13 @@ func reerServer(t *testing.T, failID string) *httptest.Server {
 func TestREERBuildsAllCountries(t *testing.T) {
 	pts, res := econClient(reerServer(t, "")).REER(context.Background(), nil)
 	by := byID(pts)
-	if res.Error != "" || res.Source != SourceFX || len(by) != 12 || res.Fetched != len(pts) {
+	if res.Error != "" || res.Source != SourceFX || len(by) != 14 || res.Fetched != len(pts) {
 		t.Fatalf("%+v %v", res, by)
 	}
 	if r := by["reer_ez"]; len(r) != 2 || r[1].Value != 102.25 || r[1].Date != "2026-07-01" {
 		t.Fatalf("еврозона = BIS-код XM: %+v", r)
 	}
-	for _, cc := range []string{"us", "gb", "ch", "jp", "cn", "ru", "pl", "tr", "no", "se", "ca"} {
+	for _, cc := range []string{"us", "gb", "ch", "jp", "cn", "ru", "pl", "tr", "no", "se", "ca", "kr", "tw"} {
 		if len(by[SerREER(cc)]) != 2 {
 			t.Errorf("нет reer_%s", cc)
 		}
@@ -41,7 +41,7 @@ func TestREERBuildsAllCountries(t *testing.T) {
 func TestREEROneFailureKeepsRest(t *testing.T) {
 	pts, res := econClient(reerServer(t, "RBTRBIS")).REER(context.Background(), nil)
 	by := byID(pts)
-	if !strings.Contains(res.Error, "RBTRBIS") || len(by["reer_tr"]) != 0 || len(by["reer_us"]) == 0 || len(by) != 11 {
+	if !strings.Contains(res.Error, "RBTRBIS") || len(by["reer_tr"]) != 0 || len(by["reer_us"]) == 0 || len(by) != 13 {
 		t.Fatalf("упал только reer_tr: %q %v", res.Error, len(by))
 	}
 	c := NewClient()

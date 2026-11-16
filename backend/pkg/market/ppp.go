@@ -37,7 +37,7 @@ const (
 // pppCountries — страны набора: код реестра (country.go) и ISO-3 Всемирного банка. de — Германия: запасной вариант для еврозоны.
 var pppCountries = []struct{ cc, iso3 string }{
 	{"ua", "UKR"}, {"us", "USA"}, {"ez", "EMU"}, {"gb", "GBR"}, {"ch", "CHE"}, {"jp", "JPN"}, {"cn", "CHN"}, {"ru", "RUS"},
-	{"pl", "POL"}, {"tr", "TUR"}, {"no", "NOR"}, {"se", "SWE"}, {"ca", "CAN"}, {"eg", "EGY"}, {"de", "DEU"},
+	{"pl", "POL"}, {"tr", "TUR"}, {"no", "NOR"}, {"se", "SWE"}, {"ca", "CAN"}, {"eg", "EGY"}, {"kr", "KOR"}, {"de", "DEU"},
 }
 
 // pppIndicators — показатели Всемирного банка; noEZ — у еврозоны (EMU) ряда нет.
@@ -55,7 +55,7 @@ var pppIndicators = []struct {
 // bigMacISO — страны Биг Мака (у еврозоны код EUZ); Германии нет — отдельного ряда по ней не бывает.
 var bigMacISO = map[string]string{
 	"UKR": "ua", "USA": "us", "EUZ": "ez", "GBR": "gb", "CHE": "ch", "JPN": "jp", "CHN": "cn",
-	"RUS": "ru", "POL": "pl", "TUR": "tr", "NOR": "no", "SWE": "se", "CAN": "ca", "EGY": "eg",
+	"RUS": "ru", "POL": "pl", "TUR": "tr", "NOR": "no", "SWE": "se", "CAN": "ca", "EGY": "eg", "KOR": "kr",
 }
 
 // pppSeries — полный перечень рядов источника (для каталога).
