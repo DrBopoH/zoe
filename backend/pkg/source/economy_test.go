@@ -127,3 +127,40 @@ func TestEconomyFileValidationAndDedup(t *testing.T) {
 		t.Fatalf("пустой набор — ничего не пишется: %v", err)
 	}
 }
+
+func TestPutSeriesMergesAndLoadSeriesFindsOnlyMacroSets(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	a := slotOf(2026, 11, 1, 0)
+	d := int64(86400)
+	if err := s.PutSeries(MacroCard("us"), map[string][]Tick{"fed_funds": {{a, 4.0}, {a + d, 4.1}}, "us_vix": {{a, 16}}}); err != nil {
+		t.Fatal(err)
+	}
+	// сбой части источника: пришёл только fed_funds — us_vix в файле остаётся
+	if err := s.PutSeries(MacroCard("us"), map[string][]Tick{"fed_funds": {{a, 4.0}, {a + d, 4.1}, {a + 2*d, 4.2}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendTicks(SetChainTicks, 3600, a, map[string]float64{"p2p_ask": 41}); err != nil { // снимки в macro-* не попадают
+		t.Fatal(err)
+	}
+	files, bad := s.ListEconomy(MacroCard("us"))
+	if len(bad) != 0 || len(files) != 1 {
+		t.Fatalf("набор — один файл: %d %v", len(files), bad)
+	}
+	got, created := s.LoadSeries()
+	if len(got) != 2 || len(got["fed_funds"]) != 3 || got["fed_funds"][2] != (Tick{a + 2*d, 4.2}) || len(got["us_vix"]) != 1 || created == 0 {
+		t.Fatalf("ряды: %+v created=%d", got, created)
+	}
+	if _, ok := got["p2p_ask"]; ok {
+		t.Fatal("часовые снимки — отдельный набор")
+	}
+	// тот же состав — файл не плодится
+	if err := s.PutSeries(MacroCard("us"), map[string][]Tick{"fed_funds": {{a, 4.0}, {a + d, 4.1}, {a + 2*d, 4.2}}}); err != nil {
+		t.Fatal(err)
+	}
+	if files, _ := s.ListEconomy(MacroCard("us")); len(files) != 1 {
+		t.Fatalf("повтор: %d файлов", len(files))
+	}
+	if got, _ := (Store{Dir: t.TempDir()}).LoadSeries(); len(got) != 0 {
+		t.Fatalf("пусто: %+v", got)
+	}
+}

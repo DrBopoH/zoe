@@ -127,6 +127,10 @@ func (s *Server) startMarket(ctx context.Context, only string, quiet bool) bool 
 						if err := s.storage.SaveMacroSeries(pts, now, res.Tail...); err != nil {
 							res.Error = strings.TrimSpace(res.Error + " сохранение: " + err.Error())
 						}
+						// воспроизводимые ряды источника — в файл группы «Экономика»: из него кеш собирается заново (RestoreEconomy)
+						if err := s.persistSeries(f.ID, pts); err != nil {
+							res.Error = strings.TrimSpace(res.Error + " файл рядов: " + err.Error())
+						}
 						// снимки (P2P, комиссии, доминация) заодно копятся по часам в файле группы «Экономика»: заново их не получить
 						step := int64(s.tickEvery().Seconds())
 						if err := store().AppendTicks(source.SetChainTicks, step, now-now%step, snapshotValues(pts)); err != nil {

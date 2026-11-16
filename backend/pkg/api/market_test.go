@@ -347,3 +347,53 @@ func TestMarketScheduleQuietRunIsHiddenFromStatus(t *testing.T) {
 		t.Fatalf("фоновый опрос не виден в статусе: %+v", snap)
 	}
 }
+
+func TestEconomyFilesRebuildMacroCache(t *testing.T) {
+	s := newMarketServer(t, true)
+	t.Setenv("ECONOMIC_SOURCES_DIR", t.TempDir())
+	now := time.Now().Unix()
+	// опрос источника «us»: ряды уходят и в кеш, и в файл группы «Экономика»
+	pts := []market.SeriesPoint{{Series: "fed_funds", Date: "2026-11-10", Value: 4.0}, {Series: "fed_funds", Date: "2026-11-11", Value: 4.1}, {Series: "us_vix", Date: "2026-11-11", Value: 16}}
+	if err := s.storage.SaveMacroSeries(pts, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.persistSeries("us", pts); err != nil {
+		t.Fatal(err)
+	}
+	files, _ := store().LoadSeries()
+	if len(files["fed_funds"]) != 2 || len(files["us_vix"]) != 1 {
+		t.Fatalf("файл набора: %+v", files)
+	}
+	// часовые снимки за два дня: в кеш вернётся последнее значение каждого дня
+	h := int64(3600)
+	day := time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC).Unix()
+	for i, v := range []float64{41.0, 41.2, 41.5} {
+		if err := store().AppendTicks(source.SetChainTicks, h, day+int64(i)*14*h, map[string]float64{market.SerP2PAsk: v}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// кеш стёрт, кроме одного свежего ряда: он не перетирается файлом
+	if err := s.storage.WipeCache(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.storage.SaveMacroSeries([]market.SeriesPoint{{Series: "us_vix", Date: "2026-11-12", Value: 99}}, now); err != nil {
+		t.Fatal(err)
+	}
+	n, err := s.RestoreEconomy()
+	if err != nil || n != 2 { // fed_funds и p2p_ask; us_vix уже есть
+		t.Fatalf("восстановлено рядов: %d %v", n, err)
+	}
+	got, _, err := s.storage.MacroSeries(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got["fed_funds"]) != 2 || len(got["us_vix"]) != 1 || got["us_vix"][0].Value != 99 {
+		t.Fatalf("кеш: %+v", got)
+	}
+	if p := got[market.SerP2PAsk]; len(p) != 2 || p[1].Value != 41.5 {
+		t.Fatalf("снимки по дням: %+v", p)
+	}
+	if n, _ := s.RestoreEconomy(); n != 0 { // повтор ничего не добавляет
+		t.Fatalf("повторное восстановление: %d", n)
+	}
+}

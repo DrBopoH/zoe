@@ -18,7 +18,13 @@ const (
 
 	// SetChainTicks — набор часовых снимков контура (папка economy/chain-ticks, файл на месяц).
 	SetChainTicks = "chain-ticks"
+
+	// MacroPrefix — наборы воспроизводимых макро-рядов: один набор на источник (macro-fx, macro-us…), один файл на набор.
+	MacroPrefix = "macro-"
 )
+
+// MacroCard — набор рядов источника feed.
+func MacroCard(feed string) string { return MacroPrefix + feed }
 
 // Dataset — таблица рядов набора: id ряда → точки по возрастанию времени (unix-секунды, значение).
 type Dataset struct {
@@ -177,4 +183,71 @@ func (s Store) LastTick(set string) int64 {
 		}
 	}
 	return last
+}
+
+// PutSeries складывает ряды в файл набора card (один файл на набор, имя набора = card). Ряды из set заменяют одноимённые в файле целиком,
+// остальные ряды файла остаются — сбой части источника не стирает то, что уже лежит. Прежний файл удаляется после успешной записи нового.
+func (s Store) PutSeries(card string, set map[string][]Tick) error {
+	if len(set) == 0 {
+		return nil
+	}
+	list, _ := s.ListEconomy(card)
+	var old *Entry
+	data := &Dataset{Name: card, Series: map[string]*Points{}}
+	for i := range list {
+		if d := list[i].File.Data; d != nil && d.Name == card {
+			old = &list[i]
+			for id, p := range d.Series {
+				data.Series[id] = p
+			}
+			break
+		}
+	}
+	for id, ticks := range set {
+		if len(ticks) == 0 {
+			continue
+		}
+		p := &Points{T: make([]int64, len(ticks)), V: make([]float64, len(ticks))}
+		for i, t := range ticks {
+			p.T[i], p.V[i] = t.T, t.V
+		}
+		data.Series[id] = p
+	}
+	f := &File{Name: card, Origin: OriginAPI, Kind: KindDataset, Group: GroupEconomy, Card: card, Data: data}
+	dst, added, err := s.Put(f)
+	if err != nil {
+		return err
+	}
+	if old != nil && added && old.Path != dst {
+		if err := os.Remove(old.Path); err != nil {
+			return fmt.Errorf("прежний файл набора: %w", err)
+		}
+	}
+	return nil
+}
+
+// LoadSeries — все ряды из наборов macro-*: id → точки по возрастанию времени, и время создания самого свежего файла (unix).
+// Из таких файлов собирается кеш макро-рядов, когда он пуст.
+func (s Store) LoadSeries() (map[string][]Tick, int64) {
+	out := map[string][]Tick{}
+	var newest int64
+	list, _ := s.ListEconomy("")
+	for _, e := range list {
+		if !strings.HasPrefix(e.File.Card, MacroPrefix) || e.File.Data == nil {
+			continue
+		}
+		if e.File.Created > newest {
+			newest = e.File.Created
+		}
+		for id, p := range e.File.Data.Series {
+			ticks := make([]Tick, 0, len(p.T))
+			for i, t := range p.T {
+				if i < len(p.V) {
+					ticks = append(ticks, Tick{t, p.V[i]})
+				}
+			}
+			out[id] = ticks
+		}
+	}
+	return out, newest
 }

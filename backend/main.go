@@ -54,6 +54,12 @@ func main() {
 	server.SetBinance(binance.NewClient())
 	// Облигации: ОВДП и US Treasury из публичных API, обновление только по запросу
 	server.SetMarket(market.NewClient())
+	// Кеш макро-рядов, если он пуст (первый запуск после «стереть кеш» или переезда), собирается из файлов группы «Экономика»
+	if n, err := server.RestoreEconomy(); err != nil {
+		log.Printf("WARNING: кеш рядов из файлов не собран: %v", err)
+	} else if n > 0 {
+		log.Printf("INFO: из файлов «Экономики» в кеш добавлено рядов: %d", n)
+	}
 	// Снимки крипто-контура (P2P-цена, комиссии сетей, доминация) копятся сами раз в MARKET_EVERY (по умолчанию час; 0 — выключено)
 	every := market.TickEvery
 	if v := os.Getenv("MARKET_EVERY"); v != "" {

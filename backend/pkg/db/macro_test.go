@@ -156,3 +156,21 @@ func TestMacroStats(t *testing.T) {
 		t.Fatalf("статистика: %+v", st)
 	}
 }
+
+func TestWipeCacheClearsMacroSeries(t *testing.T) {
+	d := t.TempDir()
+	s, err := NewStorage(filepath.Join(d, "c.db"), filepath.Join(d, "k.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.SaveMacroSeries([]market.SeriesPoint{{Series: "policy_rate", Date: "2026-01-01", Value: 15.5}}, 10); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WipeCache(); err != nil {
+		t.Fatal(err)
+	}
+	if all, _, err := s.MacroSeries(nil); err != nil || len(all) != 0 {
+		t.Fatalf("вайп кеша стирает базу кеша целиком, и макро-ряды тоже: %+v %v", all, err)
+	}
+}
