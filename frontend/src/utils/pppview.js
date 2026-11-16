@@ -19,7 +19,9 @@ export const PPP_COUNTRIES = [
   { cc: 'se', name: 'Швеция', cur: 'SEK', sym: 'kr' },
   { cc: 'ca', name: 'Канада', cur: 'CAD', sym: 'C$' },
   { cc: 'eg', name: 'Египет', cur: 'EGP', sym: 'E£' },
-  { cc: 'kr', name: 'Южная Корея', cur: 'KRW', sym: '₩' }
+  { cc: 'kr', name: 'Южная Корея', cur: 'KRW', sym: '₩' },
+  { cc: 'au', name: 'Австралия', cur: 'AUD', sym: 'A$' },
+  { cc: 'br', name: 'Бразилия', cur: 'BRL', sym: 'R$' }
 ]
 export const countryOf = (cc) => PPP_COUNTRIES.find((c) => c.cc === cc) || null
 const base = (cc) => (cc === 'ez' ? 'de' : cc) // индекс цен и PPP-коэффициент еврозоны — немецкие
