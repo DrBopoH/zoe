@@ -1,4 +1,5 @@
 <script setup>
+import { pushRequestError } from '../composables/useToasts.js'
 import { ref, computed, watch } from 'vue'
 import { formatMaskedIBAN, validateAndCleanAccount, isMaskedPan } from '../utils/formatters.js'
 import { isIbanLike, idKey, detectBankKey } from '../utils/personLayout.js'
@@ -203,7 +204,7 @@ const pasteFromClipboard = async (isChild = false) => {
       addRootAccount()
     }
   } catch (err) {
-    console.error('Paste error:', err)
+    pushRequestError('Не удалось вставить из буфера', err)
   }
 }
 

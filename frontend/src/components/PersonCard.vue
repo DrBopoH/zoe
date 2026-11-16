@@ -1,4 +1,5 @@
 <script setup>
+import { pushRequestError } from '../composables/useToasts.js'
 import { computed, ref } from 'vue'
 import { formatMaskedIBAN, lifeSpan } from '../utils/formatters.js'
 import MaskedId from './ui/MaskedId.vue'
@@ -78,7 +79,7 @@ const pasteFromClipboard = async (eventName) => {
     const text = await readClipboardText()
     if (text) emit(eventName, props.user, text)
   } catch (err) {
-    console.error('Clipboard read error:', err)
+    pushRequestError('Не удалось прочитать буфер обмена', err)
   }
 }
 const onPasteAvatar = () => pasteFromClipboard('paste-avatar')

@@ -4,7 +4,7 @@ import { formatMaskedIBAN } from '../../utils/formatters.js'
 import { parseMask, flagEmoji, bankMark, binanceMark, failedLogos } from '../../utils/ibanMask.js'
 import { writeClipboardText } from '../../utils/clipboard.js'
 import { useIbanMasks } from '../../composables/useIbanMasks.js'
-import { pushToast } from '../../composables/useToasts.js'
+import { pushToast, pushRequestError } from '../../composables/useToasts.js'
 import UiIcon from './UiIcon.vue'
 
 // Номер счёта или карты. Показ: скрытый вид (для IBAN — флаг, контрольные цифры, значок банка, 4 первые … 4 последние
@@ -60,7 +60,7 @@ const onKey = (e) => {
 const commit = async () => {
   if (!editing.value) return
   editing.value = false
-  try { await saveMask(props.id, draft.value) } catch (err) { console.error('Mask save error:', err) }
+  try { await saveMask(props.id, draft.value) } catch (err) { pushRequestError('Не удалось сохранить маску', err) }
 }
 </script>
 
