@@ -45,7 +45,7 @@ export function scaleTicks(mode, lo, hi, max = 6) {
 // Первое число месяца через n месяцев от даты (UTC)
 const addMonths = (d, n) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n, 1))
 
-// Деления оси времени: годы, если окно широкое, иначе месяцы. Возвращает [{ t, label }] (t — годы от today)
+// Деления оси времени: годы, если окно широкое, иначе месяцы; в окне уже 55 дней — дни и часы. Возвращает [{ t, label }] (t — годы от today)
 export function timeTicks(x0, x1, today) {
   const t0 = Date.parse(`${today}T00:00:00Z`)
   const dateAt = (t) => new Date(t0 + t * YEAR_DAYS * 86400000)
@@ -53,7 +53,17 @@ export function timeTicks(x0, x1, today) {
   const span = x1 - x0
   const out = []
   if (!isFinite(x0) || !isFinite(x1) || !(span > 0)) return out // NaN в окне не должен зациклить деления
-  if (span >= 3) {
+  if (span < 0.15) { // окно в дни и часы (часовые снимки): шаг подбирается так, чтобы делений было не больше восьми; полночь подписана датой
+    const H = 3600000, win = span * YEAR_DAYS * 86400000
+    const step = [1, 2, 3, 6, 12, 24, 48, 96, 168, 336].find((h) => win / (h * H) <= 8) || 720
+    const a = t0 + x0 * YEAR_DAYS * 86400000
+    for (let ms = Math.ceil(a / (step * H)) * step * H, guard = 0; guard < 40; ms += step * H, guard++) {
+      const t = (ms - t0) / (YEAR_DAYS * 86400000)
+      if (t > x1) break
+      const d = new Date(ms), mid = d.getUTCHours() === 0
+      out.push({ t, label: step >= 24 || mid ? `${String(d.getUTCDate()).padStart(2, '0')}.${String(d.getUTCMonth() + 1).padStart(2, '0')}` : `${String(d.getUTCHours()).padStart(2, '0')}:00` })
+    }
+  } else if (span >= 3) {
     const step = span > 40 ? 10 : span > 20 ? 5 : span > 9 ? 2 : 1
     const y0 = dateAt(x0).getUTCFullYear()
     for (let y = Math.ceil(y0 / step) * step, guard = 0; guard < 200; y += step, guard++) {

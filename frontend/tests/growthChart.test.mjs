@@ -121,3 +121,14 @@ test('кривая рисуется только в видимом окне и �
   const out = buildGrowthChart({ items, amount: 1000, today, view: { x0: 20, x1: 21 } })
   assert.equal(out.lines.find((l) => l.id === 'A').solid, '') // линия уже погасла — в окне её нет
 })
+
+test('узкое окно: деления по часам и суткам, полночь — датой', () => {
+  const day = 1 / 365.25
+  const hours = timeTicks(-1.5 * day, 0.1 * day, '2026-11-17')
+  assert.ok(hours.length >= 2 && hours.length <= 9, `делений: ${hours.length}`)
+  assert.ok(hours.every((t) => /^\d\d:00$|^\d\d\.\d\d$/.test(t.label)))
+  assert.ok(hours.every((t, i) => i === 0 || t.t > hours[i - 1].t))
+  const days = timeTicks(-20 * day, 0, '2026-11-17')
+  assert.ok(days.length >= 2 && days.every((t) => /^\d\d\.\d\d$/.test(t.label)), days.map((t) => t.label).join())
+  assert.ok(timeTicks(-0.5, 0, '2026-11-17').every((t) => /^\d\d\.\d{4}$/.test(t.label)), 'широкое окно — месяцы как раньше')
+})

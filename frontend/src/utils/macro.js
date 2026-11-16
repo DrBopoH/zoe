@@ -364,7 +364,7 @@ export function annualChange(points, todayIso, years) {
 }
 
 const DAY = 86400000
-const ms = (iso) => Date.parse(`${iso}T00:00:00Z`)
+const ms = (iso) => Date.parse(iso.length > 10 ? `${iso}Z` : `${iso}T00:00:00Z`) // дата или «ГГГГ-ММ-ДДTЧЧ:ММ» (часовой снимок)
 
 // Значение ряда на дату: последняя точка не позже даты; раньше первой точки — null. Ряд отсортирован по возрастанию.
 export function valueAt(points, iso) {
@@ -433,18 +433,39 @@ const YEAR_MS = 365.25 * DAY
 // Годы от сегодня (отрицательные — прошлое): та же ось X, что у графика роста, поэтому и общий движок (composables/useChartView.js)
 export const yearsFrom = (iso, todayIso) => (ms(iso) - ms(todayIso)) / YEAR_MS
 export const isoAt = (years, todayIso) => new Date(ms(todayIso) + years * YEAR_MS).toISOString().slice(0, 10)
+// То же с минутами: для подсказки на часовых графиках (сравнение строк с датами остаётся верным — дата раньше той же даты со временем)
+export const stampAt = (years, todayIso) => new Date(ms(todayIso) + years * YEAR_MS).toISOString().slice(0, 16)
+
+// Часовая точка сервера (unix-секунды) → метка «ГГГГ-ММ-ДДTЧЧ:ММ» по местным часам: ось графиков считает по дате «сегодня» пользователя, и часы сходятся с его днём
+export const localStamp = (unix) => new Date(unix * 1000 - new Date(unix * 1000).getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+
+/**
+ * Дневной хвост ряда-снимка заменяется часовыми точками сервера (GET /api/macro/ticks): дни до первой точки остаются как были.
+ * ticks — { id: [{ t: unix, v }] }; ряд без часовых точек не трогается.
+ */
+export function withTicks(series, ticks) {
+  const out = { ...series }
+  for (const [id, list] of Object.entries(ticks || {})) {
+    if (!Array.isArray(list) || !list.length) continue
+    const pts = list.map((p) => ({ d: localStamp(p.t), v: p.v }))
+    const from = pts[0].d.slice(0, 10)
+    out[id] = (out[id] || []).filter((p) => p.d < from).concat(pts)
+  }
+  return out
+}
 
 const usable = (series, ids) => (ids || []).filter((id) => series && series[id] && series[id].length)
 
 /** Окно по умолчанию: years лет назад (0 — с первой точки, весь период), до сегодня с небольшим запасом справа. Левее первой точки данных не уходит. */
-export function macroWindow({ series, ids, todayIso, years = 0 }) {
+export function macroWindow({ series, ids, todayIso, years = 0, minSpan = MACRO_MIN_SPAN }) {
   const use = usable(series, ids)
   if (!use.length) return { x0: -1, x1: 0.05 }
   const first = use.map((id) => series[id][0].d).sort()[0]
   const firstT = yearsFrom(first, todayIso)
   const left = years ? Math.max(-years, firstT) : firstT
-  const span = Math.max(-left, MACRO_MIN_SPAN)
-  return { x0: -span, x1: span * 0.02 }
+  const span = Math.max(-left, minSpan)
+  const last = Math.max(...use.map((id) => yearsFrom(series[id][series[id].length - 1].d, todayIso))) // часовые точки сегодняшнего дня лежат правее нуля
+  return { x0: -span, x1: Math.max(span * 0.02, last + span * 0.02) }
 }
 
 /** Вертикаль: auto — под видимое окно без редких выбросов (один сбойный месяц не должен сплющивать график), ext — крайности по всем данным. */
