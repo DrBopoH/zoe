@@ -1,5 +1,7 @@
 package market
 
+import "sort"
+
 // Страна в каталоге: код (ISO-2 в нижнем регистре, «ez» — еврозона), имя, валюта и какой ряд отвечает за каждый показатель карточки.
 // Страны еврозоны по отдельности сюда не входят: еврозона — одна карточка «ez», сравнение стран-членов лежит внутри раздела «Еврозона» (ezm.go).
 // Новая страна = одна запись здесь + её источник в Feeds; фронт, каталог и тесты ничего больше не требуют.
@@ -11,6 +13,9 @@ type Country struct {
 	Currency string            `json:"currency"`
 	Source   string            `json:"source"` // источник, который опрашивает «Обновить» в карточке страны
 	Metrics  map[string]string `json:"metrics"`
+	// Sources — все источники, из которых собрана карточка: свой первым, затем те, что дают остальные показатели (курс, реальный курс, безработица…).
+	// «Обновить» в карточке опрашивает их все. Заполняет WithSources по каталогу рядов, руками не ведётся.
+	Sources []string `json:"sources"`
 }
 
 // Countries — страны набора в порядке показа. Показатели — id рядов, которые уже отдаёт Catalog.
@@ -49,4 +54,33 @@ func Countries() []Country {
 		{CC: "tw", Name: "Тайвань", Currency: "TWD", Source: SourceTW, Metrics: map[string]string{
 			"reer": SerREER("tw"), "stock": SerWM("tw")}},
 	}
+}
+
+// WithSources проставляет каждой стране источники её показателей по каталогу рядов (Client.Catalog: источник → его ряды).
+// Показатель, которого нет в каталоге, пропускается; свой источник страны идёт первым и всегда есть.
+func WithSources(list []Country, cat map[string][]string) []Country {
+	owner := map[string]string{}
+	for feed, ids := range cat {
+		for _, id := range ids {
+			owner[id] = feed
+		}
+	}
+	out := make([]Country, len(list))
+	for i, c := range list {
+		keys := make([]string, 0, len(c.Metrics))
+		for k := range c.Metrics {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		c.Sources = []string{c.Source}
+		seen := map[string]bool{c.Source: true}
+		for _, k := range keys {
+			if f := owner[c.Metrics[k]]; f != "" && !seen[f] {
+				seen[f] = true
+				c.Sources = append(c.Sources, f)
+			}
+		}
+		out[i] = c
+	}
+	return out
 }

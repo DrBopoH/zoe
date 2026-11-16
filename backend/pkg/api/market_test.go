@@ -143,6 +143,9 @@ func TestMacroSyncOnlyAndEmptyCache(t *testing.T) {
 	if code, _ := call(t, s.HandleMacro, http.MethodPost, "/api/macro", ""); code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST на macro: %d", code)
 	}
+	if code, _ := call(t, s.HandleMarketSync, http.MethodPost, "/api/market/sync?source=macro,xx", ""); code != http.StatusBadRequest {
+		t.Fatalf("неизвестный источник в списке: %d", code)
+	}
 	if code, _ := call(t, s.HandleMarketSync, http.MethodPost, "/api/market/sync?source=macro", ""); code != 200 {
 		t.Fatalf("source=macro: %d", code)
 	}
@@ -257,10 +260,19 @@ func TestMacroCatalog(t *testing.T) {
 	s := newMarketServer(t, true)
 	_, body := call(t, s.HandleMacroCatalog, http.MethodGet, "/api/macro/catalog", "")
 	var r struct {
-		Feeds map[string][]string `json:"feeds"`
+		Feeds     map[string][]string `json:"feeds"`
+		Countries []struct {
+			CC      string   `json:"cc"`
+			Sources []string `json:"sources"`
+		} `json:"countries"`
 	}
 	if json.Unmarshal(body, &r) != nil || len(r.Feeds["us"]) != 5 || r.Feeds["us"][0] != "fed_funds" || len(r.Feeds["stocks"]) != 3 {
 		t.Fatalf("каталог: %s", body)
+	}
+	for _, c := range r.Countries {
+		if c.CC == "tw" && strings.Join(c.Sources, ",") != "tw,fx" {
+			t.Fatalf("карточка Тайваня собирается из своего источника и «Курсов»: %v", c.Sources)
+		}
 	}
 	if code, _ := call(t, s.HandleMacroCatalog, http.MethodPost, "/api/macro/catalog", ""); code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST: %d", code)
