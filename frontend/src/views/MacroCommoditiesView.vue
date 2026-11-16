@@ -5,6 +5,9 @@ import MarketHeader from '../components/MarketHeader.vue'
 import { useMarketRefresh } from '../composables/useMarketRefresh.js'
 import { lastPoint, signedPct, dateOf } from '../utils/macro.js'
 import { COMMODITY_GROUPS, commodityView, commodityRows, groupIds, priceText } from '../utils/commodities.js'
+import UiCard from '../components/ui/UiCard.vue'
+import UiEmpty from '../components/ui/UiEmpty.vue'
+import UiNotice from '../components/ui/UiNotice.vue'
 
 // Экран «Сырьё»: нефть, газ, металлы, зерно, сахар и кофе (FRED, Всемирный банк) и четыре драгоценных металла из курсов НБУ.
 // Переключатель «$ / ₴» пересчитывает всё по курсу доллара НБУ на дату каждой точки.
@@ -34,9 +37,9 @@ const usdMissing = computed(() => mode.value === 'uah' && !props.com.usd_uah?.le
       </span>
     </MarketHeader>
 
-    <div v-if="usdMissing" class="rounded-lg border border-amber-900/50 bg-amber-950/20 px-3 py-2 text-xs text-amber-300">Курса доллара пока нет: открой раздел «Курсы» и нажми «Обновить», тогда цены в гривнах появятся.</div>
+    <UiNotice v-if="usdMissing">Курса доллара пока нет: открой раздел «Курсы» и нажми «Обновить», тогда цены в гривнах появятся.</UiNotice>
 
-    <section class="rounded-lg border border-slate-800 bg-slate-900/40 overflow-x-auto">
+    <UiCard class="overflow-x-auto">
       <table v-if="hasAny" class="w-full text-xs tabular-nums">
         <thead class="text-[10px] uppercase tracking-wider text-slate-500">
           <tr><th class="px-3 py-1.5 text-left font-bold">Товар</th><th class="px-2 text-right font-bold">За</th><th class="px-2 text-right font-bold">Цена, {{ sym }}</th><th class="px-3 text-right font-bold">За год</th></tr>
@@ -50,8 +53,8 @@ const usdMissing = computed(() => mode.value === 'uah' && !props.com.usd_uah?.le
           </tr>
         </tbody>
       </table>
-      <div v-else class="px-3 py-3 text-xs text-slate-500">{{ EMPTY }}</div>
-    </section>
+      <UiEmpty v-else>{{ EMPTY }}</UiEmpty>
+    </UiCard>
 
     <MacroPanel v-for="g in COMMODITY_GROUPS" :key="g.key" :title="`${g.title}, ${sym} за ${g.per}`" :unit="sym" :series="view" :today="today" :ids="groupIds(g.key)" :hint="g.hint" :empty="EMPTY">
       <template #summary>

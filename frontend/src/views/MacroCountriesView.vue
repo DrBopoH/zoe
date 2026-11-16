@@ -6,6 +6,7 @@ import { useMarketRefresh } from '../composables/useMarketRefresh.js'
 import { storageGet, storageSet } from '../utils/storage.js'
 import { countryRows, COUNTRY_PANELS } from '../utils/countries.js'
 import { dateOf, hasPoints } from '../utils/macro.js'
+import UiCard from '../components/ui/UiCard.vue'
 
 // Экран «Страны»: переключатель стран и карточка — главные показатели одной строкой каждый; клик по строке рисует её график.
 // Какие страны и ряды, решает сервер (реестр стран): новая страна появляется здесь без правок экрана.
@@ -43,7 +44,7 @@ const EMPTY = 'Нет данных. Нажми «Обновить»: подтя�
 
     <div v-if="!country" class="text-xs text-slate-500">Список стран ещё не пришёл с сервера.</div>
     <template v-else>
-      <div class="rounded-lg border border-slate-800 bg-slate-900/40 divide-y divide-slate-800/70">
+      <UiCard as="div" class="divide-y divide-slate-800/70">
         <div class="px-3 py-2 text-[11px] text-slate-500">{{ country.name }} · валюта {{ country.currency }}</div>
         <button
           v-for="r in rows" :key="r.key" type="button"
@@ -55,7 +56,7 @@ const EMPTY = 'Нет данных. Нажми «Обновить»: подтя�
           <b class="tabular-nums text-slate-100">{{ r.text }}</b>
           <span class="w-20 text-right text-[11px] text-slate-600 tabular-nums">{{ r.last ? dateOf(r.last.d) : '' }}</span>
         </button>
-      </div>
+      </UiCard>
 
       <MacroPanel v-if="chosen" :title="`${country.name}: ${chosen.label.toLowerCase()}`" :unit="chosen.unit" :series="series" :today="today" :ids="[chosen.id]" :empty="EMPTY" />
       <MacroPanel v-for="p in panels" :key="p.title" :title="p.title" :unit="p.unit" :series="series" :today="today" :ids="p.ids" :empty="EMPTY" />

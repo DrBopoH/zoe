@@ -2,6 +2,7 @@
 import { dmy } from '../utils/numfmt.js'
 import { computed } from 'vue'
 import { curveSnapshot, curveChart, lastPoint, plainPct } from '../utils/macro.js'
+import UiCard from './ui/UiCard.vue'
 
 // Снимок кривой доходности Treasury: как выглядит кривая сегодня и как выглядела год и пять лет назад.
 // Сроки идут по горизонтали равномерно (так кривую и принято рисовать), значение — по вертикали.
@@ -23,7 +24,7 @@ const tenYears = (s) => s.points.find((p) => p.id === 'ust_10y')?.v ?? null
 </script>
 
 <template>
-  <section class="rounded-lg border border-slate-800 bg-slate-900/40 p-3 space-y-2" data-testid="curve-snapshot">
+  <UiCard class="p-3 space-y-2" data-testid="curve-snapshot">
     <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
       <h3 class="font-bold text-slate-300 uppercase tracking-wider">Кривая доходности Treasury</h3>
       <span v-for="s in snaps" :key="s.key" class="inline-flex items-center gap-1.5 text-slate-400">
@@ -42,5 +43,5 @@ const tenYears = (s) => s.points.find((p) => p.id === 'ust_10y')?.v ?? null
       <path v-for="l in [...chart.lines].reverse()" :key="l.key" :d="l.d" fill="none" :stroke="l.color" :stroke-width="l.key === 'now' ? 2.2 : 1.4" stroke-linejoin="round" :data-line="l.key" />
     </svg>
     <p class="text-[11px] text-slate-600">Нормальная кривая идёт вверх: чем длиннее срок, тем выше доходность. Когда короткие ставки выше длинных, кривую называют инвертированной.</p>
-  </section>
+  </UiCard>
 </template>
