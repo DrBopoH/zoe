@@ -14,7 +14,7 @@ const SerREERPrefix = "reer_"
 var reerFRED = []struct{ cc, fred string }{
 	{"us", "RBUSBIS"}, {"ez", "RBXMBIS"}, {"gb", "RBGBBIS"}, {"ch", "RBCHBIS"}, {"jp", "RBJPBIS"}, {"cn", "RBCNBIS"},
 	{"ru", "RBRUBIS"}, {"pl", "RBPLBIS"}, {"tr", "RBTRBIS"}, {"no", "RBNOBIS"}, {"se", "RBSEBIS"}, {"ca", "RBCABIS"},
-	{"kr", "RBKRBIS"}, {"tw", "RBTWBIS"}, {"au", "RBAUBIS"}, {"br", "RBBRBIS"}, {"sa", "RBSABIS"}, {"ae", "RBAEBIS"},
+	{"kr", "RBKRBIS"}, {"tw", "RBTWBIS"}, {"au", "RBAUBIS"}, {"br", "RBBRBIS"}, {"sa", "RBSABIS"}, {"ae", "RBAEBIS"}, {"in", "RBINBIS"},
 }
 
 // SerREER — id ряда реального эффективного курса страны: reer_us, reer_ez, …
