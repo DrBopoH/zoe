@@ -281,7 +281,6 @@ export const SERIES = {
   aud_uah: { label: 'Австралийский доллар', color: '#facc15', step: false },
   br_policy: { label: 'Бразилия: ставка Selic', color: '#4ade80', step: true },
   br_cpi: { label: 'Инфляция Бразилии г/г', color: '#fb923c', step: false },
-  br_y10: { label: 'Бразилия: 10 лет', color: '#fbbf24', step: false },
   ca_u: { label: 'Безработица Канады', color: '#38bdf8', step: false },
   ca_y10: { label: 'Канада: 10 лет', color: '#fbbf24', step: false },
   cad_uah: { label: 'Канадский доллар', color: '#f87171', step: false },
