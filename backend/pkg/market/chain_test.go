@@ -28,8 +28,8 @@ func chainServer(t *testing.T, fail string) *httptest.Server {
 					`{"adv":{"price":"47.20","tradableQuantity":"1000","minSingleTransAmount":"1000","maxSingleTransAmount":"50000"}},` +
 					`{"adv":{"price":"47.10","tradableQuantity":"1000","minSingleTransAmount":"1000","maxSingleTransAmount":"50000"}}]}`))
 			} else {
-				w.Write([]byte(`{"data":[{"adv":{"price":"46.00","tradableQuantity":"1000","minSingleTransAmount":"20000","maxSingleTransAmount":"50000"}},` +
-					`{"adv":{"price":"46.00","tradableQuantity":"1000","minSingleTransAmount":"500","maxSingleTransAmount":"5000"}},` +
+				w.Write([]byte(`{"data":[{"adv":{"price":"46.00","tradableQuantity":"1000","minSingleTransAmount":"100000","maxSingleTransAmount":"200000"}},` +
+					`{"adv":{"price":"46.00","tradableQuantity":"1000","minSingleTransAmount":"500","maxSingleTransAmount":"800"}},` +
 					`{"adv":{"price":"46.20","tradableQuantity":"1000","minSingleTransAmount":"500","maxSingleTransAmount":"50000"}}]}`))
 			}
 		case strings.Contains(r.URL.Path, "fundingRate"):
@@ -183,5 +183,32 @@ func TestNextTickFollowsGridAcrossRestarts(t *testing.T) {
 	}
 	if NextTick(at(1, 0), time.Time{}, 0) != 0 {
 		t.Error("нулевой шаг — не ждать")
+	}
+}
+
+// Живой ответ Binance 16.11.2026: у большинства объявлений лимиты совпадают (фиксированная сумма). Раньше фильтр «влезает 10 000 ₴» отбрасывал все 20.
+func TestP2PPriceFromFixedAmountAds(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ad := func(p, q, lo, hi string) string {
+			return `{"adv":{"price":"` + p + `","tradableQuantity":"` + q + `","minSingleTransAmount":"` + lo + `","maxSingleTransAmount":"` + hi + `"}}`
+		}
+		w.Write([]byte(`{"data":[` + strings.Join([]string{
+			ad("46.34", "17.98", "500", "500"),      // пыль: сделка на 500 ₴
+			ad("46.36", "356.41", "1274", "1274"),   // 1-я рабочая
+			ad("46.37", "119.90", "718", "718"),     // пыль
+			ad("46.38", "99.92", "1149", "1150"),    // 2-я
+			ad("46.39", "99.93", "400", "400"),      // пыль
+			ad("46.40", "401.67", "18400", "18400"), // 3-я
+			ad("46.40", "149.92", "2555", "2555"),   // 4-я
+			ad("46.41", "143.14", "620", "621"),     // пыль
+			ad("46.43", "251.94", "522", "523"),     // пыль
+			ad("46.43", "99.92", "4490", "4490"),    // 5-я
+		}, ",") + `]}`))
+	}))
+	defer srv.Close()
+	c := chainClient(srv)
+	got, err := c.p2pPrice(context.Background(), "BUY")
+	if err != nil || got != 46.40 {
+		t.Fatalf("медиана пяти первых рабочих: %v %v", got, err)
 	}
 }

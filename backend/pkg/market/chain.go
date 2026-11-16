@@ -32,7 +32,7 @@ const (
 	SerFeeEthUSD   = "fee_eth_usd"  // перевод USDT по сети Ethereum (65 000 газа), $ — снимок
 	SerDomBTC      = "dom_btc"      // доля Bitcoin в капитализации крипторынка, % — снимок
 	SerMcapTotal   = "mcap_total"   // капитализация крипторынка, $ трлн — снимок
-	p2pTicketUAH   = 10000.0        // «рабочее» объявление: на сумму 10 000 ₴ хватает остатка и она вписывается в лимиты
+	p2pMinDealUAH  = 1000.0         // «рабочее» объявление: по нему реально можно провести сделку хотя бы на 1 000 ₴ (меньше — пыль, цену рынка не задаёт)
 	p2pTopN        = 5              // сколько первых рабочих объявлений усреднять (медиана)
 	btcTxVBytes    = 140.0          // типичный перевод: 1 вход, 2 выхода, segwit
 	tronEnergyUSDT = 65000.0        // энергия перевода USDT, если у получателя уже есть USDT
@@ -145,8 +145,8 @@ type p2pAdv struct {
 	} `json:"adv"`
 }
 
-// p2pPrice — типичная лучшая цена стороны: медиана первых p2pTopN рабочих объявлений. Объявление рабочее, если остатка хватает на 10 000 ₴ и сумма вписывается в его лимиты:
-// единичное объявление с крошечным остатком не должно задавать «рынок». side — BUY (покупаем USDT, платим гривной) или SELL.
+// p2pPrice — типичная лучшая цена стороны: медиана первых p2pTopN рабочих объявлений. Объявление рабочее, если по нему можно провести сделку хотя бы на p2pMinDealUAH
+// (остаток и лимиты): единичное объявление с крошечным остатком не должно задавать «рынок». side — BUY (покупаем USDT, платим гривной) или SELL.
 func (c *Client) p2pPrice(ctx context.Context, side string) (float64, error) {
 	payload := fmt.Sprintf(`{"fiat":"UAH","page":1,"rows":20,"tradeType":%q,"asset":"USDT","countries":[],"proMerchantAds":false,"shieldMerchantAds":false,"publisherType":null,"payTypes":[],"classifies":["mass","profession"]}`, side)
 	body, err := c.postJSON(ctx, strings.TrimRight(c.P2PBase, "/")+"/bapi/c2c/v2/friendly/c2c/adv/search", []byte(payload))
@@ -168,7 +168,13 @@ func (c *Client) p2pPrice(ctx context.Context, side string) (float64, error) {
 	for _, a := range r.Data {
 		price, qty := f64(a.Adv.Price), f64(a.Adv.Tradable)
 		lo, hi := f64(a.Adv.Min), f64(a.Adv.Max)
-		if price <= 0 || qty*price < p2pTicketUAH || lo > p2pTicketUAH || (hi > 0 && hi < p2pTicketUAH) {
+		// Сделка по объявлению — сколько оно может принять: остаток в гривнах, не больше верхнего лимита. У многих объявлений лимиты совпадают
+		// (фиксированная сумма: 1 274 ₴, 18 400 ₴), поэтому «своя» сумма пользователя в них не вписывается — смотрим на возможность сделки, а не на сумму.
+		deal := qty * price
+		if hi > 0 && hi < deal {
+			deal = hi
+		}
+		if price <= 0 || deal < p2pMinDealUAH || lo > deal {
 			continue
 		}
 		prices = append(prices, price)
@@ -177,7 +183,7 @@ func (c *Client) p2pPrice(ctx context.Context, side string) (float64, error) {
 		}
 	}
 	if len(prices) == 0 {
-		return 0, fmt.Errorf("P2P %s: из %d объявлений ни одно не подходит под %d ₴ (остаток или лимиты)", side, len(r.Data), int(p2pTicketUAH))
+		return 0, fmt.Errorf("P2P %s: из %d объявлений ни по одному нельзя провести сделку хотя бы на %d ₴ (остаток или лимиты)", side, len(r.Data), int(p2pMinDealUAH))
 	}
 	sort.Float64s(prices)
 	return prices[len(prices)/2], nil
