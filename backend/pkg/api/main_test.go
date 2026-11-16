@@ -4,6 +4,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
+
+	"economic/pkg/market"
 )
 
 // Тесты не должны трогать ничего за пределами временной папки. Импорт CSV кладёт файлы-источники в
@@ -18,6 +21,7 @@ func TestMain(m *testing.M) {
 	os.Setenv("ECONOMIC_SOURCES_DIR", tmp+"/sources")
 	os.Setenv("XDG_DATA_HOME", tmp+"/xdg")
 	os.Setenv("HOME", tmp+"/home")
+	market.DefaultRetryWait = time.Millisecond // повторы запросов к источникам не растягивают тесты
 	code := m.Run()
 	os.RemoveAll(tmp)
 	os.Exit(code)

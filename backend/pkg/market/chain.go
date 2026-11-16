@@ -154,10 +154,15 @@ func (c *Client) p2pPrice(ctx context.Context, side string) (float64, error) {
 		return 0, fmt.Errorf("P2P %s: %w", side, err)
 	}
 	var r struct {
-		Data []p2pAdv `json:"data"`
+		Code    any      `json:"code"`
+		Message string   `json:"message"`
+		Data    []p2pAdv `json:"data"`
 	}
 	if err := json.Unmarshal(body, &r); err != nil {
 		return 0, fmt.Errorf("P2P %s: %w", side, err)
+	}
+	if len(r.Data) == 0 { // пустой список — это отказ или пустая выдача, а не «нет подходящих»: показываем, что ответил Binance
+		return 0, fmt.Errorf("P2P %s: Binance вернул пустой список (code %v %s)", side, r.Code, strings.TrimSpace(r.Message))
 	}
 	var prices []float64
 	for _, a := range r.Data {
@@ -172,7 +177,7 @@ func (c *Client) p2pPrice(ctx context.Context, side string) (float64, error) {
 		}
 	}
 	if len(prices) == 0 {
-		return 0, fmt.Errorf("P2P %s: нет рабочих объявлений", side)
+		return 0, fmt.Errorf("P2P %s: из %d объявлений ни одно не подходит под %d ₴ (остаток или лимиты)", side, len(r.Data), int(p2pTicketUAH))
 	}
 	sort.Float64s(prices)
 	return prices[len(prices)/2], nil

@@ -180,3 +180,48 @@ func TestNormDate(t *testing.T) {
 		}
 	}
 }
+
+func TestRequestsRetryTransientFailuresOnly(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		switch r.URL.Path {
+		case "/flaky": // два сбоя подряд, потом ответ
+			if calls <= 2 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			w.Write([]byte(`ok`))
+		case "/broken":
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+	c := NewClient()
+	body, err := c.get(context.Background(), srv.URL+"/flaky")
+	if err != nil || string(body) != "ok" || calls != 3 {
+		t.Fatalf("503 дважды, потом ответ: %q %v (запросов %d)", body, err, calls)
+	}
+	calls = 0
+	if _, err := c.get(context.Background(), srv.URL+"/broken"); err == nil || calls != 1 {
+		t.Fatalf("500 не повторяется: %v (запросов %d)", err, calls)
+	}
+	calls = 0
+	c.Retries = 1
+	if _, err := c.get(context.Background(), srv.URL+"/flaky"); err == nil || calls != 2 {
+		t.Fatalf("лимит повторов: %v (запросов %d)", err, calls)
+	}
+}
+
+func TestP2PEmptyListShowsWhatBinanceSaid(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"code":"000002","message":"illegal parameter","data":[]}`))
+	}))
+	defer srv.Close()
+	c := NewClient()
+	c.P2PBase = srv.URL
+	_, err := c.p2pPrice(context.Background(), "BUY")
+	if err == nil || !strings.Contains(err.Error(), "000002") || !strings.Contains(err.Error(), "illegal parameter") {
+		t.Fatalf("ждали код и текст Binance: %v", err)
+	}
+}

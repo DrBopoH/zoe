@@ -101,12 +101,18 @@ type Client struct {
 	// USTYears — за сколько лет назад брать аукционы США (по умолчанию 3: хватает на все бумаги, что ещё в обращении
 	// у 2-летних и 3-летних выпусков; долгие бумаги подтянутся при следующих обновлениях по мере появления).
 	USTYears int
+	// Retries — сколько раз повторить запрос, если источник не ответил (таймаут, обрыв, 429, 502–504); RetryWait — пауза перед повтором (растёт с номером)
+	Retries   int
+	RetryWait time.Duration
 	// AuctionDays — сколько последних дней перебирать в результатах аукционов ОВДП (по умолчанию 14).
 	AuctionDays int
 }
 
+// DefaultRetryWait — пауза перед первым повтором запроса; тесты ставят её в миллисекунды.
+var DefaultRetryWait = time.Second
+
 func NewClient() *Client {
-	return &Client{HTTP: &http.Client{Timeout: 30 * time.Second}, NBUBase: DefaultNBUBase, USTBase: DefaultUSTBase, FREDBase: DefaultFREDBase, BinanceBase: DefaultBinanceBase, FNGBase: DefaultFNGBase, ShillerBase: DefaultShillerBase, EurostatBase: DefaultEurostatBase, ECBBase: DefaultECBBase, BoEBase: DefaultBoEBase, ONSBase: DefaultONSBase, BISBase: DefaultBISBase, WBBase: DefaultWBBase, P2PBase: DefaultP2PBase, FuturesBase: DefaultFuturesBase, LlamaBase: DefaultLlamaBase, MempoolBase: DefaultMempoolBase, TronBase: DefaultTronBase, EthRPCBase: DefaultEthRPCBase, GeckoBase: DefaultGeckoBase, Now: time.Now, Limiter: NewHostLimiter(DefaultHostGaps())}
+	return &Client{HTTP: &http.Client{Timeout: 30 * time.Second}, NBUBase: DefaultNBUBase, USTBase: DefaultUSTBase, FREDBase: DefaultFREDBase, BinanceBase: DefaultBinanceBase, FNGBase: DefaultFNGBase, ShillerBase: DefaultShillerBase, EurostatBase: DefaultEurostatBase, ECBBase: DefaultECBBase, BoEBase: DefaultBoEBase, ONSBase: DefaultONSBase, BISBase: DefaultBISBase, WBBase: DefaultWBBase, P2PBase: DefaultP2PBase, FuturesBase: DefaultFuturesBase, LlamaBase: DefaultLlamaBase, MempoolBase: DefaultMempoolBase, TronBase: DefaultTronBase, EthRPCBase: DefaultEthRPCBase, GeckoBase: DefaultGeckoBase, Now: time.Now, Limiter: NewHostLimiter(DefaultHostGaps()), Retries: 2, RetryWait: DefaultRetryWait}
 }
 
 func (c *Client) now() time.Time {
@@ -131,19 +137,39 @@ func (c *Client) postJSON(ctx context.Context, url string, payload []byte) ([]by
 }
 
 func (c *Client) do(ctx context.Context, method, url string, payload []byte, headers map[string]string) ([]byte, error) {
+	var lastErr error
+	for attempt := 0; attempt <= c.Retries; attempt++ {
+		if attempt > 0 { // повтор только после паузы и только пока опрос не отменён
+			select {
+			case <-ctx.Done():
+				return nil, lastErr
+			case <-time.After(c.RetryWait * time.Duration(attempt)):
+			}
+		}
+		body, retry, err := c.once(ctx, method, url, payload, headers)
+		if err == nil || !retry {
+			return body, err
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
+// once — один запрос. retry — стоит ли повторить: сбой связи, таймаут источника, 429 и 502–504 проходят сами; остальное (404, 500, битый ответ) — нет.
+func (c *Client) once(ctx context.Context, method, url string, payload []byte, headers map[string]string) (body []byte, retry bool, err error) {
 	var rd io.Reader
 	if payload != nil {
 		rd = bytes.NewReader(payload)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, url, rd)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
 	if err := c.Limiter.Wait(ctx, req.URL.Host); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	h := c.HTTP
 	if h == nil {
@@ -151,20 +177,21 @@ func (c *Client) do(ctx context.Context, method, url string, payload []byte, hea
 	}
 	resp, err := h.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, ctx.Err() == nil, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
+	body, err = io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
 	if err != nil {
-		return nil, err
+		return nil, ctx.Err() == nil, err
 	}
 	if len(body) > maxBody {
-		return nil, fmt.Errorf("ответ больше %d МБ", maxBody>>20)
+		return nil, false, fmt.Errorf("ответ больше %d МБ", maxBody>>20)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+		code := resp.StatusCode
+		return nil, code == http.StatusTooManyRequests || code == http.StatusBadGateway || code == http.StatusServiceUnavailable || code == http.StatusGatewayTimeout, fmt.Errorf("HTTP %d", code)
 	}
-	return body, nil
+	return body, false, nil
 }
 
 // ───────────────────────── разбор полей ─────────────────────────
