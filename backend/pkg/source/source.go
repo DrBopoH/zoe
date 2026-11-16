@@ -39,6 +39,7 @@ const (
 	KindICU     = "icu"
 	KindP2P     = "binance-p2p"    // история C2C-ордеров Binance: гривневая сторона P2P-покупок, дополняет выписку того же счёта
 	KindSeries  = "binance-series" // минутный ряд оценки портфеля Binance: данные API, собираются 10–20 минут
+	KindDataset = "dataset"        // таблица рядов группы «Экономика» (economy.go): точки макро-данных, из них собирается кеш
 
 	OriginCSV     = "csv"
 	OriginPDF     = "pdf"
@@ -117,6 +118,11 @@ type File struct {
 
 	Series *Series `json:"series,omitempty"` // только у KindSeries
 
+	// Group — группа данных: пусто или «accounts» — Счета (выписки, API банков, Binance, ICU), «economy» — Экономика (economy.go).
+	// Группы лежат в разных папках и не видят друг друга: макро-данные не попадают в «Выписки» и «Загрузить».
+	Group string   `json:"group,omitempty"`
+	Data  *Dataset `json:"data,omitempty"` // только у KindDataset
+
 	Account *mono.AccountDTO        `json:"account,omitempty"`
 	Txs     []mono.StatementItemDTO `json:"txs,omitempty"`
 
@@ -169,6 +175,13 @@ func (f *File) span() (from, to int64) {
 		note(sr.Start)
 		note(sr.Start + int64(len(sr.Vals)-1)*60)
 	}
+	if f.Data != nil {
+		for _, ds := range f.Data.Series {
+			for _, t := range ds.T {
+				note(t)
+			}
+		}
+	}
 	return
 }
 
@@ -198,6 +211,11 @@ func (f *File) Count() int {
 	if f.Series != nil {
 		n += len(f.Series.Vals)
 	}
+	if f.Data != nil {
+		for _, ds := range f.Data.Series {
+			n += len(ds.T)
+		}
+	}
 	return n
 }
 
@@ -215,6 +233,15 @@ func (f *File) Validate() error {
 	}
 	if f.Version > Version {
 		return fmt.Errorf("файл новее программы (формат %d)", f.Version)
+	}
+	if f.Group != "" && f.Group != GroupAccounts && f.Group != GroupEconomy {
+		return fmt.Errorf("неизвестная группа %q", f.Group)
+	}
+	if f.Group == GroupEconomy { // у данных экономики нет счёта: их опознаёт набор (Card) и имя набора внутри
+		if f.Kind != KindDataset || f.Data == nil || f.Card == "" {
+			return errors.New("в наборе экономики нет данных")
+		}
+		return nil
 	}
 	if f.AccountID == "" || f.Kind == "" {
 		return errors.New("в файле нет счёта")
@@ -236,7 +263,7 @@ func (s Store) path(f *File) string {
 	if f.From > 0 {
 		day = time.Unix(f.From, 0).UTC().Format("2006-01-02")
 	}
-	return filepath.Join(s.Dir, folder(f.Card), day+"_"+f.Hash+Ext)
+	return filepath.Join(s.groupDir(f), folder(f.Card), day+"_"+f.Hash+Ext)
 }
 
 func folder(card string) string {
@@ -258,7 +285,7 @@ func (s Store) Put(f *File) (string, bool, error) {
 	if err := f.Validate(); err != nil {
 		return "", false, err
 	}
-	if m, _ := filepath.Glob(filepath.Join(s.Dir, "*", "*_"+f.Hash+Ext)); len(m) > 0 {
+	if m, _ := filepath.Glob(filepath.Join(s.groupDir(f), "*", "*_"+f.Hash+Ext)); len(m) > 0 {
 		return m[0], false, nil
 	}
 	dst := s.path(f)
@@ -313,7 +340,7 @@ func Read(path string) (*File, error) {
 	return &f, f.Validate()
 }
 
-// List — все файлы-источники; нечитаемые возвращаются во втором списке (имя → причина). Порядок: счёт, начало периода.
+// List — все файлы-источники группы «Счета» (группа «Экономика» — ListEconomy); нечитаемые возвращаются во втором списке (имя → причина). Порядок: счёт, начало периода.
 func (s Store) List() ([]Entry, map[string]string) {
 	var out []Entry
 	bad := map[string]string{}
@@ -322,7 +349,7 @@ func (s Store) List() ([]Entry, map[string]string) {
 		return nil, bad
 	}
 	for _, d := range dirs {
-		if !d.IsDir() || strings.HasPrefix(d.Name(), "_") {
+		if !d.IsDir() || strings.HasPrefix(d.Name(), "_") || d.Name() == GroupEconomy { // «economy» — другая группа, Счетам она не видна
 			continue
 		}
 		files, _ := os.ReadDir(filepath.Join(s.Dir, d.Name()))
