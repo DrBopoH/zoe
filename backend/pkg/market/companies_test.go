@@ -24,7 +24,7 @@ func companiesServer(t *testing.T, secStatus int) *Client {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/files/company_tickers_exchange.json":
-			if r.Header.Get("User-Agent") == "" || strings.HasPrefix(r.Header.Get("User-Agent"), "Go-http") {
+			if ua := r.Header.Get("User-Agent"); ua != secUserAgent || !strings.Contains(ua, "@") || strings.Contains(ua, "localhost") || strings.ContainsAny(ua, "()") {
 				http.Error(w, "нужен User-Agent", http.StatusForbidden)
 				return
 			}
