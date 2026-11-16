@@ -6,6 +6,8 @@ import { apiGetJson, apiSend, q } from '../utils/api.js'
 import { pushRequestError } from '../composables/useToasts.js'
 import { dateOf } from '../utils/macro.js'
 import { feedStatus, STATUS_TEXT, agoText, lagText, seriesRows, filterSeries, seriesCsv, healthSummary } from '../utils/sources.js'
+import UiCard from '../components/ui/UiCard.vue'
+import UiEmpty from '../components/ui/UiEmpty.vue'
 
 // Экран «Источники»: здоровье каждого источника (что обещает, что в кеше, когда обновлялся, какие ряды устарели, последняя ошибка)
 // и каталог всех рядов с поиском и выгрузкой в CSV. Данные считает сервер; кнопка в шапке запускает опрос всех источников, кнопка в строке — одного.
@@ -57,7 +59,7 @@ const TONE = { error: 'text-rose-400', empty: 'text-slate-500', stale: 'text-amb
       </span>
     </MarketHeader>
 
-    <section class="rounded-lg border border-slate-800 bg-slate-900/40 text-xs overflow-x-auto">
+    <UiCard class="text-xs overflow-x-auto">
       <table v-if="feeds.length" class="w-full tabular-nums">
         <thead>
           <tr class="text-slate-500">
@@ -82,10 +84,10 @@ const TONE = { error: 'text-rose-400', empty: 'text-slate-500', stale: 'text-amb
           </tr>
         </tbody>
       </table>
-      <div v-else class="p-3 text-slate-500">Нет данных. Нажми «Обновить» — источники подтянутся, и тут появится их состояние.</div>
-    </section>
+      <UiEmpty v-else>Нет данных. Нажми «Обновить» — источники подтянутся, и тут появится их состояние.</UiEmpty>
+    </UiCard>
 
-    <section class="rounded-lg border border-slate-800 bg-slate-900/40 text-xs">
+    <UiCard class="text-xs">
       <div class="flex flex-wrap items-center gap-3 p-3">
         <b class="text-slate-200">Каталог рядов</b>
         <input v-model="query" type="search" placeholder="Поиск: id, название, источник" class="ui-input !bg-slate-900 !w-64" aria-label="Поиск по рядам" />
@@ -123,8 +125,8 @@ const TONE = { error: 'text-rose-400', empty: 'text-slate-500', stale: 'text-amb
             </tr>
           </tbody>
         </table>
-        <div v-else class="px-3 pb-3 text-slate-500">{{ rows.length ? 'Ничего не найдено.' : 'Кеш пуст: нажми «Обновить».' }}</div>
+        <UiEmpty v-else>{{ rows.length ? 'Ничего не найдено.' : 'Кеш пуст: нажми «Обновить».' }}</UiEmpty>
       </div>
-    </section>
+    </UiCard>
   </div>
 </template>

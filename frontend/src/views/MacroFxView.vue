@@ -6,6 +6,8 @@ import MarketHeader from '../components/MarketHeader.vue'
 import { useMarketRefresh } from '../composables/useMarketRefresh.js'
 import { goldUsd, annualChange, realRate, valueAt, lastPoint, signedPct, plainPct, unitText } from '../utils/macro.js'
 import { MATRIX_CCY, crossMatrix, dxyIndex, fxWorldRows, rateText } from '../utils/fxworld.js'
+import UiCard from '../components/ui/UiCard.vue'
+import UiEmpty from '../components/ui/UiEmpty.vue'
 
 // Экран «Курсы»: доллар, евро и золото к гривне (официальные курсы НБУ) и золото в долларах.
 // Из них в сводке: насколько гривна дешевела в среднем за год и что это делает с доходностью гривневых бумаг в долларах.
@@ -78,7 +80,7 @@ const dateText = (iso) => (iso ? dmy(iso) : '')
       </template>
     </MacroPanel>
 
-    <section class="rounded-lg border border-slate-800 bg-slate-900/40 overflow-x-auto">
+    <UiCard class="overflow-x-auto">
       <div class="px-3 py-2 text-[11px] text-slate-500">Мировые валюты · курсы НБУ, ставки центробанков и реальные эффективные курсы (BIS). «За год»: плюс — валюта окрепла к доллару. «Разница»: ставка страны минус ставка ФРС (чем больше, тем выгоднее держать валюту, если курс не упадёт).</div>
       <table v-if="rows.length" class="w-full text-xs tabular-nums">
         <thead class="text-[10px] uppercase tracking-wider text-slate-500">
@@ -97,8 +99,8 @@ const dateText = (iso) => (iso ? dmy(iso) : '')
           </tr>
         </tbody>
       </table>
-      <div v-else class="px-3 pb-3 text-xs text-slate-500">Нет данных. Нажми «Обновить»: подтянутся курсы и реальные курсы.</div>
-    </section>
+      <UiEmpty v-else>Нет данных. Нажми «Обновить»: подтянутся курсы и реальные курсы.</UiEmpty>
+    </UiCard>
 
     <MacroPanel title="Индекс доллара (расчёт по курсам НБУ)" :series="all" :today="today" :ids="DXY_ID" unit="п." hint="Формула ICE (DXY): евро, иена, фунт, канадский доллар, шведская крона и франк через курсы к гривне. Растёт — доллар дорожает к корзине" empty="Нет данных. Нажми «Обновить»: подтянутся курсы НБУ">
       <template #summary>
@@ -106,7 +108,7 @@ const dateText = (iso) => (iso ? dmy(iso) : '')
       </template>
     </MacroPanel>
 
-    <section class="rounded-lg border border-slate-800 bg-slate-900/40 overflow-x-auto">
+    <UiCard class="overflow-x-auto">
       <div class="px-3 py-2 text-[11px] text-slate-500">Кросс-курсы: сколько единиц валюты в столбце стоит одна единица валюты в строке (через гривну, на сегодня).</div>
       <table class="w-full text-xs tabular-nums">
         <thead class="text-[10px] uppercase tracking-wider text-slate-500">
@@ -119,7 +121,7 @@ const dateText = (iso) => (iso ? dmy(iso) : '')
           </tr>
         </tbody>
       </table>
-    </section>
+    </UiCard>
 
     <MacroPanel title="Реальные эффективные курсы: крупные валюты (BIS, индекс)" :series="fx" :today="today" :ids="REER_MAJOR" unit="п." hint="Курс к корзине торговых партнёров с поправкой на инфляцию. Выше — валюта реально дороже" empty="Нет данных. Нажми «Обновить»: подтянутся реальные курсы" />
     <MacroPanel title="Реальные эффективные курсы: остальные (BIS, индекс)" :series="fx" :today="today" :ids="REER_OTHER" unit="п." hint="Турция и Россия — на другой шкале: колесо мыши приближает" empty="Нет данных. Нажми «Обновить»: подтянутся реальные курсы" />

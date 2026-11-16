@@ -6,6 +6,8 @@ import MarketHeader from '../components/MarketHeader.vue'
 import { useMarketRefresh } from '../composables/useMarketRefresh.js'
 import { lastPoint, signedPct, plainPct, unitText, hasPoints, dateOf } from '../utils/macro.js'
 import { WORLD_GROUPS, worldIds, worldRows, buffettLevel } from '../utils/worldmarkets.js'
+import UiCard from '../components/ui/UiCard.vue'
+import UiEmpty from '../components/ui/UiEmpty.vue'
 
 // Экран «Мировые акции»: индексы ОЭСР по странам (помесячно, 2015 = 100) и оценка рынка США: индекс Баффета, CAPE и дивидендная доходность.
 // CAPE и дивиденды — таблица Шиллера, она не обновляется с 2023 года: это история, а не текущая оценка.
@@ -33,7 +35,7 @@ const num = (v) => numText(v, 1)
       <span v-if="lastDate" class="text-slate-500">помесячно · последняя точка {{ dateOf(lastDate) }}</span>
     </MarketHeader>
 
-    <section class="rounded-lg border border-slate-800 bg-slate-900/40 overflow-x-auto">
+    <UiCard class="overflow-x-auto">
       <table v-if="has" class="w-full text-xs tabular-nums">
         <thead class="text-[10px] uppercase tracking-wider text-slate-500">
           <tr><th class="px-3 py-1.5 text-left font-bold">Страна</th><th class="px-2 text-right font-bold">Индекс</th><th class="px-2 text-right font-bold">За год</th><th class="px-3 text-right font-bold">От максимума</th></tr>
@@ -47,8 +49,8 @@ const num = (v) => numText(v, 1)
           </tr>
         </tbody>
       </table>
-      <div v-else class="px-3 py-3 text-xs text-slate-500">{{ EMPTY }}</div>
-    </section>
+      <UiEmpty v-else>{{ EMPTY }}</UiEmpty>
+    </UiCard>
 
     <MacroPanel v-for="g in WORLD_GROUPS" :key="g.key" :title="`${g.title}, индекс (2015 = 100)`" unit="п." :series="world" :today="today" :ids="worldIds(g.key)" :log="!!g.log" :hint="g.hint" :empty="EMPTY" />
 
