@@ -143,7 +143,7 @@ Indices by country (monthly, 2015 = 100) and an assessment of the US market: the
 
 ### Company stocks
 
-A list of US companies by capitalization (Nasdaq and SEC) with search by ticker and name. For a selected company: the price (Yahoo, monthly), capitalization over time (the price times the number of shares from SEC filings, adjusted for splits), annual revenue and profit, equity and assets, the ratios P/E, P/S and P/B. Price histories and filings are downloaded for the top 500 with the "Обновить" button, other companies on first opening.
+A list of US companies by capitalization (Nasdaq and SEC) with search by ticker and name. For a selected company: the price (Yahoo, monthly), capitalization over time (the price times the number of shares from SEC filings, adjusted for splits), annual revenue and profit, equity and assets, the ratios P/E, P/S and P/B. Price histories and filings are downloaded for the top 500 with the "Обновить" button, other companies on first opening. The chosen company is remembered: after a reload the screen opens it, not the first one in the list.
 
 ### Crypto
 

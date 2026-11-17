@@ -8,6 +8,7 @@ import UiLoadError from '../components/ui/UiLoadError.vue'
 import UiNotice from '../components/ui/UiNotice.vue'
 import { useMarketRefresh } from '../composables/useMarketRefresh.js'
 import { useStocks } from '../composables/useStocks.js'
+import { storageGet, storageSet } from '../utils/storage.js'
 import { dateOf, signedPct } from '../utils/macro.js'
 import { numText } from '../utils/numfmt.js'
 import { stockSeries, stockRatios, capCheck, usdText, ratioText } from '../utils/shares.js'
@@ -24,10 +25,12 @@ const props = defineProps({
 const { refresh } = useMarketRefresh(() => 'shares')
 const stocks = useStocks()
 const query = ref('')
-const ticker = ref('')
+// Выбранная компания запоминается: после перезагрузки или возврата на экран открывается она, а не первая в списке
+const TICKER_KEY = 'zoe.stocks.ticker'
+const ticker = ref(storageGet(TICKER_KEY, ''))
 let timer = null
 
-const pick = (t) => { ticker.value = t; stocks.open(t) }
+const pick = (t) => { ticker.value = t; storageSet(TICKER_KEY, t); stocks.open(t) }
 const reload = async () => {
   await stocks.search(query.value)
   if (!ticker.value && stocks.list.value.length) pick(stocks.list.value[0].ticker)
