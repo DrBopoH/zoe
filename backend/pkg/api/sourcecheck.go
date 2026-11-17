@@ -44,6 +44,9 @@ type inspection struct {
 
 	Overlap  *overlapInfo `json:"overlap,omitempty"`
 	Problems []problem    `json:"problems"`
+
+	Files   int `json:"files,omitempty"`   // файлов выписок в архиве (у одиночного файла нет)
+	Skipped int `json:"skipped,omitempty"` // из них уже загруженных
 }
 
 // overlapInfo — как файл ложится на уже имеющиеся операции в общем отрезке.
@@ -200,7 +203,7 @@ func (s *Server) HandleInspectSource(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "Failed to read file bytes")
 		return
 	}
-	f, err := parseSource(name, raw)
+	files, archived, err := parseUpload(name, raw)
 	if err != nil {
 		code := http.StatusInternalServerError
 		if he, ok := err.(*importError); ok {
@@ -209,8 +212,53 @@ func (s *Server) HandleInspectSource(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), code)
 		return
 	}
-	f.Seal()
-	writeJSON(w, s.inspect(f, r.FormValue("account")))
+	target := r.FormValue("account")
+	if !archived {
+		files[0].Seal()
+		writeJSON(w, s.inspect(files[0], target))
+		return
+	}
+	writeJSON(w, s.inspectBatch(files, target))
+}
+
+// inspectBatch сводит проверку файлов архива в одну: записей и период — по всем новым файлам, проблемы — объединение.
+// Уже загруженные файлы (дубли) в сумму не входят и считаются в skipped; если дубли все — проблема «duplicate».
+func (s *Server) inspectBatch(files []*source.File, target string) *inspection {
+	var agg, first *inspection
+	skipped := 0
+	for _, f := range files {
+		f.Seal()
+		in := s.inspect(f, target)
+		if first == nil {
+			first = in
+		}
+		if hasProblem(in, "duplicate") {
+			skipped++
+			continue
+		}
+		if agg == nil {
+			agg = in
+			continue
+		}
+		agg.Count += in.Count
+		if in.From > 0 && (agg.From == 0 || in.From < agg.From) {
+			agg.From = in.From
+		}
+		if in.To > agg.To {
+			agg.To = in.To
+		}
+		agg.Overlap = nil // пересечение считается по одному файлу; у партии его не показываем
+		for _, p := range in.Problems {
+			if !hasProblem(agg, p.Code) {
+				agg.Problems = append(agg.Problems, p)
+			}
+		}
+	}
+	if agg == nil {
+		agg = first
+	}
+	agg.Files, agg.Skipped = len(files), skipped
+	return agg
 }
 
 // enforceImportRules применяет решения пользователя из формы импорта. Без поля mode — прежнее поведение (просто импорт).
