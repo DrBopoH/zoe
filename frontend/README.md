@@ -1,6 +1,6 @@
 # Ζωή — фронтенд
 
-Vue 3 (`<script setup>`), Tailwind v4, Vite, bun. Общее описание проекта: [../README.md](../README.md), устройство фронтенда: [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md#10-фронтенд).
+Vue 3 (`<script setup>`), Tailwind v4, Vite, bun. Общее описание проекта: [../README.ru.md](../README.ru.md), устройство фронтенда: [../docs/ARCHITECTURE.ru.md](../docs/ARCHITECTURE.ru.md#10-фронтенд).
 
 ```bash
 bun install            # зависимости (bun.lock фиксирует версии)
