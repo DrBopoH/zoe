@@ -21,6 +21,7 @@ import MacroCryptoView from './MacroCryptoView.vue'
 import MacroStocksView from './MacroStocksView.vue'
 import MacroCommoditiesView from './MacroCommoditiesView.vue'
 import MacroWorldView from './MacroWorldView.vue'
+import MacroSharesView from './MacroSharesView.vue'
 import MacroChainView from './MacroChainView.vue'
 import MacroPppView from './MacroPppView.vue'
 import MacroScorecardView from './MacroScorecardView.vue'
@@ -110,6 +111,7 @@ const bondSection = computed(() => (isBondSection(section.value) ? section.value
     <MacroStocksView v-else-if="section === 'stocks'" :stocks="stocks.series.value" :today="today" :running="running" />
     <MacroCommoditiesView v-else-if="section === 'commodities'" :com="commodities.series.value" :today="today" :running="running" />
     <MacroWorldView v-else-if="section === 'world'" :world="world.series.value" :today="today" :running="running" />
+    <MacroSharesView v-else-if="section === 'shares'" :today="today" :running="running" :data-version="dataVersion" />
     <MacroChainView v-else-if="section === 'chain'" :chain="chain.series.value" :today="today" :running="running" />
     <MacroScorecardView v-else-if="section === 'scorecard'" :econ="score.series.value" :countries="countries.countries.value" :cseries="countries.series.value" :today="today" :running="running" />
     <MacroSourcesView v-else-if="section === 'sources'" :health="sources.series.value" :running="running" />

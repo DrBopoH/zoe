@@ -323,6 +323,12 @@ export const SERIES = {
   stock_sp500_dd: { label: 'S&P 500: просадка от максимума', color: '#38bdf8', step: false },
   stock_nasdaq_dd: { label: 'NASDAQ: просадка от максимума', color: '#a78bfa', step: false },
   stock_dow_dd: { label: 'Dow Jones: просадка от максимума', color: '#fbbf24', step: false },
+  sh_price: { label: 'Цена закрытия месяца', color: '#38bdf8', step: false },
+  sh_cap: { label: 'Капитализация', color: '#34d399', step: false },
+  sh_revenue: { label: 'Выручка за год', color: '#fbbf24', step: true },
+  sh_income: { label: 'Чистая прибыль за год', color: '#a78bfa', step: true },
+  sh_assets: { label: 'Активы', color: '#fb923c', step: true },
+  sh_equity: { label: 'Капитал', color: '#38bdf8', step: true },
   crypto_btc_dd: { label: 'Bitcoin: просадка от максимума', color: '#fb923c', step: false },
   crypto_eth_dd: { label: 'Ethereum: просадка от максимума', color: '#a78bfa', step: false }
 }
@@ -331,6 +337,7 @@ export const SERIES = {
 export function unitText(v, unit = '%') {
   if (v === null || v === undefined || !isFinite(v)) return '—'
   if (unit === '%') return plainPct(v)
+  if (unit === 'млрд') return Math.abs(v) >= 1000 ? `${numText(v / 1000, 2)} трлн` : `${numText(v, Math.abs(v) < 10 ? 1 : 0)} млрд` // капитализация и отчётность компаний: сотни млрд — единицы трлн
   const abs = Math.abs(v)
   const body = abs >= 10000 ? `${Math.round(v / 1000)} тыс.` : abs >= 100 ? String(Math.round(v)) : numText(v, 2)
   return `${body} ${unit}`

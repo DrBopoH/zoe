@@ -21,6 +21,7 @@ export const MACRO_SECTIONS = [
   { key: 'commodities', label: 'Сырьё', icon: 'commodity', feed: 'commodities' },
   { key: 'stocks', label: 'Биржа США', icon: 'stocks', feed: 'stocks' },
   { key: 'world', label: 'Мировые акции', icon: 'stocks', feed: 'world' },
+  { key: 'shares', label: 'Акции компаний', icon: 'stocks', feed: 'companies,stockprices,stockfacts' },
   { key: 'crypto', label: 'Крипто', icon: 'crypto', feed: 'crypto' },
   { key: 'chain', label: 'Крипто-контур', icon: 'crypto', feed: 'chain' },
   { key: 'ppp', label: 'Покупательная способность', icon: 'inflation', feed: 'ppp' },
