@@ -3,7 +3,9 @@ package market
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 )
@@ -95,6 +97,10 @@ func (c *Client) StockFrame(ctx context.Context, req FrameRequest) ([]FrameFact,
 	}
 	u := fmt.Sprintf("%s/api/xbrl/frames/%s/%s/%s.json", strings.TrimRight(c.EDGARBase, "/"), req.Tag, req.Unit, req.Period)
 	body, err := c.getHeaders(ctx, u, map[string]string{"Accept": "application/json", "User-Agent": secUserAgent})
+	var he *HTTPError
+	if errors.As(err, &he) && he.Code == http.StatusNotFound {
+		return nil, nil // у SEC нет такого кадра: тег ещё не существовал (RevenueFromContract… — с 2018) или за период никто не отчитался. Это «данных нет», а не сбой: пустой кадр сохраняется и больше не запрашивается
+	}
 	if err != nil {
 		return nil, fmt.Errorf("EDGAR %s %s: %w", req.Tag, req.Period, err)
 	}
@@ -117,7 +123,7 @@ func (c *Client) StockFrame(ctx context.Context, req FrameRequest) ([]FrameFact,
 	return out, nil
 }
 
-// StockFacts качает кадры по одному и отдаёт каждый в save сразу. Кадр, которого у SEC нет (период ещё без отчётов), пропускается;
+// StockFacts качает кадры по одному и отдаёт каждый в save сразу. Кадр, которого у SEC нет (404), сохраняется пустым;
 // об ошибке источника сообщается, если без значений осталась половина кадров и больше.
 func (c *Client) StockFacts(ctx context.Context, rep Reporter, todo []FrameRequest, save func(FrameRequest, []FrameFact) error) Result {
 	res := Result{Source: SourceStockFacts}
