@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { isShallow, isReactive } from 'vue'
-import { feedSeries, countryList, snapshotIds, loadTicks, resetCatalog, useMacro } from '../src/composables/useMacro.js'
+import { macroLoading, feedSeries, countryList, snapshotIds, loadTicks, resetCatalog, useMacro } from '../src/composables/useMacro.js'
 import { useCountries } from '../src/composables/useCountries.js'
 
 test('каталог спрашивается один раз на все источники', async () => {
@@ -53,5 +53,34 @@ test('ряды не оборачиваются глубокой реактивн
     assert.equal(isShallow(series), true)
     series.value = { usd_uah: [{ d: '2026-01-01', v: 40 }] }
     assert.equal(isReactive(series.value.usd_uah), false)
+  }
+})
+
+test('пока ряды грузятся, macroLoading истинен; после успеха и после сбоя — снова ложен', async () => {
+  resetCatalog()
+  const realFetch = globalThis.fetch
+  let release
+  const gate = new Promise((r) => { release = r })
+  globalThis.fetch = async (url) => {
+    await gate
+    if (String(url).includes('/macro/catalog')) return { ok: true, status: 200, json: async () => ({ feeds: { fx: ['usd_uah'] } }), text: async () => '' }
+    return { ok: true, status: 200, json: async () => ({ series: { usd_uah: [] }, updated_at: 1 }), text: async () => '' }
+  }
+  try {
+    const m = useMacro('fx')
+    assert.equal(macroLoading.value, false)
+    const p = m.load()
+    assert.equal(macroLoading.value, true)
+    release()
+    await p
+    assert.equal(macroLoading.value, false)
+    resetCatalog()
+    globalThis.fetch = async () => ({ ok: false, status: 500, text: async () => 'сбой', json: async () => ({}) })
+    await m.load()
+    assert.equal(macroLoading.value, false)
+    assert.ok(m.error.value)
+  } finally {
+    globalThis.fetch = realFetch
+    resetCatalog()
   }
 })

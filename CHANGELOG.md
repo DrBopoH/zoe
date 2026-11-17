@@ -8,7 +8,8 @@ Versions: `R.sB.C+T.hash`. On `dev` there is no state letter (`v1.1.C+T`), the l
 
 Polishing the user-friendly design and finishing QoL, builder and reference features.
 
-- **v1.3.6** — "Company stocks": the chosen company is remembered, after a reload the screen opens it instead of the first one in the list
+- **v1.3.7** — Small QoL: the "Company stocks" screen remembers the chosen company (after a reload it opens it, not the first one); while series are loading, an empty market chart says "Идёт загрузка…" (Loading…) instead of "Нет данных" (No data)
+- **v1.3.6** — `clc.sh build` repeats the merge while GitHub still counts the PR checks as queued (up to 30 tries, 10 s apart)
 - **v1.3.5** — Toasts: pause between leaves cut from 0.5 to 0.2 s; the stack keeps its scroll place when toasts appear and leave (at the top it stays at the newest, at the bottom at the oldest, in the middle it does not move), the slide-in no longer draws a horizontal scrollbar
 - **v1.3.4** — Toasts: new ones appear on top, the oldest one at the bottom leaves first (one queue in order of arrival, 0.5 s apart); the "Рыночные данные" (Market data) window: a finished source is one line "Name ✓" without a bar, finished ones on top, running ones at the bottom; in the sync window only a finished Binance collapses this way, banks keep their bar
 - **v1.3.3** — Branches by modules (`<module>/<date>-<word>` instead of `wip/`, `clc.sh next` and `-b` take a module, new `clc.sh modules` command, workflow updated); toasts: the stack scrolls when it does not fit (before, the top ones were cut off), expired toasts leave one by one with a 0.5 s pause, each keeping its own lifetime

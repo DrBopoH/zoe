@@ -1,4 +1,4 @@
-import { ref, shallowRef } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
 import { apiGetJson } from '../utils/api.js'
 import { withTicks } from '../utils/macro.js'
 import { errText } from '../utils/errText.js'
@@ -23,6 +23,10 @@ export async function loadTicks(ids, get = apiGetJson) {
   return out
 }
 
+// Сколько загрузок рядов идёт прямо сейчас (на всех экранах): пока идут, пустая панель пишет «Идёт загрузка…», а не «Нет данных»
+const pending = ref(0)
+export const macroLoading = computed(() => pending.value > 0)
+
 export function useMacro(feed = 'macro', extra = [], { ticks = false } = {}) {
   // shallowRef: ряды — сотни тысяч точек, которые только читаются и заменяются целиком; глубокая реактивность делала каждое чтение через Proxy (индекс доллара ≈ в 35 раз медленнее)
   const series = shallowRef({}) // id → [{ d: 'YYYY-MM-DD', v }]
@@ -30,6 +34,7 @@ export function useMacro(feed = 'macro', extra = [], { ticks = false } = {}) {
   const error = ref('')
 
   const load = async () => {
+    pending.value++
     try {
       const ids = [...(await feedSeries(feed)), ...extra]
       const r = await apiGetJson(`/macro?series=${ids.join(',')}`)
@@ -38,6 +43,8 @@ export function useMacro(feed = 'macro', extra = [], { ticks = false } = {}) {
       error.value = ''
     } catch (e) {
       error.value = errText(e)
+    } finally {
+      pending.value--
     }
   }
 
