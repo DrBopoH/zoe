@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, shallowRef } from 'vue'
 import { apiGetJson } from '../utils/api.js'
 import { withTicks } from '../utils/macro.js'
 
@@ -23,7 +23,8 @@ export async function loadTicks(ids, get = apiGetJson) {
 }
 
 export function useMacro(feed = 'macro', extra = [], { ticks = false } = {}) {
-  const series = ref({}) // id → [{ d: 'YYYY-MM-DD', v }]
+  // shallowRef: ряды — сотни тысяч точек, которые только читаются и заменяются целиком; глубокая реактивность делала каждое чтение через Proxy (индекс доллара ≈ в 35 раз медленнее)
+  const series = shallowRef({}) // id → [{ d: 'YYYY-MM-DD', v }]
   const updatedAt = ref(0)
   const error = ref('')
 
