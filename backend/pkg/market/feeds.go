@@ -22,7 +22,9 @@ type Feed struct {
 	// Companies — источник списка компаний (раздел «Акции»): третий вид после облигаций (Fetch) и числовых рядов (Series)
 	Companies func(ctx context.Context, rep Reporter) ([]Company, Result)
 	// Prices — история цен акций: тикеры выбирает сервер (топ по капитализации, у кого история устарела), каждую историю отдаёт в save сразу
-	Prices func(ctx context.Context, rep Reporter, tickers []string, save func([]PriceBar) error) Result
+	// Facts — кадры отчётности SEC (число акций по кварталам, потом выручка и прибыль): сервер говорит, какие кадры ещё нужны, каждый кадр уходит в save сразу
+	Facts  func(ctx context.Context, rep Reporter, todo []FrameRequest, save func(FrameRequest, []FrameFact) error) Result
+	Prices func(ctx context.Context, rep Reporter, tickers []string, save func(ticker string, bars []PriceBar, splits []Split) error) Result
 	Series func(ctx context.Context, rep Reporter) ([]SeriesPoint, Result)
 }
 
@@ -40,7 +42,7 @@ func (c *Client) Catalog() map[string][]string {
 // IsSource — известен ли такой источник (для ?source=… в маршрутах).
 func IsSource(id string) bool {
 	switch id {
-	case SourceNBU, SourceUST, SourceMacro, SourceFX, SourceUS, SourceUSEcon, SourceUSCurve, SourceUSReal, SourceUSPrices, SourceUSJobs, SourceUSAct, SourceUSLiq, SourceUSCredit, SourceEZ, SourceGB, SourceCH, SourceJP, SourceCN, SourceRU, SourceEG, SourcePL, SourceTR, SourceNO, SourceSE, SourceCA, SourceKR, SourceTW, SourceAU, SourceBR, SourceSA, SourceAE, SourceIR, SourceIN, SourceCommodities, SourceWorld, SourceChain, SourcePPP, SourceCrypto, SourceStocks, SourceCompanies, SourceStockPrices:
+	case SourceNBU, SourceUST, SourceMacro, SourceFX, SourceUS, SourceUSEcon, SourceUSCurve, SourceUSReal, SourceUSPrices, SourceUSJobs, SourceUSAct, SourceUSLiq, SourceUSCredit, SourceEZ, SourceGB, SourceCH, SourceJP, SourceCN, SourceRU, SourceEG, SourcePL, SourceTR, SourceNO, SourceSE, SourceCA, SourceKR, SourceTW, SourceAU, SourceBR, SourceSA, SourceAE, SourceIR, SourceIN, SourceCommodities, SourceWorld, SourceChain, SourcePPP, SourceCrypto, SourceStocks, SourceCompanies, SourceStockPrices, SourceStockFacts:
 		return true
 	}
 	return false
@@ -128,5 +130,6 @@ func (c *Client) Feeds() []Feed {
 		{ID: SourceStocks, Title: "Биржа США · FRED", Unit: "точек", Provides: []string{SerStockSP500, SerStockNasdaq, SerStockDow}, Series: c.Stocks},
 		{ID: SourceCompanies, Title: "Акции: список компаний · Nasdaq, SEC", Unit: "компаний", Companies: c.Companies},
 		{ID: SourceStockPrices, Title: "Акции: история цен · Yahoo", Unit: "месяцев", Prices: c.StockPrices},
+		{ID: SourceStockFacts, Title: "Акции: отчётность SEC · EDGAR", Unit: "значений", Facts: c.StockFacts},
 	}
 }

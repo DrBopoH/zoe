@@ -26,6 +26,9 @@ func (s *Server) SetMarket(c *market.Client) {
 	s.mk.client = c
 }
 
+// stockFramesAge — как часто перекачиваются кадры двух последних кварталов, пока SEC принимает отчёты.
+const stockFramesAge = 3 * 24 * time.Hour
+
 const marketPricesTimeout = 20 * time.Minute // история 500 компаний: по запросу к Yahoo каждые полсекунды, около четырёх минут с запасом
 const marketFeedTimeout = 3 * time.Minute    // с запасом на повторы запросов (market.Client.Retries): источник может отвечать медленно
 
@@ -115,7 +118,7 @@ func (s *Server) startMarket(ctx context.Context, only string, quiet bool) bool 
 				st.State = "fetch"
 				m.mu.Unlock()
 				timeout := marketFeedTimeout
-				if f.Prices != nil {
+				if f.Prices != nil || f.Facts != nil {
 					timeout = marketPricesTimeout
 				}
 				fctx, cancel := context.WithTimeout(ctx, timeout)
@@ -156,7 +159,19 @@ func (s *Server) startMarket(ctx context.Context, only string, quiet bool) bool 
 					case len(have) == 0:
 						res.Error = "нет списка компаний: сначала обнови источник companies"
 					case len(tickers) > 0:
-						res = f.Prices(fctx, rep, tickers, func(b []market.PriceBar) error { return s.storage.SaveStockPrices(b, now) })
+						res = f.Prices(fctx, rep, tickers, func(tk string, b []market.PriceBar, sp []market.Split) error {
+							return s.storage.SaveStockPrices(tk, b, sp, now)
+						})
+					}
+				} else if f.Facts != nil {
+					now := time.Now()
+					todo, err := s.storage.StockFramesTodo(market.StockFrameRequests(now), stockFramesAge, now.Unix())
+					if err != nil {
+						res.Error = err.Error()
+					} else if len(todo) > 0 {
+						res = f.Facts(fctx, rep, todo, func(r market.FrameRequest, facts []market.FrameFact) error {
+							return s.storage.SaveStockFrame(r, facts, now.Unix())
+						})
 					}
 				} else if f.Companies != nil {
 					var list []market.Company
@@ -266,7 +281,8 @@ func (s *Server) HandleMarketCompanies(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, list)
 }
 
-// GET /api/market/stock?ticker=AAPL — компания из списка и её месячная история цен: [{"d":"2026-10-01","c":закрытие,"a":с дивидендами}].
+// GET /api/market/stock?ticker=AAPL — компания из списка, её месячная история цен [{"d":"2026-10-01","c":закрытие,"a":с дивидендами}], сплиты и капитализация по месяцам
+// cap [{"d":…,"v":$}] (закрытие × акции из отчётности SEC, приведённые к сегодняшней базе по сплитам; месяц без отчёта — пропуск).
 // Нет истории или она старше суток — подтягивается с Yahoo прямо сейчас (одна компания: доли секунды); Yahoo недоступен, а в кеше что-то есть — отдаётся то, что есть.
 // Тикер не из списка — 404: произвольные запросы к Yahoo через сервер не нужны.
 func (s *Server) HandleMarketStock(w http.ResponseWriter, r *http.Request) {
@@ -295,11 +311,11 @@ func (s *Server) HandleMarketStock(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().Unix()
 	if (len(bars) == 0 || now-at > int64(stockOnDemandAge/time.Second)) && s.mk.client != nil {
 		ctx, cancel := context.WithTimeout(r.Context(), marketFeedTimeout)
-		fresh, ferr := s.mk.client.StockHistory(ctx, co.Ticker)
+		fresh, freshSplits, ferr := s.mk.client.StockHistory(ctx, co.Ticker)
 		cancel()
 		switch {
 		case ferr == nil:
-			if err := s.storage.SaveStockPrices(fresh, now); err != nil {
+			if err := s.storage.SaveStockPrices(co.Ticker, fresh, freshSplits, now); err != nil {
 				failErr(w, err)
 				return
 			}
@@ -309,13 +325,27 @@ func (s *Server) HandleMarketStock(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeJSON(w, map[string]any{"company": co, "prices": bars, "fetched_at": at})
+	splits, err := s.storage.StockSplits(ticker)
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	shares, err := s.storage.StockShares(co.CIK)
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	capSeries := market.CapSeries(bars, splits, shares)
+	if capSeries == nil {
+		capSeries = []market.CapPoint{}
+	}
+	writeJSON(w, map[string]any{"company": co, "prices": bars, "splits": splits, "cap": capSeries, "fetched_at": at})
 }
 
 // stockOnDemandAge — насколько старой может быть история в кеше, чтобы страница компании не ходила за ней в Yahoo.
 const stockOnDemandAge = 24 * time.Hour
 
-// POST /api/market/sync[?source=<источник>[,<источник>…]; список источников:  nbu|ust|macro|fx|us|usecon|uscurve|usreal|usprices|usjobs|usact|usliq|uscredit|ez|gb|ch|jp|cn|ru|eg|pl|tr|no|se|ca|crypto|stocks|companies|stockprices] — запустить опрос отдельно от «Разведать». Ответ сразу, ход и итог —
+// POST /api/market/sync[?source=<источник>[,<источник>…]; список источников:  nbu|ust|macro|fx|us|usecon|uscurve|usreal|usprices|usjobs|usact|usliq|uscredit|ez|gb|ch|jp|cn|ru|eg|pl|tr|no|se|ca|crypto|stocks|companies|stockprices|stockfacts] — запустить опрос отдельно от «Разведать». Ответ сразу, ход и итог —
 // в "market" из /api/sync/status. Уже идёт — 409.
 func (s *Server) HandleMarketSync(w http.ResponseWriter, r *http.Request) {
 	if !allow(w, r, http.MethodPost) {
@@ -327,7 +357,7 @@ func (s *Server) HandleMarketSync(w http.ResponseWriter, r *http.Request) {
 	}
 	src := strings.ToLower(r.URL.Query().Get("source"))
 	if !market.IsSources(src) {
-		fail(w, http.StatusBadRequest, "source: nbu, ust, macro, fx, us, usecon, uscurve, usreal, usprices, usjobs, usact, usliq, uscredit, ez, gb, ch, jp, cn, ru, eg, pl, tr, no, se, ca, commodities, world, chain, ppp, crypto, stocks, companies или stockprices")
+		fail(w, http.StatusBadRequest, "source: nbu, ust, macro, fx, us, usecon, uscurve, usreal, usprices, usjobs, usact, usliq, uscredit, ez, gb, ch, jp, cn, ru, eg, pl, tr, no, se, ca, commodities, world, chain, ppp, crypto, stocks, companies, stockprices или stockfacts")
 		return
 	}
 	if !s.startMarket(s.marketContext(), src, false) {

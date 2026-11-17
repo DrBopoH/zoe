@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -16,6 +17,7 @@ import (
 // Грузится не всё сразу: при обновлении — топ StockTopN по капитализации, остальные по требованию (GET /api/market/stock).
 const (
 	SourceStockPrices = "stockprices"
+	SourceStockFacts  = "stockfacts"
 
 	StockTopN   = 500            // сколько крупнейших компаний обновляет общий опрос
 	StockMaxAge = 20 * time.Hour // история моложе этого не перекачивается: опрос раз в сутки не гоняет Yahoo впустую
@@ -29,26 +31,33 @@ type PriceBar struct {
 	Adj    float64 `json:"a"`
 }
 
-// StockHistory — месячная история одного тикера (в записи Yahoo: класс акций через дефис, BRK-B).
-func (c *Client) StockHistory(ctx context.Context, ticker string) ([]PriceBar, error) {
+// Split — сплит акций: Ratio — во сколько раз стало больше акций (4:1 — 4, обратный 1:10 — 0,1). Date — день сплита.
+type Split struct {
+	Date  string  `json:"d"`
+	Ratio float64 `json:"r"`
+}
+
+// StockHistory — месячная история одного тикера (в записи Yahoo: класс акций через дефис, BRK-B) и его сплиты.
+// Цены Yahoo уже поправлены на сплиты, а число акций из отчётности — нет: сплиты нужны, чтобы привести акции к сегодняшней базе (см. CapSeries).
+func (c *Client) StockHistory(ctx context.Context, ticker string) ([]PriceBar, []Split, error) {
 	if c.YahooBase == "" {
-		return nil, fmt.Errorf("источник Yahoo отключён")
+		return nil, nil, fmt.Errorf("источник Yahoo отключён")
 	}
-	u := fmt.Sprintf("%s/v8/finance/chart/%s?interval=1mo&range=max", strings.TrimRight(c.YahooBase, "/"), url.PathEscape(ticker))
+	u := fmt.Sprintf("%s/v8/finance/chart/%s?interval=1mo&range=max&events=split", strings.TrimRight(c.YahooBase, "/"), url.PathEscape(ticker))
 	body, err := c.getHeaders(ctx, u, map[string]string{"Accept": "application/json", "User-Agent": "Mozilla/5.0"})
 	if err != nil {
-		return nil, fmt.Errorf("Yahoo %s: %w", ticker, err)
+		return nil, nil, fmt.Errorf("Yahoo %s: %w", ticker, err)
 	}
-	bars, err := parseStockHistory(body, ticker)
+	bars, splits, err := parseStockHistory(body, ticker)
 	if err != nil {
-		return nil, fmt.Errorf("Yahoo %s: %w", ticker, err)
+		return nil, nil, fmt.Errorf("Yahoo %s: %w", ticker, err)
 	}
-	return bars, nil
+	return bars, splits, nil
 }
 
 // parseStockHistory читает ответ графика Yahoo (interval=1mo). Месяц без закрытия пропускается; два отсчёта в одном месяце (последний,
 // незавершённый, Yahoo иногда дублирует) — остаётся поздний. Нет поправленной цены — Adj равна Close.
-func parseStockHistory(body []byte, ticker string) ([]PriceBar, error) {
+func parseStockHistory(body []byte, ticker string) ([]PriceBar, []Split, error) {
 	var r struct {
 		Chart struct {
 			Result []struct {
@@ -61,6 +70,13 @@ func parseStockHistory(body []byte, ticker string) ([]PriceBar, error) {
 						Adj []*float64 `json:"adjclose"`
 					} `json:"adjclose"`
 				} `json:"indicators"`
+				Events struct {
+					Splits map[string]struct {
+						Date        int64   `json:"date"`
+						Numerator   float64 `json:"numerator"`
+						Denominator float64 `json:"denominator"`
+					} `json:"splits"`
+				} `json:"events"`
 			} `json:"result"`
 			Error *struct {
 				Description string `json:"description"`
@@ -68,13 +84,13 @@ func parseStockHistory(body []byte, ticker string) ([]PriceBar, error) {
 		} `json:"chart"`
 	}
 	if err := json.Unmarshal(body, &r); err != nil {
-		return nil, fmt.Errorf("неверный ответ (начало: %q)", head160(body))
+		return nil, nil, fmt.Errorf("неверный ответ (начало: %q)", head160(body))
 	}
 	if r.Chart.Error != nil {
-		return nil, fmt.Errorf("%s", r.Chart.Error.Description)
+		return nil, nil, fmt.Errorf("%s", r.Chart.Error.Description)
 	}
 	if len(r.Chart.Result) == 0 || len(r.Chart.Result[0].Indicators.Quote) == 0 {
-		return nil, fmt.Errorf("в ответе нет графика (начало: %q)", head160(body))
+		return nil, nil, fmt.Errorf("в ответе нет графика (начало: %q)", head160(body))
 	}
 	res := r.Chart.Result[0]
 	closes := res.Indicators.Quote[0].Close
@@ -98,14 +114,21 @@ func parseStockHistory(body []byte, ticker string) ([]PriceBar, error) {
 		out = append(out, bar)
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("в ответе нет ни одного закрытия")
+		return nil, nil, fmt.Errorf("в ответе нет ни одного закрытия")
 	}
-	return out, nil
+	var splits []Split
+	for _, sp := range res.Events.Splits {
+		if sp.Date > 0 && sp.Numerator > 0 && sp.Denominator > 0 {
+			splits = append(splits, Split{Date: time.Unix(sp.Date, 0).UTC().Format("2006-01-02"), Ratio: sp.Numerator / sp.Denominator})
+		}
+	}
+	sort.Slice(splits, func(i, j int) bool { return splits[i].Date < splits[j].Date })
+	return out, splits, nil
 }
 
-// StockPrices качает историю тикеров по одному и отдаёт каждую в save сразу: отмена или сбой на середине не теряют уже скачанное.
+// StockPrices качает историю и сплиты тикеров по одному и отдаёт каждую в save сразу: отмена или сбой на середине не теряют уже скачанное.
 // Тикер без истории (Yahoo его не знает) пропускается; об ошибке источника сообщается, если без истории осталась пятая часть и больше.
-func (c *Client) StockPrices(ctx context.Context, rep Reporter, tickers []string, save func([]PriceBar) error) Result {
+func (c *Client) StockPrices(ctx context.Context, rep Reporter, tickers []string, save func(ticker string, bars []PriceBar, splits []Split) error) Result {
 	res := Result{Source: SourceStockPrices}
 	if c.YahooBase == "" {
 		return res
@@ -116,9 +139,9 @@ func (c *Client) StockPrices(ctx context.Context, rep Reporter, tickers []string
 			return res
 		}
 		rep.report(i*100/len(tickers), t)
-		bars, err := c.StockHistory(ctx, t)
+		bars, splits, err := c.StockHistory(ctx, t)
 		if err == nil {
-			err = save(bars)
+			err = save(t, bars, splits)
 		}
 		if err != nil {
 			if ctx.Err() != nil {

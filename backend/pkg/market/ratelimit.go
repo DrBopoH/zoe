@@ -103,6 +103,7 @@ func DefaultHostGaps() map[string]time.Duration {
 		"query1.finance.yahoo.com": 500 * time.Millisecond,
 		"api.nasdaq.com":           1000 * time.Millisecond,
 		"www.sec.gov":              200 * time.Millisecond, // SEC: не больше десяти запросов в секунду
+		"data.sec.gov":             200 * time.Millisecond,
 	}
 }
 

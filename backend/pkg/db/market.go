@@ -46,6 +46,31 @@ CREATE TABLE IF NOT EXISTS stock_prices (
 	adj REAL NOT NULL,                -- и на дивиденды
 	PRIMARY KEY (ticker, d)
 );
+CREATE TABLE IF NOT EXISTS stock_splits (
+	ticker TEXT NOT NULL,
+	d TEXT NOT NULL,                  -- день сплита
+	ratio REAL NOT NULL,              -- во сколько раз стало больше акций (4:1 — 4, обратный 1:10 — 0.1)
+	PRIMARY KEY (ticker, d)
+);
+CREATE TABLE IF NOT EXISTS stock_split_known (
+	ticker TEXT NOT NULL PRIMARY KEY  -- сплиты тикера скачаны (у тикера без сплитов строк в stock_splits нет, но отметка есть)
+);
+CREATE TABLE IF NOT EXISTS stock_facts (
+	tag TEXT NOT NULL,                -- us-gaap/CommonStockSharesOutstanding
+	period TEXT NOT NULL,             -- кадр SEC: CY2024Q4I, CY2023
+	cik INTEGER NOT NULL,
+	end TEXT NOT NULL,                -- дата, на которую значение относится у этой компании
+	val REAL NOT NULL,
+	PRIMARY KEY (tag, period, cik)
+);
+CREATE INDEX IF NOT EXISTS idx_stock_facts_cik ON stock_facts(cik, end);
+CREATE TABLE IF NOT EXISTS stock_frames (
+	tag TEXT NOT NULL,
+	period TEXT NOT NULL,
+	at INTEGER NOT NULL,              -- когда кадр скачан (unix)
+	n INTEGER NOT NULL DEFAULT 0,     -- сколько компаний в нём
+	PRIMARY KEY (tag, period)
+);
 CREATE TABLE IF NOT EXISTS stock_fetched (
 	ticker TEXT NOT NULL PRIMARY KEY,
 	at INTEGER NOT NULL               -- когда история скачана (unix)
@@ -175,13 +200,13 @@ func (s *Storage) MarketCompanies(q string, limit int) ([]market.Company, error)
 	return list, rows.Err()
 }
 
-// SaveStockPrices заменяет историю одного тикера целиком (Yahoo пересчитывает прошлые цены при сплитах и дивидендах) и помечает время загрузки.
-// bars — история одного тикера (поле Ticker у всех одинаковое); пустой список ничего не меняет.
-func (s *Storage) SaveStockPrices(bars []market.PriceBar, nowUnix int64) error {
+// SaveStockPrices заменяет историю и сплиты одного тикера целиком (Yahoo пересчитывает прошлые цены при сплитах и дивидендах) и помечает время загрузки.
+// Пустая история ничего не меняет.
+func (s *Storage) SaveStockPrices(ticker string, bars []market.PriceBar, splits []market.Split, nowUnix int64) error {
 	if len(bars) == 0 {
 		return nil
 	}
-	ticker := strings.ToUpper(bars[0].Ticker)
+	ticker = strings.ToUpper(strings.TrimSpace(ticker))
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
 	defer s.bump()
@@ -190,18 +215,117 @@ func (s *Storage) SaveStockPrices(bars []market.PriceBar, nowUnix int64) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`DELETE FROM stock_prices WHERE ticker = ?`, ticker); err != nil {
-		return err
+	for _, q := range []string{`DELETE FROM stock_prices WHERE ticker = ?`, `DELETE FROM stock_splits WHERE ticker = ?`} {
+		if _, err := tx.Exec(q, ticker); err != nil {
+			return err
+		}
 	}
 	for _, b := range bars {
 		if _, err := tx.Exec(`INSERT OR REPLACE INTO stock_prices(ticker, d, close, adj) VALUES(?,?,?,?)`, ticker, b.Date, b.Close, b.Adj); err != nil {
 			return err
 		}
 	}
+	for _, sp := range splits {
+		if _, err := tx.Exec(`INSERT OR REPLACE INTO stock_splits(ticker, d, ratio) VALUES(?,?,?)`, ticker, sp.Date, sp.Ratio); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`INSERT OR REPLACE INTO stock_split_known(ticker) VALUES(?)`, ticker); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`INSERT OR REPLACE INTO stock_fetched(ticker, at) VALUES(?,?)`, ticker, nowUnix); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// StockSplits — сплиты тикера по возрастанию даты.
+func (s *Storage) StockSplits(ticker string) ([]market.Split, error) {
+	rows, err := s.cacheDB.Query(`SELECT d, ratio FROM stock_splits WHERE ticker = ? ORDER BY d`, strings.ToUpper(strings.TrimSpace(ticker)))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []market.Split{}
+	for rows.Next() {
+		var sp market.Split
+		if err := rows.Scan(&sp.Date, &sp.Ratio); err != nil {
+			return nil, err
+		}
+		out = append(out, sp)
+	}
+	return out, rows.Err()
+}
+
+// SaveStockFrame заменяет кадр отчётности SEC целиком (по CIK) и помечает время загрузки; пустой кадр тоже помечается — период просто без значений.
+func (s *Storage) SaveStockFrame(req market.FrameRequest, facts []market.FrameFact, nowUnix int64) error {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	defer s.bump()
+	tx, err := s.cacheDB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM stock_facts WHERE tag = ? AND period = ?`, req.Tag, req.Period); err != nil {
+		return err
+	}
+	for _, f := range facts {
+		if _, err := tx.Exec(`INSERT OR REPLACE INTO stock_facts(tag, period, cik, end, val) VALUES(?,?,?,?,?)`, req.Tag, req.Period, f.CIK, f.End, f.Val); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`INSERT OR REPLACE INTO stock_frames(tag, period, at, n) VALUES(?,?,?,?)`, req.Tag, req.Period, nowUnix, len(facts)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// StockFramesTodo — какие из нужных кадров ещё не скачаны, а свежие (Recent: SEC дописывает отчёты за последние кварталы) — ещё и устарели старше maxAge.
+func (s *Storage) StockFramesTodo(all []market.FrameRequest, maxAge time.Duration, nowUnix int64) ([]market.FrameRequest, error) {
+	rows, err := s.cacheDB.Query(`SELECT tag, period, at FROM stock_frames`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	have := map[string]int64{}
+	for rows.Next() {
+		var tag, period string
+		var at int64
+		if err := rows.Scan(&tag, &period, &at); err != nil {
+			return nil, err
+		}
+		have[tag+"|"+period] = at
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	var todo []market.FrameRequest
+	for _, r := range all {
+		at, ok := have[r.Key()]
+		if !ok || (r.Recent && at < nowUnix-int64(maxAge/time.Second)) {
+			todo = append(todo, r)
+		}
+	}
+	return todo, nil
+}
+
+// StockShares — число акций компании по CIK из сохранённых кадров (баланс и обложка отчёта) по возрастанию даты.
+func (s *Storage) StockShares(cik int) ([]market.ShareFact, error) {
+	rows, err := s.cacheDB.Query(`SELECT tag, period, end, val FROM stock_facts WHERE cik = ? AND tag IN (?, ?) ORDER BY end, period`, cik, market.TagSharesBalance, market.TagSharesCover)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []market.ShareFact{}
+	for rows.Next() {
+		var f market.ShareFact
+		if err := rows.Scan(&f.Tag, &f.Period, &f.End, &f.Val); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
 }
 
 // StockPrices — месячная история тикера по возрастанию даты и время её загрузки (0 — истории нет).
@@ -231,13 +355,14 @@ func (s *Storage) StockPrices(ticker string) ([]market.PriceBar, int64, error) {
 	return bars, at, nil
 }
 
-// StockTickersToFetch — тикеры n крупнейших по капитализации компаний, чья история не скачана или старше maxAge; крупные первыми.
+// StockTickersToFetch — тикеры n крупнейших по капитализации компаний, чья история не скачана, старше maxAge или скачана без сплитов; крупные первыми.
 func (s *Storage) StockTickersToFetch(n int, maxAge time.Duration, nowUnix int64) ([]string, error) {
 	rows, err := s.cacheDB.Query(`
 		SELECT c.ticker FROM market_companies c
 		LEFT JOIN stock_fetched f ON f.ticker = c.ticker
+		LEFT JOIN stock_split_known k ON k.ticker = c.ticker
 		WHERE c.ticker IN (SELECT ticker FROM market_companies ORDER BY market_cap DESC, ticker LIMIT ?)
-		  AND (f.at IS NULL OR f.at < ?)
+		  AND (f.at IS NULL OR f.at < ? OR k.ticker IS NULL)
 		ORDER BY c.market_cap DESC, c.ticker`, n, nowUnix-int64(maxAge/time.Second))
 	if err != nil {
 		return nil, err

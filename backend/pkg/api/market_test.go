@@ -18,6 +18,14 @@ import (
 func newMarketServer(t *testing.T, usUp bool) *Server {
 	t.Helper()
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/xbrl/frames/") { // кадры SEC: у Apple есть два квартала, остальные периоды пустые
+			if strings.HasSuffix(r.URL.Path, "/CY2025Q3I.json") || strings.HasSuffix(r.URL.Path, "/CY2025Q2I.json") {
+				w.Write([]byte(`{"data":[{"cik":320193,"end":"2025-09-27","val":14800000000}]}`))
+			} else {
+				w.Write([]byte(`{"data":[]}`))
+			}
+			return
+		}
 		switch r.URL.Path {
 		case "/depo_securities":
 			w.Write([]byte(`[{"cpcode":"UA4000000001","cpdescr":"ОВДП тест","val_code":"UAH","nominal":1000,"auk_proc":16.4,"pgs_date":"2030-02-20"}]`))
@@ -78,7 +86,7 @@ func newMarketServer(t *testing.T, usUp bool) *Server {
 	s := NewServer(st, nil, nil)
 	c := market.NewClient()
 	c.NBUBase, c.USTBase, c.FREDBase, c.BinanceBase, c.FNGBase, c.ShillerBase, c.EurostatBase, c.ECBBase, c.BoEBase, c.ONSBase, c.BISBase, c.WBBase, c.AuctionDays = up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, 1
-	c.P2PBase, c.FuturesBase, c.LlamaBase, c.MempoolBase, c.TronBase, c.EthRPCBase, c.GeckoBase, c.YahooBase, c.NasdaqBase, c.SECBase = up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL
+	c.P2PBase, c.FuturesBase, c.LlamaBase, c.MempoolBase, c.TronBase, c.EthRPCBase, c.GeckoBase, c.YahooBase, c.NasdaqBase, c.SECBase, c.EDGARBase = up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL, up.URL
 	s.SetMarket(c)
 	return s
 }
@@ -177,7 +185,7 @@ func TestFullSyncStartsMarketToo(t *testing.T) {
 		t.Fatalf("sync/full: %d", code)
 	}
 	last := waitMarketLast(t, s)
-	if len(last["feeds"].([]any)) != 41 || feedByID(last, "stocks")["state"] != "done" || feedByID(last, "crypto")["state"] != "done" || feedByID(last, "usecon")["state"] != "done" || feedByID(last, "us")["state"] != "done" || feedByID(last, "fx")["state"] != "done" || feedByID(last, "ust")["state"] != "done" || feedByID(last, "nbu")["state"] != "done" || feedByID(last, "macro")["state"] != "done" {
+	if len(last["feeds"].([]any)) != 42 || feedByID(last, "stocks")["state"] != "done" || feedByID(last, "crypto")["state"] != "done" || feedByID(last, "usecon")["state"] != "done" || feedByID(last, "us")["state"] != "done" || feedByID(last, "fx")["state"] != "done" || feedByID(last, "ust")["state"] != "done" || feedByID(last, "nbu")["state"] != "done" || feedByID(last, "macro")["state"] != "done" {
 		t.Fatalf("все фиды должны отработать: %+v", last)
 	}
 	if f := feedByID(last, "companies"); f["state"] != "done" || f["unit"] != "компаний" || f["fetched"].(float64) != 2 || f["skipped"].(float64) != 1 {
@@ -186,6 +194,9 @@ func TestFullSyncStartsMarketToo(t *testing.T) {
 	// история цен пошла из списка, который «companies» положил в кеш в том же опросе или раньше: в этом прогоне списка ещё не было
 	if f := feedByID(last, "stockprices"); f == nil || f["unit"] != "месяцев" {
 		t.Fatalf("stockprices: %+v", f)
+	}
+	if f := feedByID(last, "stockfacts"); f == nil || f["state"] != "done" || f["unit"] != "значений" || f["fetched"].(float64) != 4 {
+		t.Fatalf("stockfacts: Apple есть в двух кварталах × двух тегах, остальные кадры пустые: %+v", f)
 	}
 	ccode, cbody := call(t, s.HandleMarketCompanies, http.MethodGet, "/api/market/companies", "")
 	var cs []market.Company
@@ -454,6 +465,10 @@ func TestMarketStockOnDemandAndFeed(t *testing.T) {
 	if code, _ := call(t, s.HandleMarketStock, http.MethodPost, "/api/market/stock?ticker=AAPL", ""); code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST: %d", code)
 	}
+	// число акций из отчёта SEC лежит в кеше: капитализация = закрытие месяца × акции
+	if err := s.storage.SaveStockFrame(market.FrameRequest{Tag: market.TagSharesBalance, Unit: "shares", Period: "CY2025Q3I"}, []market.FrameFact{{CIK: 320193, End: "2025-09-27", Val: 14.8e9}}, 1); err != nil {
+		t.Fatal(err)
+	}
 	code, body := call(t, s.HandleMarketStock, http.MethodGet, "/api/market/stock?ticker=aapl", "")
 	var r struct {
 		Company market.Company `json:"company"`
@@ -462,9 +477,11 @@ func TestMarketStockOnDemandAndFeed(t *testing.T) {
 			C float64
 			A float64
 		} `json:"prices"`
-		FetchedAt int64 `json:"fetched_at"`
+		Splits    []market.Split    `json:"splits"`
+		Cap       []market.CapPoint `json:"cap"`
+		FetchedAt int64             `json:"fetched_at"`
 	}
-	if code != 200 || json.Unmarshal(body, &r) != nil || r.Company.CIK != 320193 || len(r.Prices) != 2 || r.Prices[0].C != 250.5 || r.Prices[1].A != 268.5 || r.FetchedAt == 0 {
+	if code != 200 || json.Unmarshal(body, &r) != nil || r.Company.CIK != 320193 || len(r.Prices) != 2 || r.Prices[0].C != 250.5 || r.Prices[1].A != 268.5 || r.FetchedAt == 0 || len(r.Cap) != 2 || r.Cap[0].Cap != 250.5*14.8e9 || r.Cap[1].Cap != 270*14.8e9 || r.Splits == nil {
 		t.Fatalf("история AAPL: %d %s", code, body)
 	}
 	// теперь история в кеше: Yahoo может лечь, ответ не меняется
