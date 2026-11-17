@@ -191,8 +191,8 @@ func TestFullSyncStartsMarketToo(t *testing.T) {
 	if f := feedByID(last, "companies"); f["state"] != "done" || f["unit"] != "компаний" || f["fetched"].(float64) != 2 || f["skipped"].(float64) != 1 {
 		t.Fatalf("companies: Apple и Tesla сошлись с SEC, строка без пары пропущена: %+v", f)
 	}
-	// история цен пошла из списка, который «companies» положил в кеш в том же опросе или раньше: в этом прогоне списка ещё не было
-	if f := feedByID(last, "stockprices"); f == nil || f["unit"] != "месяцев" {
+	// история цен ждёт, пока «companies» положит список в кеш в том же опросе (а не падает «нет списка компаний»), и качает его тикеры
+	if f := feedByID(last, "stockprices"); f == nil || f["unit"] != "месяцев" || f["state"] != "done" || f["fetched"].(float64) == 0 {
 		t.Fatalf("stockprices: %+v", f)
 	}
 	if f := feedByID(last, "stockfacts"); f == nil || f["state"] != "done" || f["unit"] != "значений" || f["fetched"].(float64) != 8 {

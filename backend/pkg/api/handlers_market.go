@@ -109,11 +109,30 @@ func (s *Server) startMarket(ctx context.Context, only string, quiet bool) bool 
 	go func() {
 		defer m.wg.Done()
 		var wg sync.WaitGroup
+		// История цен берёт тикеры из списка компаний: если список обновляется в этом же опросе, она ждёт его конца (в очереди), а не падает «нет списка»
+		listReady := make(chan struct{})
+		hasList := false
+		for _, f := range feeds {
+			hasList = hasList || f.Companies != nil
+		}
+		if !hasList {
+			close(listReady)
+		}
 		for i, f := range feeds {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
+				if f.Companies != nil {
+					defer close(listReady)
+				}
 				st := states[i]
+				if f.Prices != nil {
+					select {
+					case <-listReady:
+					case <-ctx.Done():
+						return
+					}
+				}
 				m.mu.Lock()
 				st.State = "fetch"
 				m.mu.Unlock()
