@@ -21,6 +21,12 @@ const (
 
 	// MacroPrefix — наборы воспроизводимых макро-рядов: один набор на источник (macro-fx, macro-us…), один файл на набор.
 	MacroPrefix = "macro-"
+
+	// StockPrefix — наборы раздела «Акции»: stock-prices (цены и сплиты по тикерам) и stock-facts (число акций по кадрам SEC). Список компаний не хранится:
+	// он собирается из Nasdaq и SEC за секунду, а цены (около 4 минут запросов к Yahoo) и кадры EDGAR (около 2 минут) — нет.
+	StockPrefix     = "stock-"
+	StockPricesCard = StockPrefix + "prices"
+	StockFactsCard  = StockPrefix + "facts"
 )
 
 // MacroCard — набор рядов источника feed.
@@ -226,14 +232,17 @@ func (s Store) PutSeries(card string, set map[string][]Tick) error {
 	return nil
 }
 
-// LoadSeries — все ряды из наборов macro-*: id → точки по возрастанию времени, и время создания самого свежего файла (unix).
+// LoadSeries — все ряды из наборов macro-*: см. LoadSets.
+func (s Store) LoadSeries() (map[string][]Tick, int64) { return s.LoadSets(MacroPrefix) }
+
+// LoadSets — все ряды из наборов, чьё имя начинается с prefix: id → точки по возрастанию времени, и время создания самого свежего файла (unix).
 // Из таких файлов собирается кеш макро-рядов, когда он пуст.
-func (s Store) LoadSeries() (map[string][]Tick, int64) {
+func (s Store) LoadSets(prefix string) (map[string][]Tick, int64) {
 	out := map[string][]Tick{}
 	var newest int64
 	list, _ := s.ListEconomy("")
 	for _, e := range list {
-		if !strings.HasPrefix(e.File.Card, MacroPrefix) || e.File.Data == nil {
+		if !strings.HasPrefix(e.File.Card, prefix) || e.File.Data == nil {
 			continue
 		}
 		if e.File.Created > newest {

@@ -503,3 +503,71 @@ func TestMarketStockOnDemandAndFeed(t *testing.T) {
 		t.Fatalf("TSLA в кеше: %+v", bars)
 	}
 }
+
+// Цены и отчётность акций уходят и в кеш, и в файлы группы «Экономика»; стёртый кеш собирается из файлов без запросов к Yahoo и EDGAR.
+func TestStockFilesRebuildStockCache(t *testing.T) {
+	s := newMarketServer(t, true)
+	t.Setenv("ECONOMIC_SOURCES_DIR", t.TempDir())
+	now := time.Now().Unix()
+	save, done := s.pricesSaver(now)
+	bars := []market.PriceBar{{Date: "2020-07-01", Close: 91, Adj: 89}, {Date: "2020-09-01", Close: 115, Adj: 113}}
+	if err := save("aapl", bars, []market.Split{{Date: "2020-08-31", Ratio: 4}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := save("TSLA", []market.PriceBar{{Date: "2026-10-01", Close: 420, Adj: 420}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var res market.Result
+	done(&res) // остаток пачки сбрасывается в файл
+	if res.Error != "" {
+		t.Fatalf("файл цен: %s", res.Error)
+	}
+	fsave, fdone := s.factsSaver(now)
+	req := market.FrameRequest{Tag: market.TagSharesBalance, Unit: "shares", Period: "CY2020Q2I"}
+	if err := fsave(req, []market.FrameFact{{CIK: 320193, End: "2020-06-27", Val: 4_275_634_000}, {CIK: 1318605, End: "2020-06-30", Val: 186_361_726}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fsave(market.FrameRequest{Tag: market.TagSharesCover, Unit: "shares", Period: "CY2020Q2I"}, nil); err != nil { // пустой кадр
+		t.Fatal(err)
+	}
+	fdone(&res)
+	if res.Error != "" {
+		t.Fatalf("файл отчётности: %s", res.Error)
+	}
+	// кеш стёрт: одна компания (MSFT) вернулась из опроса сама и не должна перетереться
+	if err := s.storage.WipeCache(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.storage.SaveStockPrices("MSFT", []market.PriceBar{{Date: "2026-10-01", Close: 500, Adj: 500}}, nil, now); err != nil {
+		t.Fatal(err)
+	}
+	tickers, frames, err := s.RestoreStocks()
+	if err != nil || tickers != 2 || frames != 1 {
+		t.Fatalf("восстановлено: тикеров %d, кадров %d, %v (AAPL и TSLA; один непустой кадр, пустой тоже есть в файле без значений)", tickers, frames, err)
+	}
+	got, at, err := s.storage.StockPrices("AAPL")
+	if err != nil || len(got) != 2 || got[0].Close != 91 || got[0].Adj != 89 || got[1].Date != "2020-09-01" || at == 0 {
+		t.Fatalf("AAPL из файла: %v %+v at=%d", err, got, at)
+	}
+	if sp, _ := s.storage.StockSplits("AAPL"); len(sp) != 1 || sp[0].Ratio != 4 || sp[0].Date != "2020-08-31" {
+		t.Fatalf("сплиты из файла: %+v", sp)
+	}
+	if tk, _ := s.storage.StockTickersToFetch(10, 20*time.Hour, now); len(tk) != 0 {
+		// список компаний пуст — качать нечего; главное, что восстановленные тикеры «со сплитами» и не перекачиваются
+		t.Fatalf("после восстановления перекачка не нужна: %v", tk)
+	}
+	if m, _, _ := s.storage.StockPrices("MSFT"); len(m) != 1 || m[0].Close != 500 {
+		t.Fatalf("то, что уже в кеше, не перетирается: %+v", m)
+	}
+	sh, err := s.storage.StockShares(320193)
+	if err != nil || len(sh) != 1 || sh[0].End != "2020-06-27" || sh[0].Val != 4_275_634_000 || sh[0].Tag != market.TagSharesBalance || sh[0].Period != "CY2020Q2I" {
+		t.Fatalf("акции Apple из файла: %v %+v", err, sh)
+	}
+	todo, _ := s.storage.StockFramesTodo([]market.FrameRequest{req, {Tag: market.TagSharesCover, Unit: "shares", Period: "CY2020Q2I"}}, 72*time.Hour, now)
+	if len(todo) != 1 || todo[0].Tag != market.TagSharesCover {
+		t.Fatalf("восстановленный кадр не качается заново, пустой — качается (в файле он без значений): %+v", todo)
+	}
+	if t2, f2, _ := s.RestoreStocks(); t2 != 0 || f2 != 0 { // повтор ничего не добавляет
+		t.Fatalf("повторное восстановление: %d %d", t2, f2)
+	}
+}
