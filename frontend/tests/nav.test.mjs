@@ -22,3 +22,11 @@ test('мусор и пустое → Смета и «История»', () => {
 test('вкладка «Рынок» сохраняется как есть', () => {
   assert.deepEqual(resolveNav('market', 'persons'), { tab: 'market', section: 'persons' })
 })
+
+test('ARCHIVE_PAGES: страницы архива = верхние вкладки, названия для меню и шапки', async () => {
+  const { ARCHIVE_PAGES, TOP_TABS, archiveLabel } = await import('../src/utils/nav.js')
+  assert.deepEqual(ARCHIVE_PAGES.map((p) => p.key), TOP_TABS)
+  assert.equal(archiveLabel('market'), 'Рынок')
+  assert.equal(archiveLabel('data'), 'Учет')
+  assert.equal(archiveLabel('нет'), '')
+})

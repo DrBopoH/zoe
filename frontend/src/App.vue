@@ -190,17 +190,14 @@ onUnmounted(() => {
 
 <template>
   <div class="min-h-screen bg-slate-950 text-slate-100 font-mono flex flex-col p-6 pt-24 sm:pt-20 select-none">
-    <SideMenu @refresh="fetchData" />
+    <SideMenu v-model:active-tab="activeTab" @refresh="fetchData" />
     <ScrollJumpButtons />
     <ToastStack :progress="progress" :panel-state="panelState" :market="marketPanel" :lost-since="connLostSince" @close-panel="closePanel" @close-market="closeMarket" />
 
     <!-- Шапка прибита к верху экрана: страница скроллится под ней -->
     <div class="app-bar">
       <div class="max-w-6xl w-full mx-auto px-6 pl-16 xl:pl-6 py-3">
-        <AppHeader
-          v-model:activeTab="activeTab"
-          :is-syncing="isSyncing"
-        />
+        <AppHeader :active-tab="activeTab" :is-syncing="isSyncing" />
       </div>
     </div>
 
