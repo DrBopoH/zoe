@@ -2,6 +2,7 @@ package db
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -172,5 +173,64 @@ func TestWipeCacheClearsMacroSeries(t *testing.T) {
 	}
 	if all, _, err := s.MacroSeries(nil); err != nil || len(all) != 0 {
 		t.Fatalf("вайп кеша стирает базу кеша целиком, и макро-ряды тоже: %+v %v", all, err)
+	}
+}
+
+// Старый кеш-файл (обычная таблица) переводится на WITHOUT ROWID без потери рядов; повторный запуск ничего не делает.
+func TestMacroSeriesMigratesToClusteredTable(t *testing.T) {
+	d := t.TempDir()
+	s, err := NewStorage(filepath.Join(d, "c.db"), filepath.Join(d, "k.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	isClustered := func() bool {
+		var def string
+		if err := s.cacheDB.QueryRow(`SELECT sql FROM sqlite_master WHERE name = 'macro_series'`).Scan(&def); err != nil {
+			t.Fatal(err)
+		}
+		return strings.Contains(strings.ToUpper(def), "WITHOUT ROWID")
+	}
+	if !isClustered() {
+		t.Fatal("новый кеш должен создаваться кластерным")
+	}
+	// возвращаем старую схему и кладём ряды вразнобой
+	for _, q := range []string{
+		`DROP TABLE macro_series`,
+		`CREATE TABLE macro_series (series TEXT NOT NULL, dt TEXT NOT NULL, value REAL NOT NULL, updated_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (series, dt))`,
+		`INSERT INTO macro_series VALUES ('usd_uah','2026-03-01',41.5,7), ('cpi_yoy','2026-01-01',6.1,5), ('usd_uah','2025-03-01',41,9), ('usd_uah','2026-01-01',42,8)`,
+	} {
+		if _, err := s.cacheDB.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if isClustered() {
+		t.Fatal("тест должен стартовать со старой схемой")
+	}
+	for i := 0; i < 2; i++ { // второй запуск — холостой
+		if err := s.migrateMacroClustered(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !isClustered() {
+		t.Fatal("таблица не переведена")
+	}
+	var old int
+	if err := s.cacheDB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name = 'macro_series_old'`).Scan(&old); err != nil || old != 0 {
+		t.Fatalf("временная таблица осталась: %d %v", old, err)
+	}
+	got, upd, err := s.MacroSeries(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upd != 9 || len(got["cpi_yoy"]) != 1 || len(got["usd_uah"]) != 3 {
+		t.Fatalf("ряды потеряны: upd=%d %+v", upd, got)
+	}
+	// порядок по датам даёт сам запрос (ORDER BY по ключу), без пересортировки в Go
+	if u := got["usd_uah"]; u[0].Date != "2025-03-01" || u[1].Date != "2026-01-01" || u[2].Date != "2026-03-01" || u[2].Value != 41.5 {
+		t.Fatalf("порядок или значения: %+v", u)
+	}
+	if d := s.MacroLastDate("usd_uah"); d != "2026-03-01" {
+		t.Fatalf("последняя дата: %q", d)
 	}
 }

@@ -162,6 +162,9 @@ func (s *Storage) initCache() error {
 	if err := s.migrateBinanceModel(); err != nil {
 		return err
 	}
+	if err := s.migrateMacroClustered(); err != nil {
+		return err
+	}
 
 	// Миграции старых кеш-файлов (кеш одноразовый, но так бережнее).
 	if !hasColumn(s.cacheDB, "accounts", "extra_pans") {
