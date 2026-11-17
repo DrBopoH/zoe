@@ -345,7 +345,7 @@ func TestMacroSourcesHealth(t *testing.T) {
 			Stale bool   `json:"stale"`
 		} `json:"series"`
 	}
-	if code != 200 || json.Unmarshal(body, &r) != nil || len(r.Series) != 1 || r.Series[0].ID != "fed_funds" || r.Series[0].Feed != "us" || r.Series[0].Freq != "месяц" || !r.Series[0].Stale {
+	if code != 200 || json.Unmarshal(body, &r) != nil || len(r.Series) != 1 || r.Series[0].ID != "fed_funds" || r.Series[0].Feed != "us" || r.Series[0].Freq != "по решению" || !r.Series[0].Stale {
 		t.Fatalf("ряд: %d %s", code, body)
 	}
 	found := false
