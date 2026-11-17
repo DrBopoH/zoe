@@ -461,6 +461,45 @@ export function withTicks(series, ticks) {
   return out
 }
 
+/**
+ * Числовой индекс ряда: время точек (мс) в Float64Array и крайние значения, один раз на массив точек.
+ * Кадр масштабирования или сдвига дальше ищет окно бисекцией и не парсит даты заново (ряды НБУ — десятки тысяч дневных точек).
+ * Массив рядов заменяется целиком при загрузке; на случай правки на месте индекс проверяется по длине и последней точке.
+ */
+const seriesIndex = new WeakMap()
+function indexOf(points) {
+  const n = points.length
+  const last = points[n - 1]
+  let e = seriesIndex.get(points)
+  if (e && e.n === n && e.d === last.d && e.v === last.v) return e
+  const t = new Float64Array(n)
+  let min = Infinity, max = -Infinity, minPos = Infinity, maxPos = -Infinity
+  for (let i = 0; i < n; i++) {
+    const p = points[i]
+    t[i] = ms(p.d)
+    const v = p.v
+    if (typeof v === 'number' && isFinite(v)) {
+      if (v < min) min = v
+      if (v > max) max = v
+      if (v > 0) { if (v < minPos) minPos = v; if (v > maxPos) maxPos = v }
+    }
+  }
+  e = { n, d: last.d, v: last.v, t, min, max, minPos, maxPos }
+  seriesIndex.set(points, e)
+  return e
+}
+// Первая точка, у которой «годы от сегодня» не меньше x (strict — строго больше). Выражение то же, что в yearsFrom: границы окна совпадают с прежним перебором.
+function firstFrom(e, m0, x, strict = false) {
+  let lo = 0, hi = e.n
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    const y = (e.t[mid] - m0) / YEAR_MS
+    if (strict ? y <= x : y < x) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+
 const usable = (series, ids) => (ids || []).filter((id) => series && series[id] && series[id].length)
 
 /** Окно по умолчанию: years лет назад (0 — с первой точки, весь период), до сегодня с небольшим запасом справа. Левее первой точки данных не уходит. */
@@ -478,15 +517,17 @@ export function macroWindow({ series, ids, todayIso, years = 0, minSpan = MACRO_
 /** Вертикаль: auto — под видимое окно без редких выбросов (один сбойный месяц не должен сплющивать график), ext — крайности по всем данным. */
 export function macroRanges({ series, ids, view, todayIso, floor = 0, log = false }) {
   const visible = [], all = []
+  const m0 = ms(todayIso)
   for (const id of usable(series, ids)) {
     const pts = series[id]
     const before = valueAt(pts, isoAt(view.x0, todayIso))
     if (before !== null) visible.push(before)
-    for (const p of pts) {
-      all.push(p.v)
-      const t = yearsFrom(p.d, todayIso)
-      if (t >= view.x0 && t <= view.x1) visible.push(p.v)
-    }
+    const e = indexOf(pts)
+    // крайности всего ряда берутся из индекса: robustRanges от «всех» значений использует только минимум и максимум
+    const lo = log ? e.minPos : e.min, hi = log ? e.maxPos : e.max
+    if (isFinite(lo)) all.push(lo, hi)
+    const end = firstFrom(e, m0, view.x1, true)
+    for (let i = firstFrom(e, m0, view.x0); i < end; i++) visible.push(pts[i].v)
   }
   return robustRanges({ visible, all, floor, log })
 }
@@ -506,21 +547,24 @@ export function buildMacroChart({ series, ids, view, yRange, todayIso, width = 1
   // yRange — в шкальном пространстве (при log это логарифмы); значения ≤ 0 на логарифмической оси не рисуются (разрыв линии)
   const Y = (v) => pad.t + (1 - (sc.fwd(v) - lo) / (hi - lo)) * (height - pad.t - pad.b)
   const margin = (x1 - x0) * 0.05
+  const m0 = ms(todayIso)
 
   const lines = use.map((id) => {
     const meta = SERIES[id] || { label: id, color: '#94a3b8', step: false }
     // точки окна с запасом и одна точка перед ним (чтобы линия входила с левого края)
+    const src = series[id]
+    const e = indexOf(src)
     const pts = []
-    let prev = null
-    for (const p of series[id]) {
-      if (sc.mode === 'log' && !(p.v > 0)) continue
-      const t = yearsFrom(p.d, todayIso)
-      if (t < x0 - margin) { prev = { t: x0 - margin, v: p.v }; continue }
-      if (t > x1 + margin) break
-      if (prev) { pts.push(prev); prev = null }
-      pts.push({ t, v: p.v })
+    const from = firstFrom(e, m0, x0 - margin)
+    const end = firstFrom(e, m0, x1 + margin, true)
+    let j = from - 1
+    if (sc.mode === 'log') while (j >= 0 && !(src[j].v > 0)) j--
+    if (j >= 0) pts.push({ t: x0 - margin, v: src[j].v })
+    for (let i = from; i < end; i++) {
+      const v = src[i].v
+      if (sc.mode === 'log' && !(v > 0)) continue
+      pts.push({ t: (e.t[i] - m0) / YEAR_MS, v })
     }
-    if (prev) pts.push(prev)
     let d = ''
     pts.forEach((p, i) => {
       const x = X(p.t).toFixed(1), y = Y(p.v).toFixed(1)
