@@ -1,6 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { feedSeries, countryList, snapshotIds, loadTicks, resetCatalog } from '../src/composables/useMacro.js'
+import { isShallow, isReactive } from 'vue'
+import { feedSeries, countryList, snapshotIds, loadTicks, resetCatalog, useMacro } from '../src/composables/useMacro.js'
+import { useCountries } from '../src/composables/useCountries.js'
 
 test('каталог спрашивается один раз на все источники', async () => {
   resetCatalog()
@@ -44,4 +46,12 @@ test('часовые точки запрашиваются только для �
   assert.deepEqual(r, { p2p_ask: [{ t: 1, v: 2 }], p2p_bid: [] })
   resetCatalog()
   assert.deepEqual(await snapshotIds(async () => ({ feeds: {} })), [])
+})
+
+test('ряды не оборачиваются глубокой реактивностью: чтение сотен тысяч точек через Proxy тормозило экран «Курсы»', () => {
+  for (const { series } of [useMacro('fx'), useCountries()]) {
+    assert.equal(isShallow(series), true)
+    series.value = { usd_uah: [{ d: '2026-01-01', v: 40 }] }
+    assert.equal(isReactive(series.value.usd_uah), false)
+  }
 })
