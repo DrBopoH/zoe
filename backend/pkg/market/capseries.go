@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// ShareFact — число акций компании на дату из отчётности; Tag — откуда (баланс главнее обложки), Period — кадр SEC.
-type ShareFact struct {
+// Fact — значение показателя компании на дату из отчётности (число акций, выручка, …); Tag — откуда (у акций баланс главнее обложки), Period — кадр SEC.
+type Fact struct {
 	Tag    string
 	Period string
 	End    string
@@ -24,8 +24,8 @@ const shareFactMaxAge = 460 * 24 * time.Hour // число акций старш
 // CapSeries — капитализация по месяцам: закрытие месяца × акции из последнего отчёта не позже конца месяца.
 // Акции в отчётности даны «как тогда», цена Yahoo поправлена на все сплиты до сегодня, поэтому число акций умножается на сплиты ПОСЛЕ даты отчёта.
 // Месяц без подходящего отчёта пропускается: лучше пробел, чем неверное число. Если за один период есть и баланс, и обложка — берётся баланс.
-func CapSeries(bars []PriceBar, splits []Split, shares []ShareFact) []CapPoint {
-	byPeriod := map[string]ShareFact{}
+func CapSeries(bars []PriceBar, splits []Split, shares []Fact) []CapPoint {
+	byPeriod := map[string]Fact{}
 	for _, f := range shares {
 		if f.Val <= 0 || f.End == "" {
 			continue
@@ -35,7 +35,7 @@ func CapSeries(bars []PriceBar, splits []Split, shares []ShareFact) []CapPoint {
 		}
 		byPeriod[f.Period] = f
 	}
-	facts := make([]ShareFact, 0, len(byPeriod))
+	facts := make([]Fact, 0, len(byPeriod))
 	for _, f := range byPeriod {
 		facts = append(facts, f)
 	}
@@ -54,7 +54,7 @@ func CapSeries(bars []PriceBar, splits []Split, shares []ShareFact) []CapPoint {
 		monthEnd := first.AddDate(0, 1, -1)
 		oldest := monthEnd.Add(-shareFactMaxAge).Format("2006-01-02")
 		end := monthEnd.Format("2006-01-02")
-		var pick *ShareFact
+		var pick *Fact
 		for i := len(facts) - 1; i >= 0; i-- {
 			if facts[i].End <= end {
 				pick = &facts[i]

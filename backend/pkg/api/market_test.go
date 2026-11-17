@@ -195,8 +195,8 @@ func TestFullSyncStartsMarketToo(t *testing.T) {
 	if f := feedByID(last, "stockprices"); f == nil || f["unit"] != "месяцев" {
 		t.Fatalf("stockprices: %+v", f)
 	}
-	if f := feedByID(last, "stockfacts"); f == nil || f["state"] != "done" || f["unit"] != "значений" || f["fetched"].(float64) != 4 {
-		t.Fatalf("stockfacts: Apple есть в двух кварталах × двух тегах, остальные кадры пустые: %+v", f)
+	if f := feedByID(last, "stockfacts"); f == nil || f["state"] != "done" || f["unit"] != "значений" || f["fetched"].(float64) != 8 {
+		t.Fatalf("stockfacts: Apple есть в двух кварталах × четырёх тегах (акции, обложка, капитал, активы), остальные кадры пустые: %+v", f)
 	}
 	ccode, cbody := call(t, s.HandleMarketCompanies, http.MethodGet, "/api/market/companies", "")
 	var cs []market.Company
@@ -469,6 +469,16 @@ func TestMarketStockOnDemandAndFeed(t *testing.T) {
 	if err := s.storage.SaveStockFrame(market.FrameRequest{Tag: market.TagSharesBalance, Unit: "shares", Period: "CY2025Q3I"}, []market.FrameFact{{CIK: 320193, End: "2025-09-27", Val: 14.8e9}}, 1); err != nil {
 		t.Fatal(err)
 	}
+	// отчётность F3: убыток сохраняется со знаком, выручка берётся по цепочке тегов, капитал — на конец квартала
+	if err := s.storage.SaveStockFrame(market.FrameRequest{Tag: market.TagNetIncome, Unit: "USD", Period: "CY2024"}, []market.FrameFact{{CIK: 320193, End: "2024-09-28", Val: -5e9}}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.storage.SaveStockFrame(market.FrameRequest{Tag: market.TagRevenueContracts, Unit: "USD", Period: "CY2024"}, []market.FrameFact{{CIK: 320193, End: "2024-09-28", Val: 391e9}}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.storage.SaveStockFrame(market.FrameRequest{Tag: market.TagEquity, Unit: "USD", Period: "CY2025Q3I"}, []market.FrameFact{{CIK: 320193, End: "2025-09-27", Val: 74e9}}, 1); err != nil {
+		t.Fatal(err)
+	}
 	code, body := call(t, s.HandleMarketStock, http.MethodGet, "/api/market/stock?ticker=aapl", "")
 	var r struct {
 		Company market.Company `json:"company"`
@@ -477,12 +487,16 @@ func TestMarketStockOnDemandAndFeed(t *testing.T) {
 			C float64
 			A float64
 		} `json:"prices"`
-		Splits    []market.Split    `json:"splits"`
-		Cap       []market.CapPoint `json:"cap"`
-		FetchedAt int64             `json:"fetched_at"`
+		Splits       []market.Split      `json:"splits"`
+		Cap          []market.CapPoint   `json:"cap"`
+		Fundamentals market.Fundamentals `json:"fundamentals"`
+		FetchedAt    int64               `json:"fetched_at"`
 	}
 	if code != 200 || json.Unmarshal(body, &r) != nil || r.Company.CIK != 320193 || len(r.Prices) != 2 || r.Prices[0].C != 250.5 || r.Prices[1].A != 268.5 || r.FetchedAt == 0 || len(r.Cap) != 2 || r.Cap[0].Cap != 250.5*14.8e9 || r.Cap[1].Cap != 270*14.8e9 || r.Splits == nil {
 		t.Fatalf("история AAPL: %d %s", code, body)
+	}
+	if f := r.Fundamentals; len(f.Revenue) != 1 || f.Revenue[0].Val != 391e9 || len(f.NetIncome) != 1 || f.NetIncome[0].Val != -5e9 || len(f.Equity) != 1 || f.Equity[0].Val != 74e9 || f.Assets == nil {
+		t.Fatalf("отчётность AAPL: %+v", f)
 	}
 	// теперь история в кеше: Yahoo может лечь, ответ не меняется
 	s.mk.client.YahooBase = "http://127.0.0.1:1"

@@ -339,7 +339,12 @@ func (s *Server) HandleMarketStock(w http.ResponseWriter, r *http.Request) {
 	if capSeries == nil {
 		capSeries = []market.CapPoint{}
 	}
-	writeJSON(w, map[string]any{"company": co, "prices": bars, "splits": splits, "cap": capSeries, "fetched_at": at})
+	facts, err := s.storage.StockFacts(co.CIK, market.FundamentalTags())
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"company": co, "prices": bars, "splits": splits, "cap": capSeries, "fundamentals": market.BuildFundamentals(facts), "fetched_at": at})
 }
 
 // stockOnDemandAge — насколько старой может быть история в кеше, чтобы страница компании не ходила за ней в Yahoo.

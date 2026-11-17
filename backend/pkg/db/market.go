@@ -335,22 +335,34 @@ func (s *Storage) StockFramesTodo(all []market.FrameRequest, maxAge time.Duratio
 	return todo, nil
 }
 
-// StockShares — число акций компании по CIK из сохранённых кадров (баланс и обложка отчёта) по возрастанию даты.
-func (s *Storage) StockShares(cik int) ([]market.ShareFact, error) {
-	rows, err := s.cacheDB.Query(`SELECT tag, period, end, val FROM stock_facts WHERE cik = ? AND tag IN (?, ?) ORDER BY end, period`, cik, market.TagSharesBalance, market.TagSharesCover)
+// StockFacts — значения показателей компании по CIK из сохранённых кадров по возрастанию даты.
+func (s *Storage) StockFacts(cik int, tags []string) ([]market.Fact, error) {
+	if len(tags) == 0 {
+		return []market.Fact{}, nil
+	}
+	args := []any{cik}
+	for _, t := range tags {
+		args = append(args, t)
+	}
+	rows, err := s.cacheDB.Query(`SELECT tag, period, end, val FROM stock_facts WHERE cik = ? AND tag IN (?`+strings.Repeat(",?", len(tags)-1)+`) ORDER BY end, period`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []market.ShareFact{}
+	out := []market.Fact{}
 	for rows.Next() {
-		var f market.ShareFact
+		var f market.Fact
 		if err := rows.Scan(&f.Tag, &f.Period, &f.End, &f.Val); err != nil {
 			return nil, err
 		}
 		out = append(out, f)
 	}
 	return out, rows.Err()
+}
+
+// StockShares — число акций компании по CIK (баланс и обложка отчёта).
+func (s *Storage) StockShares(cik int) ([]market.Fact, error) {
+	return s.StockFacts(cik, []string{market.TagSharesBalance, market.TagSharesCover})
 }
 
 // StockPrices — месячная история тикера по возрастанию даты и время её загрузки (0 — истории нет).
