@@ -4,6 +4,7 @@ import { computed } from 'vue'
 import { SERIES, MACRO_PAD, MACRO_MIN_SPAN, MACRO_MAX_SPAN, buildMacroChart, macroWindow, macroRanges, isoAt, stampAt, valueAt, unitText, axisText } from '../utils/macro.js'
 import { BENNER, bennerPhase } from '../utils/benner.js'
 import BennerBands from './BennerBands.vue'
+import { macroLoading } from '../composables/useMacro.js'
 import { useChartView } from '../composables/useChartView.js'
 
 // Универсальная панель макро-графика: заголовок, кнопки окна, слот summary (текущие значения), график и подсказка под курсором. Данные — из кеша (/api/macro), заполняются кнопкой «Обновить».
@@ -93,7 +94,7 @@ const hover = computed(() => {
       </span>
     </div>
 
-    <div v-if="!has" class="text-xs text-slate-600 uppercase tracking-wider py-6 text-center">{{ empty }}</div>
+    <div v-if="!has" class="text-xs text-slate-600 uppercase tracking-wider py-6 text-center">{{ macroLoading ? 'Идёт загрузка…' : empty }}</div>
     <template v-else>
       <div class="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-xs"><slot name="summary" /></div>
 
