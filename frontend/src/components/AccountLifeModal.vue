@@ -4,6 +4,7 @@ import { apiSend } from '../utils/api.js'
 import UiModal from './ui/UiModal.vue'
 import UiButton from './ui/UiButton.vue'
 import { parseDateText, isoToText, isDateTextOk } from '../utils/dateText.js'
+import { errText } from '../utils/errText.js'
 
 // Ручные даты открытия/закрытия счёта — костыль для банков, которые их не отдают.
 // Хранятся в core.db (переживают снос кеша). Пустое поле = «считать по выписке».
@@ -39,7 +40,7 @@ const save = async () => {
     if (refresh) await refresh()
     emit('close')
   } catch (e) {
-    error.value = String(e.message || e)
+    error.value = errText(e)
   } finally {
     busy.value = false
   }

@@ -12,6 +12,7 @@ import { inflationFor, realRate, signedPct, plainPct, macroSummary } from '../ut
 import { apiGetJson, apiSend, apiJson } from '../utils/api.js'
 import { toLocalDateStr } from '../utils/formatters.js'
 import { SOURCES, COLUMNS, filterBonds, sortBonds, currenciesOf, bondCells, nextSort, resolveRates, holdingsOf, qtyText, restrictTo, scoreBonds, scoreColor, HORIZON_YEARS, moneyText, isMatured, rateOf } from '../utils/marketTable.js'
+import { errText } from '../utils/errText.js'
 
 // dataVersion растёт при любой записи в кеш (в том числе после опроса рынка) — по нему перечитываем список.
 // running — идёт ли сейчас опрос рынка (из /sync/status → market.running).
@@ -37,7 +38,7 @@ const load = async (src) => {
     lists.value = { ...lists.value, [src]: (await apiGetJson(`/market/bonds?source=${src}`)) || [] }
     loadError.value = ''
   } catch (e) {
-    loadError.value = String(e.message || e)
+    loadError.value = errText(e)
   }
 }
 onMounted(() => { load(section.value); icu.load() })

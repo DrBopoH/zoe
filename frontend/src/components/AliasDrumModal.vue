@@ -10,6 +10,7 @@ import UiIconButton from './ui/UiIconButton.vue'
 import CardDrum from './CardDrum.vue'
 import TxResolveTable from './TxResolveTable.vue'
 import CardTilesPanel from './CardTilesPanel.vue'
+import { errText } from '../utils/errText.js'
 
 // Резолвер связей. Центр — алиас: он ограничивает барабан картами (IBAN), подключёнными к нему.
 // Барабан выбирает карту → её история. Справа все карты и PAN-сироты: перетащил на рядок контрагента —
@@ -138,7 +139,7 @@ const linkMany = async (pairs) => {
       if (u) done.push(u)
     }
   } catch (e) {
-    err.value = String(e.message || e)
+    err.value = errText(e)
   } finally {
     busy.value = false
     if (done.length) {
@@ -162,7 +163,7 @@ const doUndo = async () => {
     for (const u of list) await apiSend('DELETE', `/users/link-account?identifier=${q(u.identifier)}&alias=${q(u.alias)}`)
     emit('changed')
   } catch (e) {
-    err.value = String(e.message || e)
+    err.value = errText(e)
   }
 }
 

@@ -1,9 +1,7 @@
-export const formatMoney = (val) => {
-  return new Intl.NumberFormat('uk-UA', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(val || 0)
-}
+import { ruFormat } from './numfmt.js'
+
+const UK_MONEY = new Intl.NumberFormat('uk-UA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+export const formatMoney = (val) => UK_MONEY.format(val || 0)
 
 export const toLocalDateStr = (d) => {
   const year = d.getFullYear()
@@ -144,5 +142,5 @@ export const formatTxTime = (iso) => {
 }
 
 // Число с разделителями разрядов и период «дата — дата» (источники/импорт выписок)
-export const fmtN = (n) => new Intl.NumberFormat('ru-RU').format(n || 0)
+export const fmtN = (n) => ruFormat(n || 0)
 export const formatPeriod = (from, to) => (from ? `${formatRuDate(from)} — ${formatRuDate(to)}` : '—')

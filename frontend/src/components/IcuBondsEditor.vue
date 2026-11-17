@@ -6,6 +6,7 @@ import UiButton from './ui/UiButton.vue'
 import UiIconButton from './ui/UiIconButton.vue'
 import { parseDateText, isoToText } from '../utils/dateText.js'
 import { ISIN_LEN, normIsin, findMarketBond, fillFromMarket } from '../utils/bondLookup.js'
+import { errText } from '../utils/errText.js'
 
 // Справочник облигаций вместо ввода карт: плитка на каждую ОВДП (ISIN, погашение, ставка, номинал).
 // В брокерском отчёте этих данных нет; один справочник на всех счетах. Пишется сразу (не ждёт «Сохранить» алиаса).
@@ -22,7 +23,7 @@ const load = async () => {
     bonds.value = await apiGetJson('/icu/bonds')
     error.value = ''
   } catch (e) {
-    error.value = String(e.message || e)
+    error.value = errText(e)
   }
 }
 load()
@@ -62,7 +63,7 @@ const run = async (fn) => {
     await load()
     if (refresh) await refresh()
   } catch (e) {
-    error.value = String(e.message || e)
+    error.value = errText(e)
   } finally {
     busy.value = false
   }
@@ -77,7 +78,6 @@ const save = () => run(async () => {
 })
 const remove = (b) => run(() => apiSend('DELETE', `/icu/bonds?isin=${q(b.isin)}`))
 
-const fmtDate = (iso) => dmy(iso)
 </script>
 
 <template>
@@ -106,7 +106,7 @@ const fmtDate = (iso) => dmy(iso)
       <div v-else class="flex items-center gap-2 text-[11px] rounded border border-blue-500/30 bg-blue-950/30 px-2 py-1.5">
         <div class="flex-1 min-w-0">
           <div class="font-bold text-blue-100 truncate">{{ b.isin }} <span class="font-normal text-slate-400">{{ b.name }}</span></div>
-          <div class="text-[10px] text-slate-400">до {{ fmtDate(b.maturity) }} · {{ b.coupon_rate }}% · номинал ₴ {{ b.nominal }}</div>
+          <div class="text-[10px] text-slate-400">до {{ dmy(b.maturity) }} · {{ b.coupon_rate }}% · номинал ₴ {{ b.nominal }}</div>
         </div>
         <UiIconButton icon="edit" tone="accent" size="sm" @click="edit(b)" />
         <UiIconButton icon="trash" tone="danger" size="sm" @click="remove(b)" />

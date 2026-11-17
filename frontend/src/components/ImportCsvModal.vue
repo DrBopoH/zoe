@@ -5,6 +5,7 @@ import { formatRuDate, fmtN, formatPeriod as period } from '../utils/formatters.
 import UiModal from './ui/UiModal.vue'
 import UiButton from './ui/UiButton.vue'
 import UiIconButton from './ui/UiIconButton.vue'
+import { errText } from '../utils/errText.js'
 
 // Окно выбора файла выписки (клик или перетаскивание). Два режима:
 //   add    — «Добавить»: новый счёт. Если такой счёт уже есть, предлагается обновить его этим файлом.
@@ -58,7 +59,7 @@ const inspect = async () => {
     if (props.mode === 'update' && props.account) fd.append('account', props.account.id)
     info.value = await (await apiUpload('/sources/inspect', fd)).json()
   } catch (err) {
-    statusMsg.value = { type: 'error', text: err.message }
+    statusMsg.value = { type: 'error', text: errText(err) }
   } finally {
     checking.value = false
   }
@@ -103,7 +104,7 @@ const submitImport = async () => {
     statusMsg.value = { type: 'success', text: `Загружено операций: ${data.imported_count || 0}` }
     setTimeout(() => { emit('success'); emit('close') }, 900)
   } catch (err) {
-    statusMsg.value = { type: 'error', text: err.message }
+    statusMsg.value = { type: 'error', text: errText(err) }
   } finally {
     uploading.value = false
   }

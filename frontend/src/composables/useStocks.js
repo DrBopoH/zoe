@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { apiGetJson, q } from '../utils/api.js'
+import { errText } from '../utils/errText.js'
 
 // Раздел «Акции компаний»: список компаний (поиск по тикеру и названию, на сервере) и одна открытая компания.
 // Ответы приходят вразнобой (печатают быстрее, чем отвечает сервер): засчитывается только последний запрос каждого вида.
@@ -19,7 +20,7 @@ export function useStocks(get = apiGetJson) {
       const r = await get(`/market/companies?q=${q(text.trim())}&limit=${STOCK_LIST_LIMIT}`)
       if (my === listSeq) { list.value = Array.isArray(r) ? r : []; error.value = '' }
     } catch (e) {
-      if (my === listSeq) error.value = String(e.message || e)
+      if (my === listSeq) error.value = errText(e)
     }
   }
 
@@ -31,7 +32,7 @@ export function useStocks(get = apiGetJson) {
       const r = await get(`/market/stock?ticker=${q(ticker)}`)
       if (my === openSeq) { detail.value = r; error.value = '' }
     } catch (e) {
-      if (my === openSeq) { detail.value = null; error.value = String(e.message || e) }
+      if (my === openSeq) { detail.value = null; error.value = errText(e) }
     } finally {
       if (my === openSeq) loading.value = false
     }

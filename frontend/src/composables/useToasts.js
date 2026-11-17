@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { errText } from '../utils/errText.js'
 
 // Пуш-уведомления справа внизу. kind: 'ok' (зелёный) | 'err' (красный) | 'warn' (янтарный, «уже идёт»). Процессинг синка рисует отдельная панель.
 // Любое уведомление с ttl уходит само, у всех есть крестик; ttl 0 — висит, пока не закроют (так делать только если без решения человека не обойтись).
@@ -29,7 +30,7 @@ export const pushToast = ({ kind = 'ok', title, lines = [], ttl = 0 }) => {
 
 // Ошибка запроса: 409 («обновление уже идёт») — янтарное, коротко; остальное — красное на 10 секунд.
 export const pushRequestError = (title, e) => {
-  const text = String(e?.message || e)
+  const text = errText(e)
   if (e?.status === 409) return pushToast({ kind: 'warn', title: text, ttl: 4000 })
   return pushToast({ kind: 'err', title, lines: [text], ttl: 10000 })
 }

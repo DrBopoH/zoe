@@ -1,7 +1,7 @@
 // Таблица «Рынок»: фильтр, сортировка и подписи. Чистые функции над списком из /market/bonds.
 import { isoToText } from './dateText.js'
 import { curSym } from './formatters.js'
-import { numText } from './numfmt.js'
+import { numText, ruFormat } from './numfmt.js'
 
 export const SOURCES = [
   { key: 'nbu', label: 'ОВДП', icon: 'bond', title: 'ОВДП · НБУ', idLabel: 'ISIN' },
@@ -45,7 +45,7 @@ export function holdingsOf(overviews) {
   }
   return out
 }
-export const qtyText = (n) => `${new Intl.NumberFormat('ru-RU').format(Math.round(n * 100) / 100)}\u00A0шт.`
+export const qtyText = (n) => `${ruFormat(Math.round(n * 100) / 100)}\u00A0шт.`
 
 // Из вставленного текста (экран брокера, распознанный скриншот): ISIN и цена за бумагу, если она есть сразу после ISIN
 // (до следующего ISIN). Цена — число с двумя знаками от 100 до 100 000: проценты (YTM 16.15), даты и количества не подходят.
@@ -175,7 +175,7 @@ export function bondCells(b) {
     coupon_rate: pct(b.coupon_rate),
     yield: pct(b.yield),
     last_auction: b.last_auction ? isoToText(b.last_auction) : '—',
-    nominal: b.nominal > 0 ? `${curSym(b.currency)} ${new Intl.NumberFormat('ru-RU').format(b.nominal)}` : '—'
+    nominal: b.nominal > 0 ? `${curSym(b.currency)} ${ruFormat(b.nominal)}` : '—'
   }
 }
 
@@ -264,4 +264,4 @@ export function scoreColor(score) {
 }
 
 // Сумма с символом валюты: ₴ 12 345
-export const moneyText = (v, currency) => `${curSym(currency)}\u00A0${new Intl.NumberFormat('ru-RU').format(Math.round(v))}`
+export const moneyText = (v, currency) => `${curSym(currency)}\u00A0${ruFormat(Math.round(v))}`

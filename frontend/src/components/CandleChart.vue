@@ -329,9 +329,10 @@ const priceTicks = computed(() => {
 })
 // компактная подпись в одной единице на всю шкалу (9,5к · 10к · 10,5к), мелкие значения — как есть
 // тег последней цены — точное число без сокращений («10 150»); сокращать только от миллиона, иначе тег не влезает
+const UK_INT = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 0 })
 const lastLabel = computed(() => {
   const v = lastPrice.value ? lastPrice.value.val : 0
-  return Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(2).replace('.', ',') + 'М' : new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 0 }).format(v)
+  return Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(2).replace('.', ',') + 'М' : UK_INT.format(v)
 })
 const lastPrice = computed(() => {
   const S = series.value
