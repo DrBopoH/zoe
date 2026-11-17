@@ -28,6 +28,43 @@ func TestFrequencyByAverageStep(t *testing.T) {
 	}
 }
 
+func TestHealthStepRatesAgeByLastRefreshAndWideLagsAreFresh(t *testing.T) {
+	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
+	feeds := []Feed{{ID: "cn", Title: "Китай", Provides: []string{SerCNPolicy, "q", "m", "y", "m2"}}}
+	fresh, old := now.Add(-2*time.Hour).Unix(), now.Add(-90*24*time.Hour).Unix()
+	stats := []SeriesStat{
+		{ID: SerCNPolicy, Points: 5, From: "2010-01-01", To: "2025-05-01", UpdatedAt: fresh}, // ставку не меняли 18 месяцев, кеш свежий
+		{ID: "q", Points: 5, From: "2025-04-01", To: "2026-04-01", UpdatedAt: fresh},         // квартал: Q2 ВВП, Q3 ещё не вышел (230 дней от начала квартала)
+		{ID: "m", Points: 13, From: "2025-07-01", To: "2026-07-01", UpdatedAt: fresh},        // месяц: 139 дней от 1-го числа (безработица Британии)
+		{ID: "y", Points: 5, From: "2020-07-01", To: "2024-07-01", UpdatedAt: fresh},         // год: данные Всемирного банка за 2024 (869 дней)
+		{ID: "m2", Points: 13, From: "2024-12-01", To: "2025-12-01", UpdatedAt: fresh},       // месяц, последняя точка 351 день назад: устарел по-настоящему
+	}
+	_, sh := Health(feeds, stats, nil, now)
+	by := map[string]SeriesHealth{}
+	for _, s := range sh {
+		by[s.ID] = s
+	}
+	for _, id := range []string{SerCNPolicy, "q", "m", "y"} {
+		if by[id].Stale {
+			t.Errorf("%s не должен краснеть: %+v", id, by[id])
+		}
+	}
+	if !by["m2"].Stale {
+		t.Errorf("отставание в 351 день — устарел: %+v", by["m2"])
+	}
+	if by[SerCNPolicy].Freq != "по решению" || by[SerCNPolicy].LagDays != 0 {
+		t.Errorf("ступенька: возраст кеша, не последней точки: %+v", by[SerCNPolicy])
+	}
+	// кеш ставки не обновляли три месяца — это уже устаревание
+	stats[0].UpdatedAt = old
+	_, sh = Health(feeds, stats, nil, now)
+	for _, x := range sh {
+		if x.ID == SerCNPolicy && !x.Stale {
+			t.Errorf("ставка с кешем 90 дней давности должна считаться устаревшей: %+v", x)
+		}
+	}
+}
+
 func TestHealthFeedsStaleAndMissing(t *testing.T) {
 	now := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
 	feeds := []Feed{

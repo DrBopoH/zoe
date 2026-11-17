@@ -59,12 +59,31 @@ func Frequency(points int, from, to string) FreqInfo {
 	case step <= 10:
 		return FreqInfo{"неделя", 21}
 	case step <= 45:
-		return FreqInfo{"месяц", 100}
+		return FreqInfo{"месяц", 150}
 	case step <= 120:
-		return FreqInfo{"квартал", 200}
+		return FreqInfo{"квартал", 270}
 	}
-	return FreqInfo{"год", 550}
+	return FreqInfo{"год", 900}
 }
+
+// Сроки считаются от даты точки, а точка стоит на начале периода (месяц — 1-е число, квартал — первый день, год — середина): к концу периода уже
+// проходит месяц-квартал, плюс задержка публикации (ВВП и баланс ФРС — до полугода, мировые данные ОЭСР и Всемирного банка — до полутора лет).
+// Запасы подобраны по живой странице «Источников» (17.11.2026): ряды с обычной задержкой не краснеют, а те, что отстали на месяцы сверх неё, — да.
+
+// stepRates — ключевые ставки стран: ряд-«ступенька», точка есть только в день смены ставки, и «последняя точка 14 месяцев назад» значит «ставку не меняли»,
+// а не «данные устарели» (Китай держал ставку с мая 2025). Список берётся из реестра стран, отдельно его никто не ведёт.
+func stepRates() map[string]bool {
+	m := map[string]bool{}
+	for _, c := range Countries() {
+		if id := c.Metrics["policy"]; id != "" {
+			m[id] = true
+		}
+	}
+	return m
+}
+
+// stepStaleDays — через сколько дней после последнего опроса ряд-ступенька считается устаревшим (опрос заменяет ряд целиком, так что это возраст кеша).
+const stepStaleDays = 45
 
 // Health сводит каталог источников и статистику кеша в здоровье источников и рядов. errs — последняя ошибка каждого источника (id → текст).
 // Источники без Provides (облигации) пропускаются. Ряды в кеше, которых нет ни в одном источнике, идут с пустым Feed.
@@ -73,6 +92,7 @@ func Health(feeds []Feed, stats []SeriesStat, errs map[string]string, now time.T
 	for _, s := range stats {
 		byID[s.ID] = s
 	}
+	steps := stepRates()
 	owner := map[string]string{}
 	var fh []FeedHealth
 	var sh []SeriesHealth
@@ -90,7 +110,7 @@ func Health(feeds []Feed, stats []SeriesStat, errs map[string]string, now time.T
 				continue
 			}
 			owner[id] = f.ID
-			x := seriesHealth(st, f.ID, now)
+			x := seriesHealth(st, f.ID, now, steps[id])
 			sh = append(sh, x)
 			h.Cached++
 			h.Points += st.Points
@@ -108,17 +128,20 @@ func Health(feeds []Feed, stats []SeriesStat, errs map[string]string, now time.T
 	}
 	for _, st := range stats {
 		if _, ok := owner[st.ID]; !ok {
-			sh = append(sh, seriesHealth(st, "", now))
+			sh = append(sh, seriesHealth(st, "", now, steps[st.ID]))
 		}
 	}
 	sort.SliceStable(sh, func(i, j int) bool { return sh[i].ID < sh[j].ID })
 	return fh, sh
 }
 
-func seriesHealth(st SeriesStat, feed string, now time.Time) SeriesHealth {
+func seriesHealth(st SeriesStat, feed string, now time.Time, step bool) SeriesHealth {
 	fi := Frequency(st.Points, st.From, st.To)
+	if step && st.Points > 0 {
+		fi = FreqInfo{"по решению", stepStaleDays}
+	}
 	var lag int
-	if fi.Label == "снимок" {
+	if fi.Label == "снимок" || fi.Label == "по решению" {
 		if st.UpdatedAt > 0 {
 			lag = int(now.Sub(time.Unix(st.UpdatedAt, 0)).Hours() / 24)
 		}
