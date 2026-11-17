@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { TFS, dayStartOf, weekStartOf, alignDown, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel } from '../src/utils/candleMath.js'
+import { TFS, dayStartOf, weekStartOf, alignDown, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, transferSteps } from '../src/utils/candleMath.js'
 
 test('dayStartOf / weekStartOf: полночь и понедельник', () => {
   const d = new Date(2026, 10, 12, 15, 30) // чт
@@ -125,4 +125,34 @@ test('видимые слоты и вертикаль по свечам в ок�
   assert.ok(r.auto.lo < 7 && r.auto.lo > 5.5)
   assert.ok(r.auto.hi > 11 - 0.01 && r.ext.hi > 11)
   assert.deepEqual(candleYRanges(S, { x0: 5, x1: 9 }).auto, candleYRanges(S, { x0: 5, x1: 9 }).ext) // окно в будущем
+})
+
+test('transferSteps: пара перевода между своими счетами — один шаг, экстремум только после неё', () => {
+  const t = (id, acc, own, time, amount) => ({ id, account_id: acc, own_account_id: own, time, amount })
+  // 17.11: приход на FOP стоит раньше расхода BLACK (у банков разные часы), оба с разницей в секунды
+  const r = transferSteps([
+    t('a', 'fop', 'black', '2026-11-17T20:02:05Z', 6721.61),
+    t('b', 'black', 'fop', '2026-11-17T20:02:09Z', -6721.61),
+    t('c', 'card', '', '2026-11-17T20:19:00Z', -324.98),
+  ])
+  assert.deepEqual(Array.from(r.end), [0, 1, 1])
+  assert.deepEqual(Array.from(r.amt), [6721.61, -6721.61, -324.98])
+  assert.equal(r.ms[0], r.ms[1])
+  // капитал после первой записи шага — ещё не сошёлся: в max/min попадает только значение после конца шага
+  let run = 100, hi = 100
+  r.amt.forEach((a, k) => { run += a; if (r.end[k] && run > hi) hi = run })
+  assert.equal(hi, 100)
+})
+
+test('transferSteps: без пары, вне окна или с другой суммой записи остаются отдельными шагами', () => {
+  const t = (id, acc, own, time, amount) => ({ id, account_id: acc, own_account_id: own, time, amount })
+  const r = transferSteps([
+    t('a', 'fop', 'black', '2026-11-17T10:00:00Z', 50),
+    t('b', 'black', 'fop', '2026-11-17T12:00:00Z', -50), // слишком далеко
+    t('c', 'fop', 'black', '2026-11-17T13:00:00Z', 70),
+    t('d', 'black', 'fop', '2026-11-17T13:00:01Z', -60), // другая сумма
+    { id: 'e', account_id: 'x', time: '', amount: 1 }, // без времени — пропуск
+  ])
+  assert.deepEqual(Array.from(r.end), [1, 1, 1, 1])
+  assert.equal(r.amt.length, 4)
 })

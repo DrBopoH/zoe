@@ -70,6 +70,54 @@ export const axisLabel = (v, step, lo, hi) => {
   return fixedText(v / unit, dec) + suffix
 }
 
+// ── Операции для свечей. Перевод между своими счетами — две записи (уход и приход, у банков разные часы). Если применять
+// их по одной, внутри свечи капитал на миг удваивается (или проваливается) и рисует ложный фитиль. Поэтому найденная пара
+// ставится рядом (время — раньше из двух), а экстремумы свечи считаются только после неё: флаг `end` у последней записи шага.
+export const PAIR_WINDOW_MS = 10 * 60 * 1000
+
+// list: [{ id, account_id, own_account_id, time, amount }] → { ms, amt, end } по времени. Запись без пары — шаг из одной записи.
+export function transferSteps(list) {
+  const items = []
+  for (const t of list) {
+    if (!t.time) continue
+    items.push({ t, ms: new Date(t.time).getTime(), used: false })
+  }
+  items.sort((a, b) => a.ms - b.ms)
+  const byAcc = new Map()
+  for (const it of items) {
+    if (!byAcc.has(it.t.account_id)) byAcc.set(it.t.account_id, [])
+    byAcc.get(it.t.account_id).push(it)
+  }
+  const steps = []
+  for (const it of items) {
+    if (it.used) continue
+    it.used = true
+    let mate = null
+    if (it.t.own_account_id) {
+      let best = Infinity
+      for (const c of byAcc.get(it.t.own_account_id) || []) {
+        if (c.used || Math.abs(c.t.amount + it.t.amount) >= 0.005) continue
+        const d = Math.abs(c.ms - it.ms)
+        if (d <= PAIR_WINDOW_MS && d < best) { best = d; mate = c }
+      }
+    }
+    if (mate) {
+      mate.used = true
+      steps.push({ ms: Math.min(it.ms, mate.ms), amts: [it.t.amount, mate.t.amount] })
+    } else {
+      steps.push({ ms: it.ms, amts: [it.t.amount] })
+    }
+  }
+  steps.sort((a, b) => a.ms - b.ms)
+  const n = steps.reduce((m, st) => m + st.amts.length, 0)
+  const ms = new Float64Array(n), amt = new Float64Array(n), end = new Uint8Array(n)
+  let i = 0
+  for (const st of steps) {
+    st.amts.forEach((a, k) => { ms[i] = st.ms; amt[i] = a; end[i] = k === st.amts.length - 1 ? 1 : 0; i++ })
+  }
+  return { ms, amt, end }
+}
+
 // Ход выбранной свечи для шапки истории: изменение капитала за период (закрытие − открытие) и размах внутри него
 // (максимум − минимум, это волатильность «внутри дня», которую не видно в истории операций). Нет данных свечи → null.
 // Процент считается от открытия; при нулевом открытии он не определён (null).
