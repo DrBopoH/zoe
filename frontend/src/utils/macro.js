@@ -500,6 +500,8 @@ function firstFrom(e, m0, x, strict = false) {
   return lo
 }
 
+const THIN_COLS = 2 // порог прореживания: больше стольких точек на единицу ширины графика — режем
+
 const usable = (series, ids) => (ids || []).filter((id) => series && series[id] && series[id].length)
 
 /** Окно по умолчанию: years лет назад (0 — с первой точки, весь период), до сегодня с небольшим запасом справа. Левее первой точки данных не уходит. */
@@ -530,6 +532,32 @@ export function macroRanges({ series, ids, view, todayIso, floor = 0, log = fals
     for (let i = firstFrom(e, m0, view.x0); i < end; i++) visible.push(pts[i].v)
   }
   return robustRanges({ visible, all, floor, log })
+}
+
+/**
+ * Прореживание линии по столбцам экрана: в каждом столбце шириной 1 единица графика остаются первая, наименьшая, наибольшая и последняя точки (в порядке времени).
+ * Глазом не отличить: внутри столбца линия всё равно закрашивает его по вертикали от минимума до максимума. Короткие ряды (окно до limit точек) не трогаются.
+ */
+export function thinColumns(pts, X, limit) {
+  if (pts.length <= limit) return pts
+  const out = []
+  let col = NaN, f = 0, mn = 0, mx = 0
+  const flush = (end) => {
+    const idx = [...new Set([f, mn, mx, end])].sort((a, b) => a - b)
+    for (const i of idx) out.push(pts[i])
+  }
+  for (let i = 0; i < pts.length; i++) {
+    const c = Math.floor(X(pts[i].t))
+    if (c !== col) {
+      if (i) flush(i - 1)
+      col = c; f = mn = mx = i
+    } else {
+      if (pts[i].v < pts[mn].v) mn = i
+      if (pts[i].v > pts[mx].v) mx = i
+    }
+  }
+  flush(pts.length - 1)
+  return out
 }
 
 /**
@@ -565,8 +593,10 @@ export function buildMacroChart({ series, ids, view, yRange, todayIso, width = 1
       if (sc.mode === 'log' && !(v > 0)) continue
       pts.push({ t: (e.t[i] - m0) / YEAR_MS, v })
     }
+    // ступенька — редкие точки, прореживать нечего (и порядок точек в ней важен); плотная ломаная режется до ~4 точек на столбец
+    const drawn = meta.step ? pts : thinColumns(pts, X, THIN_COLS * (width - pad.l - pad.r))
     let d = ''
-    pts.forEach((p, i) => {
+    drawn.forEach((p, i) => {
       const x = X(p.t).toFixed(1), y = Y(p.v).toFixed(1)
       d += i === 0 ? `M${x} ${y}` : meta.step ? `H${x}V${y}` : `L${x} ${y}`
     })

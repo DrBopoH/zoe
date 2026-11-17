@@ -74,7 +74,8 @@ export function quantile(sorted, p) {
 export function robustRanges({ visible, all, trim = 0.02, pad = 0.06, floor = null, log = false }) {
   // log: значения переводятся в натуральный логарифм (неположительные отбрасываются), диапазон — в шкальном пространстве, floor не применяется
   if (log) { floor = null; const L = (a) => (a ? a.filter((v) => typeof v === 'number' && v > 0).map(Math.log) : a); visible = L(visible); all = L(all) }
-  const fin = (a) => a.filter((v) => typeof v === 'number' && isFinite(v)).sort((x, y) => x - y)
+  // типизированный массив сортируется встроенным числовым порядком без функции сравнения: на десятках тысяч точек в разы быстрее
+  const fin = (a) => Float64Array.from(a.filter((v) => typeof v === 'number' && isFinite(v))).sort()
   const vis = fin(visible || []), every = fin(all || visible || [])
   const make = (lo, hi) => {
     if (!isFinite(lo) || !isFinite(hi)) { lo = 0; hi = 1 }
