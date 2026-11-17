@@ -4,6 +4,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import UiButton from './ui/UiButton.vue'
 import { parseIcuScreen, mergeEntries } from '../utils/icuOcr.js'
 import { parseIcuList, ytmFromPrice } from '../utils/marketTable.js'
+import { errText } from '../utils/errText.js'
 
 // Список бумаг брокера (ICU) для режима «только ICU»: скриншоты экрана брокера → распознавание → проверка → сохранение.
 // Печатать ничего не нужно: картинки можно бросить в область, выбрать файлами или вставить (Ctrl+V). Распознавание идёт
@@ -44,7 +45,7 @@ const addImages = async (files) => {
     rows.value = merged.map((e) => old.get(e.isin) || { ...e, include: !e.flags.includes('isin-weak') })
     if (!merged.length) err.value = 'На картинках не нашёл карточек с ISIN и доходностью (YTM). Нужен экран «Купити → ОВДП».'
   } catch (e) {
-    err.value = `Не удалось распознать: ${e.message || e}`
+    err.value = `Не удалось распознать: ${errText(e)}`
   } finally {
     busy.value = ''
   }
@@ -91,7 +92,7 @@ const saveShots = async () => {
     rows.value = []
     err.value = ''
   } catch (e) {
-    err.value = String(e.message || e)
+    err.value = errText(e)
   }
 }
 
@@ -104,7 +105,7 @@ const saveCurve = async () => {
     pts.value = props.icu.curve.value.map((p) => ({ years: p.years, ytm: p.ytm }))
     err.value = ''
   } catch (e) {
-    err.value = String(e.message || e)
+    err.value = errText(e)
   }
 }
 
@@ -122,7 +123,7 @@ const saveText = async () => {
     textOpen.value = false
     err.value = ''
   } catch (e) {
-    err.value = String(e.message || e)
+    err.value = errText(e)
   }
 }
 const parsedText = computed(() => parseIcuList(text.value))

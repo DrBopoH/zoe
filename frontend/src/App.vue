@@ -19,6 +19,7 @@ import { isSyncing, autoSave, syncPath } from './composables/useSync.js'
 import { marketPanelOpen } from './utils/marketPanel.js'
 import { loadMasks } from './composables/useIbanMasks.js'
 import { pollDelay } from './utils/pollDelay.js'
+import { errText } from './utils/errText.js'
 
 const STORAGE_ACTIVE_TAB = 'economic_active_tab'
 
@@ -151,7 +152,7 @@ const loadData = async () => {
     errorMsg.value = failed ? String(failed.reason?.message || failed.reason) : ''
     loadMasks() // новые счета после синхронизации получают скрытый вид на бэкенде
   } catch (err) {
-    errorMsg.value = err.message
+    errorMsg.value = errText(err)
   }
 }
 

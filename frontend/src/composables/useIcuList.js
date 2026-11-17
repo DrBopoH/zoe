@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { apiGetJson, apiJson } from '../utils/api.js'
 import { storageGet, storageSet } from '../utils/storage.js'
 import { parseIsins } from '../utils/marketTable.js'
+import { errText } from '../utils/errText.js'
 
 // Свой список бумаг, доступных в брокере (ICU), с ценой и доходностью с его экрана, и кривая доходности рынка.
 // Всё хранится на сервере (core.db: списки «icu» и кривая «icu»), переживает смену браузера и «стереть кеш».
@@ -33,7 +34,7 @@ export function useIcuList() {
       curve.value = (await apiGetJson(CURVE)).points || []
       error.value = ''
     } catch (e) {
-      error.value = String(e.message || e)
+      error.value = errText(e)
     }
   }
 

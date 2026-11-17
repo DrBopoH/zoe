@@ -1,6 +1,7 @@
 import { ref, shallowRef } from 'vue'
 import { apiGetJson } from '../utils/api.js'
 import { withTicks } from '../utils/macro.js'
+import { errText } from '../utils/errText.js'
 
 // Какие ряды даёт каждый источник, знает сервер (GET /api/macro/catalog): фронт свои списки id не держит. Спрашиваем один раз на все экраны.
 let catalog = null
@@ -36,7 +37,7 @@ export function useMacro(feed = 'macro', extra = [], { ticks = false } = {}) {
       updatedAt.value = r?.updated_at || 0
       error.value = ''
     } catch (e) {
-      error.value = String(e.message || e)
+      error.value = errText(e)
     }
   }
 

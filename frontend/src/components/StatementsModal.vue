@@ -12,6 +12,7 @@ import { apiGetJson, apiSend, q } from '../utils/api.js'
 import { autoSave, setAutoSave } from '../composables/useSync.js'
 import { formatRuDate, formatMaskedIBAN, plural, fmtN, formatPeriod } from '../utils/formatters.js'
 import { groupAccounts, groupBadges, accountLook } from '../utils/statements.js'
+import { errText } from '../utils/errText.js'
 
 // Окно «ВЫПИСКИ»: всё, что известно об источниках данных (файлы выписок, снимки API) и об их присутствии в кеш-базе.
 // У каждого счёта бит: 1 — данные в кеше, 0 — нет. «Сбросить» зануляет биты, «Загрузить» взводит их из файлов-источников.
@@ -38,7 +39,7 @@ const load = async () => {
     const ids = new Set(accounts.value.map(a => a.id))
     picked.value = new Set([...picked.value].filter(id => ids.has(id)))
   } catch (e) {
-    msg.value = { ok: false, text: e.message }
+    msg.value = { ok: false, text: errText(e) }
   } finally {
     loading.value = false
   }
@@ -81,7 +82,7 @@ const run = async (kind, fn) => {
   try {
     await fn()
   } catch (e) {
-    msg.value = { ok: false, text: e.message }
+    msg.value = { ok: false, text: errText(e) }
   } finally {
     busy.value = ''
     await load()
