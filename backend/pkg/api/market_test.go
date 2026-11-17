@@ -42,7 +42,7 @@ func newMarketServer(t *testing.T, usUp bool) *Server {
 		case "/NBUStatService/v1/statdirectory/res":
 			w.Write([]byte(`[{"dt":"20260901","id_api":"RES_OffReserveAssets","tzep":"T071USD_7","value":48670.23}]`))
 		case "/NBUStatService/v1/statdirectory/balanceofpayments":
-			w.Write([]byte(`[{"dt":"20260101","id_api":"Cur_acc","tzep":"D021USD_7","value":-1023},{"dt":"20260101","id_api":"G_S","tzep":"D021USD_7","value":-6810}]`))
+			w.Write([]byte(`[{"dt":"20260101","id_api":"Cur_acc","t023":"total","tzep":"D021USD_7","value":-1023},{"dt":"20260101","id_api":"Cur_acc","t023":"2","tzep":"D021USD_7","value":11717},{"dt":"20260101","id_api":"G_S","t023":"total","tzep":"D021USD_7","value":-6810}]`))
 		case "/NBUStatService/v1/statdirectory/monetary":
 			w.Write([]byte(`[{"dt":"20260901","txt":"Грошовий агрегат M3","id_api":"M3","k076":"Total","value":4177749.7541},{"dt":"20260901","txt":"Готівкові кошти в обігу поза депозитними корпораціями (M0)","id_api":"M0","k076":"Total","value":1000000}]`))
 		case "/graph/fredgraph.csv":

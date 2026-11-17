@@ -24,11 +24,16 @@ const monFixture = `[
  {"dt":"20260901","txt":"Готівкові кошти в обігу поза депозитними корпораціями (M0)","id_api":"M0x","freq":"M","k076":"Total","value":1000000}
 ]`
 
-// платёжный баланс: те же строки приходят на каждое окно запроса; в долларах берутся только D021USD_7
+// платёжный баланс: те же строки приходят на каждое окно запроса; в долларах берутся только D021USD_7 и только сальдо (t023 = total);
+// как в живом ответе НБУ (zond 17.11.2026), после сальдо идут кредит (1) и дебет (2) — выбор «последней строки» дал бы +11,7 млрд вместо −0,07
 const bopFixture = `[
- {"dt":"20260101","txt":"A. Рахунок поточних операцій","id_api":"Cur_acc","leveli":1,"freq":"M","tzep":"D020_7","value":-42962},
- {"dt":"20260101","txt":"A. Рахунок поточних операцій","id_api":"Cur_acc","leveli":1,"freq":"M","tzep":"D021USD_7","value":-1023},
- {"dt":"20260101","txt":"Баланс товарів та послуг","id_api":"G_S","leveli":2,"freq":"M","tzep":"D021USD_7","value":-6810},
+ {"dt":"20260101","txt":"A. Рахунок поточних операцій","id_api":"Cur_acc","leveli":1,"freq":"M","t023":"total","tzep":"D020_7","value":-42962},
+ {"dt":"20260101","txt":"A. Рахунок поточних операцій","id_api":"Cur_acc","leveli":1,"freq":"M","t023":"total","tzep":"D021USD_7","value":-1023},
+ {"dt":"20260101","txt":"A. Рахунок поточних операцій","id_api":"Cur_acc","leveli":1,"freq":"M","t023":"1","tzep":"D021USD_7","value":11644},
+ {"dt":"20260101","txt":"A. Рахунок поточних операцій","id_api":"Cur_acc","leveli":1,"freq":"M","t023":"2","tzep":"D021USD_7","value":11717},
+ {"dt":"20260101","txt":"Баланс товарів та послуг","id_api":"G_S","leveli":2,"freq":"M","t023":"total","tzep":"D021USD_7","value":-6810},
+ {"dt":"20260101","txt":"Баланс товарів та послуг","id_api":"G_S","leveli":2,"freq":"M","t023":"2","tzep":"D021USD_7","value":10940},
+ {"dt":"20260101","txt":"Баланс товарів та послуг","id_api":"G_S","leveli":2,"freq":"M","t023":"1","tzep":"D021USD_7","value":4130},
  {"dt":"20260101","txt":"Баланс товарів та послуг","id_api":"G_S","leveli":2,"freq":"M","tzep":"D021EUR_7","value":-5815},
  {"dt":"20260101","txt":"Прямі інвестиції","id_api":"FDI","leveli":2,"freq":"M","tzep":"D021USD_7","value":-78}
 ]`
@@ -116,7 +121,7 @@ func TestNBUDeepBoPFailureKeepsRest(t *testing.T) {
 		t.Fatalf("упал только платёжный баланс: %q", res.Error)
 	}
 	// пустой ответ без Cur_acc — явная ошибка, а не молчаливо пустой ряд
-	srv = deepServer(t, resFixture, monFixture, `[{"dt":"20260101","id_api":"FDI","tzep":"D021USD_7","value":1}]`)
+	srv = deepServer(t, resFixture, monFixture, `[{"dt":"20260101","id_api":"FDI","t023":"total","tzep":"D021USD_7","value":1}]`)
 	if _, res = testClient(srv.URL, "").nbuDeep(context.Background(), nil); !strings.Contains(res.Error, "нет текущего счёта") {
 		t.Fatalf("%q", res.Error)
 	}

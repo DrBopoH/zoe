@@ -88,7 +88,7 @@ func (c *Client) nbuDeep(ctx context.Context, rep Reporter) ([]SeriesPoint, Resu
 	return out, res
 }
 
-// nbuBoP — текущий счёт (Cur_acc) и баланс товаров и услуг (G_S) в долларах (tzep D021USD_7), млн → млрд. Последние bopMonths месяцев окнами по bopChunk;
+// nbuBoP — сальдо (t023 = total) текущего счёта (Cur_acc) и баланса товаров и услуг (G_S) в долларах (tzep D021USD_7), млн → млрд. Последние bopMonths месяцев окнами по bopChunk;
 // сбой окна не трогает остальные.
 func (c *Client) nbuBoP(ctx context.Context) ([]SeriesPoint, int, error) {
 	now := c.now()
@@ -121,7 +121,8 @@ func (c *Client) nbuBoP(ctx context.Context) ([]SeriesPoint, int, error) {
 				id = SerUAGS
 			}
 			d := r.date("dt")
-			if id == "" || !strings.EqualFold(r.str("tzep"), "D021USD_7") || d == "" || r.str("value") == "" {
+			// t023: total — сальдо, 1 — кредит (поступления), 2 — дебет (выплаты); без этого последняя строка (дебет, +11,7 млрд) затирала сальдо (−0,07)
+			if id == "" || !strings.EqualFold(r.str("tzep"), "D021USD_7") || !strings.EqualFold(r.str("t023"), "total") || d == "" || r.str("value") == "" {
 				skipped++
 				continue
 			}
