@@ -33,6 +33,9 @@ const lostFor = computed(() => {
   const s = Math.max(0, Math.round((now.value - props.lostSince) / 1000))
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 })
+
+// Новые тосты появляются сверху, старые копятся внизу: нижний (самый старый) уходит первым
+const toastsView = computed(() => [...toasts.value].reverse())
 </script>
 
 <template>
@@ -62,7 +65,7 @@ const lostFor = computed(() => {
       </div>
 
       <div
-        v-for="t in toasts"
+        v-for="t in toastsView"
         :key="t.id"
         class="ui-push"
         :class="{ 'ui-push--err': t.kind === 'err', 'ui-push--warn': t.kind === 'warn', 'ui-push--ok': t.kind === 'ok' }"

@@ -59,3 +59,18 @@ test('истёкшие тосты уходят по очереди: между �
   assert.ok(second - first >= 50, `a и b ушли с разницей ${second - first} мс`)
   assert.ok(at.c - first >= 250, 'c живёт дольше: его время не сжато очередью')
 })
+
+test('в очереди на уход раньше пришедший идёт первым', async () => {
+  clear()
+  toastTiming.gap = 100
+  const order = []
+  const seen = new Set()
+  const w = setInterval(() => { for (const t of ['a', 'b', 'c']) if (!seen.has(t) && !toasts.value.some((x) => x.title === t)) { seen.add(t); order.push(t) } }, 2)
+  pushToast({ kind: 'ok', title: 'a', ttl: 40 })
+  pushToast({ kind: 'ok', title: 'b', ttl: 10 }) // уходит первым по сроку
+  pushToast({ kind: 'ok', title: 'c', ttl: 10 }) // ждёт очереди; a истекает позже, но появился раньше c
+  await new Promise((r) => setTimeout(r, 450))
+  clearInterval(w)
+  toastTiming.gap = 500
+  assert.deepEqual(order, ['b', 'a', 'c'])
+})

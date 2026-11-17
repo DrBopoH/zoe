@@ -24,9 +24,12 @@ describe('MarketPanel', () => {
     expect(t).toContain('окно 3/7')
     expect(t).toContain('ошибка')
     expect(t).toContain('timeout')
-    expect(t).toContain('Бумаг: 310')
+    expect(t).toContain('ОВДП')
+    expect(t).not.toContain('Бумаг: 310') // готовый источник — одна строка без подписи и бара
     expect(w.find('.ui-bar--err').exists()).toBe(true)
-    expect(w.find('.ui-bar--done').exists()).toBe(true)
+    expect(w.find('.ui-bar--done').exists()).toBe(false)
+    expect(w.findAll('.ui-bar')).toHaveLength(3) // очередь, процент, ошибка
+    expect(t.indexOf('ОВДП')).toBeLessThan(t.indexOf('Курсы')) // готовое сверху, идущее внизу
   })
 
   it('без процента — бегущие полосы', () => {

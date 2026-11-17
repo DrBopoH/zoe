@@ -10,23 +10,40 @@ const timers = new Map()
 export const dismissToast = (id) => {
   clearTimeout(timers.get(id))
   timers.delete(id)
+  queue = queue.filter(x => x !== id)
   toasts.value = toasts.value.filter(t => t.id !== id)
 }
 
-// Уходят по очереди: у каждого свой таймер и своё время жизни, но перед уходом проверяется, что после ухода предыдущего
-// прошло не меньше toastTiming.gap мс. Иначе несколько одновременно истёкших тостов исчезли бы разом.
+// Уходят по очереди, первым — тот, кто пришёл раньше: у каждого свой таймер и своё время жизни, но истёкшие встают
+// в одну очередь (по порядку появления) и покидают экран не чаще, чем раз в toastTiming.gap мс. Иначе несколько
+// одновременно истёкших тостов исчезли бы разом или в случайном порядке.
 export const toastTiming = { gap: 500 }
 let lastLeave = 0
+let queue = [] // id истёкших, по возрастанию (id растёт с появлением)
+let pump = null
+
+const drain = () => {
+  if (pump || !queue.length) return
+  const wait = lastLeave + toastTiming.gap - Date.now()
+  const go = () => {
+    pump = null
+    const id = queue.shift()
+    if (id !== undefined) { lastLeave = Date.now(); dismissToast(id) }
+    drain()
+  }
+  if (wait <= 0) go()
+  else pump = setTimeout(go, wait)
+}
 
 const leave = (id) => {
-  const wait = lastLeave + toastTiming.gap - Date.now()
-  if (wait > 0) { timers.set(id, setTimeout(() => leave(id), wait)); return }
-  lastLeave = Date.now()
-  dismissToast(id)
+  timers.delete(id)
+  if (!queue.includes(id)) queue = [...queue, id].sort((x, y) => x - y)
+  drain()
 }
 
 const arm = (id, ttl) => {
   clearTimeout(timers.get(id))
+  queue = queue.filter(x => x !== id) // повтор продлевает жизнь и снимает с очереди на уход
   if (ttl > 0) timers.set(id, setTimeout(() => leave(id), ttl))
 }
 
