@@ -1,3 +1,5 @@
+import { fixedText } from './numfmt.js'
+
 // Чистая математика графика: таймфреймы, корзины времени, «красивые» шаги шкалы. Без Vue и DOM — покрыта tests/candleMath.test.mjs.
 
 export const TFS = [
@@ -65,7 +67,7 @@ export const axisLabel = (v, step, lo, hi) => {
   const u = step / unit
   let dec = 0 // знаков ровно столько, чтобы шаг шкалы читался точно (250 → 9,75к)
   while (dec < 3 && Math.abs(u * 10 ** dec - Math.round(u * 10 ** dec)) > 1e-6) dec++
-  return (v / unit).toFixed(dec).replace('.', ',') + suffix
+  return fixedText(v / unit, dec) + suffix
 }
 
 // Ход выбранной свечи для шапки истории: изменение капитала за период (закрытие − открытие) и размах внутри него

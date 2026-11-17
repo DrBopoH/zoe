@@ -1,5 +1,5 @@
 <script setup>
-import { dmy } from '../utils/numfmt.js'
+import { dmy, numText } from '../utils/numfmt.js'
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import UiButton from './ui/UiButton.vue'
 import { parseIcuScreen, mergeEntries } from '../utils/icuOcr.js'
@@ -63,7 +63,7 @@ const calc = (r) => {
   const b = byId.value.get(r.isin)
   return b && r.price > 0 ? ytmFromPrice(b, r.price, props.today) : null
 }
-const fmt = (v) => (v == null ? '—' : (Math.round(v * 100) / 100).toFixed(2).replace(/0$/, '').replace(/\.$/, '').replace('.', ','))
+const fmt = (v) => numText(v, 2)
 const FLAG_TEXT = {
   'isin-fixed': 'ISIN исправлен по реестру',
   'isin-ambiguous': 'ISIN неоднозначен, проверь',

@@ -5,6 +5,7 @@ import { currentInflation, signedPct, plainPct } from '../utils/macro.js'
 import { money } from '../utils/formatters.js'
 import { bondDollarYield } from '../utils/dollar.js'
 import { formatDateLong } from '../utils/formatters.js'
+import { numText } from '../utils/numfmt.js'
 
 // Портфель ОВДП: средняя ставка и срок по стоимости позиций, реальная доходность (ставка с поправкой на инфляцию г/г), ближайшая выплата.
 const props = defineProps({
@@ -16,7 +17,7 @@ const props = defineProps({
 const inflation = computed(() => currentInflation(props.macro))
 const st = computed(() => portfolioStats(props.positions, props.today, inflation.value))
 const usdy = computed(() => (st.value && props.assume ? bondDollarYield({ rate: st.value.rate, currency: 'UAH', ...props.assume }) : { usd: null, realUsd: null }))
-const yearsText = (y) => `${String(y).replace('.', ',')} г.`
+const yearsText = (y) => `${numText(y, 2)} г.`
 </script>
 
 <template>

@@ -7,6 +7,7 @@ import { hasPoints, signedPct, plainPct, unitText } from '../utils/macro.js'
 import { stressAt, stressSeries, stressLevel, STRESS_TEXT, signalRows, signalTally, regime, realRateRows } from '../utils/scorecard.js'
 import UiCard from '../components/ui/UiCard.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
+import { numText } from '../utils/numfmt.js'
 
 // Экран «Скоркард»: сводка из уже загруженных рядов — режим экономики по правилам, индекс стресса, светофор опережающих сигналов
 // и реальные ставки стран. Это сводка, а не прогноз и не торговый сигнал: у каждого вывода видно, из чего он получен.
@@ -34,7 +35,7 @@ const STATE = { ok: ['text-emerald-400', 'спокойно'], warn: ['text-amber
 const LEVEL_TONE = { calm: 'text-emerald-400', normal: 'text-slate-200', tense: 'text-amber-300', stress: 'text-rose-400' }
 const REG_TONE = { recession: 'text-rose-400', stagflation: 'text-rose-400', overheating: 'text-amber-300', disinflation: 'text-sky-300', goldilocks: 'text-emerald-400' }
 const sval = (r) => (r.unit === '%' ? plainPct(r.value) : unitText(r.value, r.unit.split(' ')[0]))
-const z = (v) => (v > 0 ? '+' : v < 0 ? '−' : '') + String(Math.abs(v)).replace('.', ',')
+const z = (v) => (v > 0 ? '+' : v < 0 ? '−' : '') + numText(Math.abs(v), 2)
 const tone = (v) => (v === null ? 'text-slate-500' : v >= 0 ? 'text-emerald-400' : 'text-rose-400')
 </script>
 

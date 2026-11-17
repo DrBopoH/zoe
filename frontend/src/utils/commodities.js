@@ -1,6 +1,5 @@
 import { valueAt, lastPoint, changeSince } from './macro.js'
-import { intText } from './numfmt.js'
-
+import { intText, fixedText } from './numfmt.js'
 // Сырьё: цены в долларах (FRED) и металлы из курсов НБУ (гривен за унцию). Экран показывает всё либо в долларах, либо в гривнах:
 // пересчёт — по курсу доллара НБУ на дату каждой точки (курс — последний не позже даты). Чистые функции, без интерфейса.
 // native: в чём цена приходит — usd (доллары), cent (центы за фунт: сахар, кофе), uah (гривны: металлы НБУ).
@@ -73,5 +72,5 @@ export function commodityRows(view, today) {
 export function priceText(v) {
   if (v === null || v === undefined || !isFinite(v)) return '—'
   if (Math.abs(v) >= 100) return intText(v)
-  return (Math.round(v * 100) / 100).toFixed(2).replace('.', ',')
+  return fixedText(Math.round(v * 100) / 100, 2)
 }

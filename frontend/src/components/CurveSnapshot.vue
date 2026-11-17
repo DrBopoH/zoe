@@ -1,5 +1,5 @@
 <script setup>
-import { dmy } from '../utils/numfmt.js'
+import { dmy, numText } from '../utils/numfmt.js'
 import { computed } from 'vue'
 import { curveSnapshot, curveChart, lastPoint, plainPct } from '../utils/macro.js'
 import UiCard from './ui/UiCard.vue'
@@ -37,7 +37,7 @@ const tenYears = (s) => s.points.find((p) => p.id === 'ust_10y')?.v ?? null
     <svg v-else :viewBox="`0 0 ${chart.width} ${chart.height}`" class="w-full h-auto" role="img" aria-label="Кривая доходности Treasury">
       <g v-for="t in chart.yTicks" :key="t.v">
         <line :x1="chart.pad.l" :x2="chart.width - chart.pad.r" :y1="t.y" :y2="t.y" stroke="#1e293b" stroke-width="1" />
-        <text :x="chart.pad.l - 6" :y="t.y + 3" text-anchor="end" font-size="10" fill="#64748b">{{ String(t.v).replace('.', ',') }} %</text>
+        <text :x="chart.pad.l - 6" :y="t.y + 3" text-anchor="end" font-size="10" fill="#64748b">{{ numText(t.v, 3) }} %</text>
       </g>
       <text v-for="x in chart.xs" :key="x.label" :x="x.x" :y="chart.height - 14" text-anchor="middle" font-size="10" fill="#64748b">{{ x.label }}</text>
       <path v-for="l in [...chart.lines].reverse()" :key="l.key" :d="l.d" fill="none" :stroke="l.color" :stroke-width="l.key === 'now' ? 2.2 : 1.4" stroke-linejoin="round" :data-line="l.key" />

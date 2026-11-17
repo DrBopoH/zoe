@@ -1,4 +1,5 @@
 import { WALLET } from './txTags.js'
+import { fixedText, numText } from './numfmt.js'
 
 // Состав счёта на карточке (account.portfolio с бэкенда).
 
@@ -17,8 +18,8 @@ const STABLE = new Set(['USDT', 'USDC', 'FDUSD', 'BUSD', 'TUSD', 'USDP', 'DAI', 
 
 // Количество монеты: у стейблкоинов копейки, у остальных до 8 знаков без хвостовых нулей
 export const fmtQty = (asset, qty) => {
-  if (STABLE.has(asset)) return (Math.round(qty * 100) / 100).toFixed(2)
-  return String(Number(qty.toFixed(8)))
+  if (STABLE.has(asset)) return fixedText(Math.round(qty * 100) / 100, 2)
+  return numText(Number(qty.toFixed(8)), 8) // пыль меньше 1e-8 — «0», как и раньше
 }
 
 // Кошельки к показу: пустые скрыты (бэкенд уже не присылает их, здесь — на случай старых данных)
