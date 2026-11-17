@@ -78,6 +78,7 @@ func (c *Client) FXNBU(ctx context.Context, rep Reporter) ([]SeriesPoint, Result
 		windows++
 	}
 	step, total := 0, windows*len(fxCodes)
+	var usd []SeriesPoint
 	for _, fc := range fxCodes {
 		var got []SeriesPoint
 		failed := false
@@ -100,6 +101,16 @@ func (c *Client) FXNBU(ctx context.Context, rep Reporter) ([]SeriesPoint, Result
 		// ряд с дыркой в середине хуже старого целого: при сбое окна ряд не отдаётся, в кеше остаётся прежний
 		if !failed {
 			sort.Slice(got, func(i, j int) bool { return got[i].Date < got[j].Date })
+			switch fc.series {
+			case SerUSDUAH:
+				usd = got
+			case SerRUBUAH:
+				ext, err := c.extendRUB(ctx, got, usd, now)
+				if err != nil {
+					errs = append(errs, err.Error())
+				}
+				got = ext
+			}
 			out = append(out, got...)
 		}
 	}
