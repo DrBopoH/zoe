@@ -30,7 +30,7 @@ func CapSeries(bars []PriceBar, splits []Split, shares []ShareFact) []CapPoint {
 		if f.Val <= 0 || f.End == "" {
 			continue
 		}
-		if old, ok := byPeriod[f.Period]; ok && !(old.Tag == TagSharesCover && f.Tag == TagSharesBalance) {
+		if old, ok := byPeriod[f.Period]; ok && (old.Tag != TagSharesCover || f.Tag != TagSharesBalance) {
 			continue
 		}
 		byPeriod[f.Period] = f
