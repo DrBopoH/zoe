@@ -33,6 +33,7 @@ import { useCountries } from '../composables/useCountries.js'
 import { toLocalDateStr } from '../utils/formatters.js'
 import { firstLoadError } from '../utils/loadError.js'
 import { MARKET_TREE, MARKET_SECTIONS, isBondSection } from '../utils/marketNav.js'
+import { feedStamps } from '../utils/feedStamps.js'
 
 // Оболочка вкладки «Рынок»: шторка с группами («Ценные бумаги», «Макро») и экран выбранного раздела.
 // Макро-ряды читаются один раз здесь и раздаются экранам; при записи в кеш (dataVersion) перечитываются.
@@ -76,13 +77,16 @@ const fxScreen = { series: fx.series, error: computed(() => firstLoadError(fx.er
 const heavy = { countries, eurozone: ez, fx: fxScreen, fed: us, yields: curve, real, prices, jobs, activity, liquidity, credit, usecon: econ, crypto, stocks, commodities, world, chain, ppp, scorecard: scoreScreen, sources }
 // Таблицы облигаций считают доходность в долларах: нужны курсы и инфляция США (тяжёлые ряды, поэтому только на этих экранах)
 const dollar = computed(() => ({ ...fx.series.value, ...us.series.value }))
-const loadBond = () => { if (!bondSection.value) return; for (const h of [fx, us]) if (!Object.keys(h.series.value).length) h.load() }
-onMounted(() => { macro.load(); heavy[section.value]?.load(); loadBond() })
-watch(() => props.dataVersion, () => { macro.load(); heavy[section.value]?.load(); if (bondSection.value) { fx.load(); us.load() } })
-watch(section, (s) => { const h = heavy[s]; if (h && !Object.keys(h.series.value).length) h.load(); loadBond() })
+const feeds = feedStamps(() => props.dataVersion)
+const loadSection = (s) => { const h = heavy[s]; if (h) feeds.load(h) }
+const loadBond = () => { if (bondSection.value) for (const h of [fx, us]) feeds.ensure(h) }
+onMounted(() => { macro.load(); loadSection(section.value); loadBond() })
+watch(() => props.dataVersion, () => { macro.load(); loadSection(section.value); if (bondSection.value) { feeds.load(fx); feeds.load(us) } })
+// Раздел, открытый до последней записи в кеш, перечитывается при возврате: ряды в нём устарели
+watch(section, (s) => { const h = heavy[s]; if (h) feeds.ensure(h); loadBond() })
 // Сбой загрузки текущего раздела (ряды, реестр стран, здоровье источников) — плашкой с повтором, а не пустым экраном
 const loadError = computed(() => firstLoadError(macro.error.value, heavy[section.value]?.error?.value, ...(bondSection.value ? [fx.error.value, us.error.value] : [])))
-const retry = () => { macro.load(); heavy[section.value]?.load(); loadBond() }
+const retry = () => { macro.load(); loadSection(section.value); loadBond() }
 const today = computed(() => toLocalDateStr(new Date()))
 const bondSection = computed(() => (isBondSection(section.value) ? section.value : null))
 </script>
