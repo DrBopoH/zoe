@@ -13,9 +13,21 @@ export const dismissToast = (id) => {
   toasts.value = toasts.value.filter(t => t.id !== id)
 }
 
+// Уходят по очереди: у каждого свой таймер и своё время жизни, но перед уходом проверяется, что после ухода предыдущего
+// прошло не меньше toastTiming.gap мс. Иначе несколько одновременно истёкших тостов исчезли бы разом.
+export const toastTiming = { gap: 500 }
+let lastLeave = 0
+
+const leave = (id) => {
+  const wait = lastLeave + toastTiming.gap - Date.now()
+  if (wait > 0) { timers.set(id, setTimeout(() => leave(id), wait)); return }
+  lastLeave = Date.now()
+  dismissToast(id)
+}
+
 const arm = (id, ttl) => {
   clearTimeout(timers.get(id))
-  if (ttl > 0) timers.set(id, setTimeout(() => dismissToast(id), ttl))
+  if (ttl > 0) timers.set(id, setTimeout(() => leave(id), ttl))
 }
 
 // Такое же уведомление, уже висящее на экране (двойной клик по «Обновить»), не дублируется: у него только продлевается время.
