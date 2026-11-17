@@ -237,3 +237,34 @@ func TestStockFactsSavesEachFrameAndTreats404AsEmpty(t *testing.T) {
 		t.Fatalf("фид: %+v", f)
 	}
 }
+
+func TestCapSeriesFixesSharesUnitOutlier(t *testing.T) {
+	// живой кадр SEC по Apple (cache.db, 17.11.2026): баланс на 29.03.2014 — 861 745 вместо 861 745 000, обложка того же периода верна
+	bars := []PriceBar{{Date: "2013-12-01", Close: 20}, {Date: "2014-03-01", Close: 20}, {Date: "2014-05-01", Close: 20}, {Date: "2014-06-01", Close: 20}}
+	splits := []Split{{Date: "2014-06-09", Ratio: 7}}
+	shares := []Fact{
+		{Tag: TagSharesBalance, Period: "CY2013Q2I", End: "2013-06-29", Val: 908_442_000},
+		{Tag: TagSharesBalance, Period: "CY2013Q3I", End: "2013-09-28", Val: 899_738_000},
+		{Tag: TagSharesBalance, Period: "CY2013Q4I", End: "2013-12-28", Val: 892_447_000},
+		{Tag: TagSharesBalance, Period: "CY2014Q1I", End: "2014-03-29", Val: 861_745},
+		{Tag: TagSharesCover, Period: "CY2014Q1I", End: "2014-04-11", Val: 861_381_000},
+		{Tag: TagSharesBalance, Period: "CY2014Q2I", End: "2014-06-28", Val: 5_989_171_000},
+	}
+	got := CapSeries(bars, splits, shares)
+	if len(got) != 4 {
+		t.Fatalf("%+v", got)
+	}
+	// март: выброса нет — берётся декабрьский отчёт (обложка вышла 11 апреля, к марту не относится)
+	if want := 20 * 892_447_000.0 * 7; got[1].Cap < want*0.999 || got[1].Cap > want*1.001 {
+		t.Fatalf("март 2014: %v, ждали ≈%v", got[1].Cap, want)
+	}
+	// май: вместо выброса — обложка того же периода, на сплит умножается так же, как баланс
+	if want := 20 * 861_381_000.0 * 7; got[2].Cap < want*0.999 || got[2].Cap > want*1.001 {
+		t.Fatalf("май 2014: %v, ждали ≈%v", got[2].Cap, want)
+	}
+	// нет подходящей обложки — месяц берёт предыдущий отчёт, а не провал
+	got = CapSeries(bars, splits, append(append([]Fact{}, shares[:4]...), shares[5]))
+	if len(got) != 4 || got[2].Cap < 20*892_447_000.0*7*0.999 || got[2].Cap > 20*892_447_000.0*7*1.001 {
+		t.Fatalf("без обложки: %+v", got)
+	}
+}

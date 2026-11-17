@@ -27,9 +27,13 @@ const shareFactMaxAge = 460 * 24 * time.Hour // число акций старш
 // Месяц без подходящего отчёта пропускается: лучше пробел, чем неверное число. Если за один период есть и баланс, и обложка — берётся баланс.
 func CapSeries(bars []PriceBar, splits []Split, shares []Fact) []CapPoint {
 	byPeriod := map[string]Fact{}
+	covers := map[string]Fact{} // обложка периода — запасной вариант, если баланс окажется выбросом
 	for _, f := range shares {
 		if f.Val <= 0 || f.End == "" {
 			continue
+		}
+		if f.Tag == TagSharesCover {
+			covers[f.Period] = f
 		}
 		if old, ok := byPeriod[f.Period]; ok && (old.Tag != TagSharesCover || f.Tag != TagSharesBalance) {
 			continue
@@ -47,6 +51,10 @@ func CapSeries(bars []PriceBar, splits []Split, shares []Fact) []CapPoint {
 		return facts[i].Period < facts[j].Period
 	})
 	base := sharesToday(facts, splits)
+	if fixed, changed := fixShareOutliers(facts, base, covers); changed {
+		facts = fixed
+		base = sharesToday(facts, splits)
+	}
 	var out []CapPoint
 	for _, b := range bars {
 		first, err := time.Parse("2006-01-02", b.Date)
@@ -124,4 +132,51 @@ func sharesToday(facts []Fact, splits []Split) []float64 {
 		}
 	}
 	return base
+}
+
+const (
+	outlierRatio  = 6 // во сколько раз число акций (в сегодняшней базе) может отличаться от соседних отчётов; акции за квартал-два так не меняются
+	outlierNeighs = 2 // соседей с каждой стороны для медианы
+)
+
+// fixShareOutliers убирает отчёты, чьё число акций в сегодняшней базе резко выбивается из соседних — ошибка единиц в данных SEC
+// (у Apple баланс на март 2014 в кадре — 861 745 вместо 861 745 000 акций, капитализация проваливалась в тысячу раз).
+// Вместо выброса ставится обложка того же периода, если она подходит к соседям; нет — отчёт выкидывается, месяц берёт предыдущий.
+func fixShareOutliers(facts []Fact, base []float64, covers map[string]Fact) ([]Fact, bool) {
+	out := make([]Fact, 0, len(facts))
+	changed := false
+	for i, f := range facts {
+		med := neighborMedian(base, i)
+		if med <= 0 || (base[i] <= med*outlierRatio && base[i] >= med/outlierRatio) {
+			out = append(out, f)
+			continue
+		}
+		changed = true
+		if alt, ok := covers[f.Period]; ok && alt.Tag != f.Tag {
+			// обложка в сегодняшней базе: тот же множитель сплитов, что у отчёта, поэтому сравнение с медианой по отношению к значению отчёта
+			if r := alt.Val / f.Val * base[i]; r <= med*outlierRatio && r >= med/outlierRatio {
+				out = append(out, alt)
+			}
+		}
+	}
+	return out, changed
+}
+
+// neighborMedian — медиана числа акций у соседних отчётов (без самого i); 0, если соседей меньше двух.
+func neighborMedian(base []float64, i int) float64 {
+	var ns []float64
+	for j := max(0, i-outlierNeighs); j <= min(len(base)-1, i+outlierNeighs); j++ {
+		if j != i {
+			ns = append(ns, base[j])
+		}
+	}
+	if len(ns) < 2 {
+		return 0
+	}
+	sort.Float64s(ns)
+	if m := len(ns) / 2; len(ns)%2 == 1 {
+		return ns[m]
+	} else {
+		return (ns[m-1] + ns[m]) / 2
+	}
 }
