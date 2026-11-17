@@ -785,7 +785,16 @@ cmd_build() {
   echo "… жду проверки PR #$pr (Ctrl+C — выйти)"
   wait_pr "$pr"
   trap - INT
-  gh pr merge "$pr" --merge --subject "$title" --body "" >/dev/null || die "GitHub не дал смержить PR #$pr (правила ветки): смотри его в вебе и запусти ./${SELF} build ещё раз — он продолжит с этого PR"
+  # GitHub может ещё считать обязательные проверки PR «в очереди», хотя wait_pr уже видит зелёное у вершины dev: повторяем, как в merge
+  local out tries=0
+  until out=$(gh pr merge "$pr" --merge --subject "$title" --body "" 2>&1); do
+    tries=$((tries + 1))
+    (( tries < 30 )) || die "GitHub не дал смержить PR #$pr (правила ветки): ${out%%$'\n'*}. Смотри его в вебе и запусти ./${SELF} build ещё раз — он продолжит с этого PR"
+    echo "[$(date +%T)] … слияние не прошло: ${out%%$'\n'*} — повторю через 10 с ($tries/30)"
+    sleep 10
+    wait_pr "$pr"
+    (( PR_MERGED )) && break
+  done
   git fetch -q --prune origin
   local m; m=$(git rev-parse origin/build)
   git tag -a "$tag" -m "$sum" "$m"
