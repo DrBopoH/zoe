@@ -6,6 +6,7 @@ import { TFS, dayStartOf, weekStartOf, buildIntradayStarts, buildDailyStarts, lo
 import { clampWindow } from '../utils/chartView.js'
 import { useChartView } from '../composables/useChartView.js'
 import { toLocalDateStr, formatMoney, formatDateLong, formatShortDateName, formatMonthName } from '../utils/formatters.js'
+import { fixedText } from '../utils/numfmt.js'
 
 const props = defineProps({
   transactions: { type: Array, default: () => [] },
@@ -332,7 +333,7 @@ const priceTicks = computed(() => {
 const UK_INT = new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 0 })
 const lastLabel = computed(() => {
   const v = lastPrice.value ? lastPrice.value.val : 0
-  return Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(2).replace('.', ',') + 'М' : UK_INT.format(v)
+  return Math.abs(v) >= 1e6 ? fixedText(v / 1e6, 2) + 'М' : UK_INT.format(v)
 })
 const lastPrice = computed(() => {
   const S = series.value

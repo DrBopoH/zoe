@@ -44,7 +44,7 @@ const has = computed(() => hasPoints(props.econ))
     <MacroPanel title="Безработица США" :series="econ" :today="today" :ids="['us_unrate']" :empty="EMPTY">
       <template #summary>
         <span v-if="unrate" class="text-slate-400">Сейчас <b class="text-sky-300 tabular-nums">{{ plainPct(unrate.v) }}</b></span>
-        <span v-if="sahm" class="text-slate-400" title="Средняя безработица за 3 месяца минус её минимум за 12 месяцев. Рост на 0,5 п. п. и выше исторически совпадал с началом рецессии">Правило Сам <b class="tabular-nums" :class="sahm.signal ? 'text-rose-400' : 'text-emerald-400'">{{ String(sahm.value).replace('.', ',') }} п. п.</b><span class="text-slate-600"> · {{ sahm.signal ? 'сигнал рецессии' : 'сигнала нет' }}</span></span>
+        <span v-if="sahm" class="text-slate-400" title="Средняя безработица за 3 месяца минус её минимум за 12 месяцев. Рост на 0,5 п. п. и выше исторически совпадал с началом рецессии">Правило Сам <b class="tabular-nums" :class="sahm.signal ? 'text-rose-400' : 'text-emerald-400'">{{ numText(sahm.value, 2) }} п. п.</b><span class="text-slate-600"> · {{ sahm.signal ? 'сигнал рецессии' : 'сигнала нет' }}</span></span>
       </template>
     </MacroPanel>
 

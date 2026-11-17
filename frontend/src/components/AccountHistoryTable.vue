@@ -8,6 +8,7 @@ import { effectiveTimes, isDateOnly } from '../utils/historyOrder.js'
 import { tagsFor, cleanTitle } from '../utils/txTags.js'
 import { usersById, personOf, swapAlias } from '../utils/personName.js'
 import { candleMove } from '../utils/candleMath.js'
+import { numText } from '../utils/numfmt.js'
 
 const props = defineProps({
   transactions: { type: Array, default: () => [] },
@@ -80,7 +81,7 @@ const moveTip = computed(() => {
   const bn = m.bnDelta === null ? '' : `\nиз них Binance: ${moneySigned(m.bnDelta, '₴')}`
   return `Открытие ${fmtMoney(m.open, '₴')} → закрытие ${fmtMoney(m.close, '₴')}\nМин ${fmtMoney(m.low, '₴')}, макс ${fmtMoney(m.high, '₴')}${bn}`
 })
-const pctText = (v) => (v === null ? '' : ` (${v > 0 ? '+' : v < 0 ? '−' : ''}${String(Math.abs(v)).replace('.', ',')} %)`)
+const pctText = (v) => (v === null ? '' : ` (${v > 0 ? '+' : v < 0 ? '−' : ''}${numText(Math.abs(v), 2)} %)`)
 
 const cur = (t) => curSym(t.currency_code)
 
@@ -127,7 +128,7 @@ const counterAcct = (t) => {
 const details = (t) => {
   const acc = byId.value.get(t.account_id)
   const list = [
-    ['Время', new Date(t.time).toLocaleString('uk-UA')],
+    ['Время', `${formatTxDate(t.time)} ${formatTxTime(t.time)}`],
     ['Счёт', acc ? acc.fullLabel : t.account_id],
     ['Описание', swapAlias(t.description, t, person(t))],
     ['Комментарий', t.comment],
@@ -166,7 +167,7 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
       <div v-if="selected.length" class="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-[11px] font-mono">
         <template v-if="move">
           <span class="text-slate-500" :title="moveTip">Капитал <span class="font-bold" :class="tone(move.delta)">{{ moneySigned(move.delta, '₴') }}{{ pctText(move.deltaPct) }}</span></span>
-          <span class="text-slate-500" :title="moveTip">Размах <span class="font-bold text-sky-300">{{ fmtMoney(move.swing, '₴') }}{{ move.swingPct === null ? '' : ` (${String(move.swingPct).replace('.', ',')} %)` }}</span></span>
+          <span class="text-slate-500" :title="moveTip">Размах <span class="font-bold text-sky-300">{{ fmtMoney(move.swing, '₴') }}{{ move.swingPct === null ? '' : ` (${numText(move.swingPct, 2)} %)` }}</span></span>
         </template>
         <span class="text-slate-500">Приход <span class="text-emerald-400 font-bold">{{ formatMoney(totals.income) }}</span></span>
         <span class="text-slate-500">Расход <span class="text-rose-400 font-bold">{{ formatMoney(Math.abs(totals.expense)) }}</span></span>

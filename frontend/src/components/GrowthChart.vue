@@ -1,5 +1,5 @@
 <script setup>
-import { fixedText } from '../utils/numfmt.js'
+import { fixedText, dmy } from '../utils/numfmt.js'
 import { computed } from 'vue'
 import { buildGrowthChart, autoView, yRanges, GROWTH_PAD, MIN_SPAN, MAX_SPAN } from '../utils/growthChart.js'
 import { useChartView } from '../composables/useChartView.js'
@@ -41,7 +41,7 @@ const byId = computed(() => new Map(props.items.map((i) => [i.id, i])))
 const order = computed(() => [...chart.value.lines].sort((a, b) => Number(a.top) - Number(b.top))) // лучшие рисуем поверх
 
 // Подсказка под курсором: дата и суммы лучших пяти на этот момент
-const dateAt = (t) => new Date(Date.parse(`${props.today}T00:00:00Z`) + t * 365.25 * 86400000).toLocaleDateString('ru-RU', { timeZone: 'UTC' })
+const dateAt = (t) => dmy(new Date(Date.parse(`${props.today}T00:00:00Z`) + t * 365.25 * 86400000).toISOString())
 const hoverX = kv.hoverPx
 const hoverInfo = computed(() => {
   if (hoverT.value === null || hoverT.value < 0) return null

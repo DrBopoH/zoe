@@ -4,6 +4,7 @@ import MacroPanel from '../components/MacroPanel.vue'
 import MarketHeader from '../components/MarketHeader.vue'
 import { useMarketRefresh } from '../composables/useMarketRefresh.js'
 import { lastPoint, plainPct, hasPoints, FED_INFLATION_TARGET } from '../utils/macro.js'
+import { numText } from '../utils/numfmt.js'
 
 // Экран «Цены США»: общая и базовая инфляция, PCE (по нему ФРС меряет цель), цены производителей и жильё (FRED).
 const props = defineProps({
@@ -34,7 +35,7 @@ const has = computed(() => hasPoints(props.prices))
       <template #summary>
         <span v-if="cpi" class="text-slate-400">CPI <b class="tabular-nums text-amber-300">{{ plainPct(cpi.v) }}</b></span>
         <span v-if="core" class="text-slate-400">базовый CPI <b class="tabular-nums text-orange-300">{{ plainPct(core.v) }}</b></span>
-        <span v-if="corePce" class="text-slate-400">базовый PCE <b class="tabular-nums text-emerald-400">{{ plainPct(corePce.v) }}</b><span v-if="gap !== null" class="text-slate-600"> · {{ gap > 0 ? 'выше цели ФРС на ' + String(gap).replace('.', ',') + ' п. п.' : gap < 0 ? 'ниже цели' : 'на цели' }}</span></span>
+        <span v-if="corePce" class="text-slate-400">базовый PCE <b class="tabular-nums text-emerald-400">{{ plainPct(corePce.v) }}</b><span v-if="gap !== null" class="text-slate-600"> · {{ gap > 0 ? 'выше цели ФРС на ' + numText(gap, 2) + ' п. п.' : gap < 0 ? 'ниже цели' : 'на цели' }}</span></span>
       </template>
     </MacroPanel>
 

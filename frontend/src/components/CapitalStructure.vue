@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { capitalStructure } from '../utils/capital.js'
 import { money } from '../utils/formatters.js'
+import { numText } from '../utils/numfmt.js'
 
 // Из чего состоит капитал: кольцо по слоям (карты, брокерский, ОВДП, крипто), внутреннее кольцо — по валюте, справа легенда с суммами и долями.
 const props = defineProps({
@@ -11,7 +12,7 @@ const props = defineProps({
 const st = computed(() => capitalStructure(props.accounts, props.rates))
 const live = computed(() => st.value.parts.filter((x) => x.value > 0))
 const val = (v) => money(v, st.value.unit)
-const pctText = (v) => (v === null ? '' : `${String(v).replace('.', ',')} %`)
+const pctText = (v) => (v === null ? '' : `${numText(v, 2)} %`)
 
 const CX = 70
 const hot = ref(null) // ключ слоя или валюты под курсором: показываем его в центре кольца

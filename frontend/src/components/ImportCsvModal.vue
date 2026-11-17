@@ -6,6 +6,7 @@ import UiModal from './ui/UiModal.vue'
 import UiButton from './ui/UiButton.vue'
 import UiIconButton from './ui/UiIconButton.vue'
 import { errText } from '../utils/errText.js'
+import { fixedText } from '../utils/numfmt.js'
 
 // Окно выбора файла выписки (клик или перетаскивание). Два режима:
 //   add    — «Добавить»: новый счёт. Если такой счёт уже есть, предлагается обновить его этим файлом.
@@ -145,7 +146,7 @@ const submitLabel = computed(() => {
 
       <div v-if="file" class="space-y-1">
         <p class="font-bold text-emerald-400 truncate">{{ file.name }}</p>
-        <p class="text-[10px] text-slate-500">{{ (file.size / 1024).toFixed(1) }} KB · нажми, чтобы выбрать другой</p>
+        <p class="text-[10px] text-slate-500">{{ fixedText(file.size / 1024, 1) }} KB · нажми, чтобы выбрать другой</p>
       </div>
       <div v-else class="space-y-2">
         <p class="text-slate-300 font-bold">Перетащи `.csv` или `.pdf` файл сюда</p>
