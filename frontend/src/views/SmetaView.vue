@@ -2,7 +2,6 @@
 import { computed, toRef, onMounted } from 'vue'
 import { money } from '../utils/formatters.js'
 import CandleChart from '../components/CandleChart.vue'
-import SyncButton from '../components/SyncButton.vue'
 import CapitalStructure from '../components/CapitalStructure.vue'
 import BondPortfolio from '../components/BondPortfolio.vue'
 import { useMacro } from '../composables/useMacro.js'
@@ -83,7 +82,6 @@ const monthlyDelta = computed(() => {
           <div title="Приход минус расход"><div class="text-[11px] text-slate-500">Итог</div><div class="text-lg font-bold tabular-nums" :class="monthlyDelta >= 0 ? 'text-emerald-400' : 'text-rose-400'">{{ monthlyDelta >= 0 ? '+' : '−' }}{{ inUnit(Math.abs(monthlyDelta)) }}</div></div>
         </div>
       </div>
-      <SyncButton class="ml-auto" />
     </section>
 
     <div class="grid gap-4 lg:grid-cols-2 items-stretch">

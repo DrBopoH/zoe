@@ -1,11 +1,11 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed, watch, provide, nextTick } from 'vue'
 import AppHeader from './components/AppHeader.vue'
-import SideMenu from './components/SideMenu.vue'
 import ScrollJumpButtons from './components/ScrollJumpButtons.vue'
 import ToastStack from './components/ToastStack.vue'
 import { pushToast, pushRequestError } from './composables/useToasts.js'
 import { useWheelScroll } from './composables/useWheelScroll.js'
+import HomeView from './views/HomeView.vue'
 import SmetaView from './views/SmetaView.vue'
 import MarketView from './views/MarketView.vue'
 import DataView from './views/DataView.vue'
@@ -190,14 +190,13 @@ onUnmounted(() => {
 
 <template>
   <div class="min-h-screen bg-slate-950 text-slate-100 font-mono flex flex-col p-6 pt-24 sm:pt-20 select-none">
-    <SideMenu v-model:active-tab="activeTab" @refresh="fetchData" />
     <ScrollJumpButtons />
     <ToastStack :progress="progress" :panel-state="panelState" :market="marketPanel" :lost-since="connLostSince" @close-panel="closePanel" @close-market="closeMarket" />
 
     <!-- Шапка прибита к верху экрана: страница скроллится под ней -->
     <div class="app-bar">
-      <div class="max-w-6xl w-full mx-auto px-6 pl-16 xl:pl-6 py-3">
-        <AppHeader :active-tab="activeTab" :is-syncing="isSyncing" />
+      <div class="max-w-6xl w-full mx-auto px-6 py-3">
+        <AppHeader v-model:active-tab="activeTab" :is-syncing="isSyncing" @refresh="fetchData" />
       </div>
     </div>
 
@@ -206,6 +205,7 @@ onUnmounted(() => {
         ERROR: {{ errorMsg }}
       </div>
 
+      <KeepAlive><HomeView v-if="activeTab === 'home'" :accounts="accounts" :transactions="transactions" /></KeepAlive>
       <KeepAlive><SmetaView v-if="activeTab === 'dashboard'" :accounts="accounts" :transactions="transactions" /></KeepAlive>
       <KeepAlive><MarketView v-if="activeTab === 'market'" :accounts="accounts" :data-version="dataVersion" :running="!!market?.running" /></KeepAlive>
       <KeepAlive><DataView v-if="activeTab === 'data'" :accounts="accounts" :transactions="transactions" :users="users" :data-version="dataVersion" :persons-count="personsCount" @refresh="fetchData" /></KeepAlive>
