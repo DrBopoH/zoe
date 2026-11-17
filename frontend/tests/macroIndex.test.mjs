@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildMacroChart, macroRanges, yearsFrom, isoAt, SERIES } from '../src/utils/macro.js'
+import { buildMacroChart, macroRanges, thinColumns, yearsFrom, isoAt, SERIES } from '../src/utils/macro.js'
 import { robustRanges, scaleOf } from '../src/utils/chartView.js'
 
 // Эталон — прежний перебор всех точек с Date.parse: индекс и бисекция обязаны дать тот же результат бит в бит.
@@ -61,7 +61,8 @@ test('buildMacroChart: точки окна и вход слева совпада
     const Y = (v) => pad.t + (1 - (sc.fwd(v) - 0) / (100 - 0)) * (chart.height - pad.t - pad.b)
     const meta = SERIES[id] || { step: false }
     let d = ''
-    naivePath(series[id], view, { log: scale === 'log' }).forEach((p, i) => {
+    const naive = naivePath(series[id], view, { log: scale === 'log' })
+    ;(meta.step ? naive : thinColumns(naive, X, 2 * (chart.width - pad.l - pad.r))).forEach((p, i) => {
       const x = X(p.t).toFixed(1), y = Y(p.v).toFixed(1)
       d += i === 0 ? `M${x} ${y}` : meta.step ? `H${x}V${y}` : `L${x} ${y}`
     })
@@ -76,7 +77,7 @@ test('buildMacroChart: логарифм пропускает неположит�
   const view = { x0: -1, x1: 0.05 }
   const chart = buildMacroChart({ series, ids: ['usd_uah'], view, yRange: { lo: 0, hi: 10 }, todayIso: TODAY, scale: 'log' })
   const ref = naivePath(series.usd_uah, view, { log: true })
-  assert.equal(chart.lines[0].d.split('L').length, ref.length)
+  assert.equal(chart.lines[0].d.split('L').length, thinColumns(ref, () => 0, Infinity).length)
 })
 
 test('индекс обновляется, если ряд дополнили на месте', () => {
@@ -86,4 +87,36 @@ test('индекс обновляется, если ряд дополнили н
   pts.push({ d: '2026-11-17', v: 1e6 })
   const after = macroRanges({ series: { a: pts }, ids: ['a'], view, todayIso: TODAY })
   assert.ok(after.ext.hi > before.ext.hi * 100)
+})
+
+test('thinColumns: короткий ряд не меняется, плотный сводится к ≤4 точкам на столбец и хранит крайности', () => {
+  const X = (t) => t * 100
+  const few = Array.from({ length: 50 }, (_, i) => ({ t: i / 50, v: i }))
+  assert.equal(thinColumns(few, X, 100), few)
+  const dense = Array.from({ length: 20000 }, (_, i) => ({ t: i / 20000, v: Math.sin(i / 37) * 10 + rnd() }))
+  const out = thinColumns(dense, X, 400)
+  assert.ok(out.length <= 4 * 100, `points ${out.length}`)
+  assert.equal(out[0], dense[0])
+  assert.equal(out[out.length - 1], dense[dense.length - 1])
+  assert.equal(Math.max(...out.map((p) => p.v)), Math.max(...dense.map((p) => p.v)))
+  assert.equal(Math.min(...out.map((p) => p.v)), Math.min(...dense.map((p) => p.v)))
+  assert.ok(out.every((p, i) => i === 0 || p.t >= out[i - 1].t), 'порядок времени сохранён')
+  // каждый столбец: минимум и максимум столбца целы
+  const cols = new Map()
+  for (const p of dense) { const c = Math.floor(X(p.t)); const e = cols.get(c) || [Infinity, -Infinity]; cols.set(c, [Math.min(e[0], p.v), Math.max(e[1], p.v)]) }
+  const kept = new Map()
+  for (const p of out) { const c = Math.floor(X(p.t)); const e = kept.get(c) || [Infinity, -Infinity]; kept.set(c, [Math.min(e[0], p.v), Math.max(e[1], p.v)]) }
+  assert.deepEqual([...kept], [...cols])
+})
+
+test('robustRanges на типизированной сортировке совпадает с обычной', () => {
+  const vals = Array.from({ length: 5000 }, () => (rnd() - 0.4) * 50)
+  vals.push(NaN, Infinity, null, 'x')
+  const got = robustRanges({ visible: vals, all: vals })
+  const sorted = vals.filter((v) => typeof v === 'number' && isFinite(v)).sort((a, b) => a - b)
+  const q = (p) => { const i = (sorted.length - 1) * p, a = Math.floor(i), b = Math.ceil(i); return sorted[a] + (sorted[b] - sorted[a]) * (i - a) }
+  const make = (lo, hi) => { const pd = (hi - lo) * 0.06; return { lo: lo - pd, hi: hi + pd } }
+  const ext = make(sorted[0], sorted[sorted.length - 1]), auto = make(q(0.02), q(0.98))
+  assert.deepEqual(got.ext, ext)
+  assert.deepEqual(got.auto, { lo: Math.max(auto.lo, ext.lo), hi: Math.min(auto.hi, ext.hi) })
 })
