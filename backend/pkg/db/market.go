@@ -281,8 +281,8 @@ func (s *Storage) SaveStockFrame(req market.FrameRequest, facts []market.FrameFa
 	return tx.Commit()
 }
 
-// StockFramesTodo — какие из нужных кадров ещё не скачаны, а свежие (Recent: SEC дописывает отчёты за последние кварталы) — ещё и устарели старше maxAge.
-func (s *Storage) StockFramesTodo(all []market.FrameRequest, maxAge time.Duration, nowUnix int64) ([]market.FrameRequest, error) {
+// StockFramesHave — какие кадры отчётности скачаны: ключ «тег|период» → когда (unix).
+func (s *Storage) StockFramesHave() (map[string]int64, error) {
 	rows, err := s.cacheDB.Query(`SELECT tag, period, at FROM stock_frames`)
 	if err != nil {
 		return nil, err
@@ -297,7 +297,32 @@ func (s *Storage) StockFramesTodo(all []market.FrameRequest, maxAge time.Duratio
 		}
 		have[tag+"|"+period] = at
 	}
-	if err := rows.Err(); err != nil {
+	return have, rows.Err()
+}
+
+// StockFetchedAt — у каких тикеров скачана история с отметкой о сплитах: тикер → когда (unix).
+func (s *Storage) StockFetchedAt() (map[string]int64, error) {
+	rows, err := s.cacheDB.Query(`SELECT f.ticker, f.at FROM stock_fetched f JOIN stock_split_known k ON k.ticker = f.ticker`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int64{}
+	for rows.Next() {
+		var t string
+		var at int64
+		if err := rows.Scan(&t, &at); err != nil {
+			return nil, err
+		}
+		out[t] = at
+	}
+	return out, rows.Err()
+}
+
+// StockFramesTodo — какие из нужных кадров ещё не скачаны, а свежие (Recent: SEC дописывает отчёты за последние кварталы) — ещё и устарели старше maxAge.
+func (s *Storage) StockFramesTodo(all []market.FrameRequest, maxAge time.Duration, nowUnix int64) ([]market.FrameRequest, error) {
+	have, err := s.StockFramesHave()
+	if err != nil {
 		return nil, err
 	}
 	var todo []market.FrameRequest

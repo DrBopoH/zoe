@@ -159,9 +159,9 @@ func (s *Server) startMarket(ctx context.Context, only string, quiet bool) bool 
 					case len(have) == 0:
 						res.Error = "нет списка компаний: сначала обнови источник companies"
 					case len(tickers) > 0:
-						res = f.Prices(fctx, rep, tickers, func(tk string, b []market.PriceBar, sp []market.Split) error {
-							return s.storage.SaveStockPrices(tk, b, sp, now)
-						})
+						save, done := s.pricesSaver(now)
+						res = f.Prices(fctx, rep, tickers, save)
+						done(&res)
 					}
 				} else if f.Facts != nil {
 					now := time.Now()
@@ -169,9 +169,9 @@ func (s *Server) startMarket(ctx context.Context, only string, quiet bool) bool 
 					if err != nil {
 						res.Error = err.Error()
 					} else if len(todo) > 0 {
-						res = f.Facts(fctx, rep, todo, func(r market.FrameRequest, facts []market.FrameFact) error {
-							return s.storage.SaveStockFrame(r, facts, now.Unix())
-						})
+						save, done := s.factsSaver(now.Unix())
+						res = f.Facts(fctx, rep, todo, save)
+						done(&res)
 					}
 				} else if f.Companies != nil {
 					var list []market.Company

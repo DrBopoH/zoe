@@ -164,3 +164,26 @@ func TestPutSeriesMergesAndLoadSeriesFindsOnlyMacroSets(t *testing.T) {
 		t.Fatalf("пусто: %+v", got)
 	}
 }
+
+func TestLoadSetsSeparatesStockFromMacroSets(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	a := slotOf(2026, 10, 1, 0)
+	if err := s.PutSeries(StockPricesCard, map[string][]Tick{"AAPL": {{a, 250.5}}, "AAPL:a": {{a, 249}}, "AAPL:s": {{a, 4}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutSeries(StockFactsCard, map[string][]Tick{"us-gaap/CommonStockSharesOutstanding|CY2025Q3I": {{a, 14.8e9}, {a, 3e9}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutSeries(MacroCard("us"), map[string][]Tick{"fed_funds": {{a, 4.0}}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.LoadSets(StockPricesCard); len(got) != 3 || got["AAPL:s"][0].V != 4 {
+		t.Fatalf("цены: %+v", got)
+	}
+	if got, created := s.LoadSets(StockPrefix); len(got) != 4 || len(got["us-gaap/CommonStockSharesOutstanding|CY2025Q3I"]) != 2 || created == 0 {
+		t.Fatalf("весь раздел «Акции» (одинаковое время у разных компаний допустимо): %+v", got)
+	}
+	if got, _ := s.LoadSeries(); len(got) != 1 || got["fed_funds"] == nil {
+		t.Fatalf("макро-наборы не видят акции: %+v", got)
+	}
+}
