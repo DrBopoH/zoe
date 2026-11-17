@@ -24,6 +24,8 @@ const toggle = (c) => { collapsed.value = { ...collapsed.value, [keyOf(c)]: !col
 
 const isErr = (c) => !!c.error || c.accounts.some(a => a.state === 'error')
 const isDone = (c) => c.finished && !isErr(c) && c.percent >= 100
+// Схлопывается в строку «Название ✓» только Binance: у банков свой прогресс-бар, он остаётся
+const isCompact = (c) => c.kind === 'binance' && isDone(c)
 
 const eta = computed(() => {
   const t = props.progress.eta
@@ -57,7 +59,13 @@ const eta = computed(() => {
 
     <!-- список клиентов прокручивается: шапка с временем и крестиком остаётся на месте -->
     <div class="mt-1 max-h-[calc(100vh-11rem)] overflow-y-auto overscroll-contain pr-2 -mr-1">
-    <div v-for="c in progress.clients" :key="keyOf(c)" class="mt-3 space-y-2">
+    <div v-for="c in progress.clients" :key="keyOf(c)" :class="isCompact(c) ? 'mt-1.5' : 'mt-3 space-y-2'">
+      <!-- готовый Binance: одна строка «Название ✓», без баров и счетов -->
+      <div v-if="isCompact(c)" class="flex items-center gap-2">
+        <span class="flex-1 min-w-0 truncate text-xs font-bold text-slate-100 pl-6">{{ c.name }}</span>
+        <UiIcon name="check" size="sm" class="text-emerald-400" />
+      </div>
+      <template v-else>
       <button type="button" class="w-full flex items-center gap-2 text-left cursor-pointer" @click="toggle(c)">
         <UiIcon :name="collapsed[keyOf(c)] ? 'arrowDown' : 'arrowUp'" size="sm" class="text-slate-500 shrink-0" />
         <span class="flex-1 min-w-0 truncate text-xs font-bold text-slate-100">{{ c.name }}</span>
@@ -79,6 +87,7 @@ const eta = computed(() => {
           <SyncTimeline :acc="a" :now="now" />
         </div>
       </div>
+      </template>
     </div>
     </div>
   </div>

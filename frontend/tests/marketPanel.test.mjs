@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { marketPanelOpen, feedView, elapsedText } from '../src/utils/marketPanel.js'
+import { marketPanelOpen, feedView, orderFeeds, elapsedText } from '../src/utils/marketPanel.js'
 
 const run = (extra = {}) => ({ running: true, started_at: 10, feeds: [{ id: 'nbu', state: 'fetch' }], ...extra })
 
@@ -33,4 +33,10 @@ test('прошедшее время м:сс', () => {
 test('строка источника числовых рядов: единица из поля unit', () => {
   assert.equal(feedView({ state: 'done', fetched: 312, unit: 'точек' }).text, 'Точек: 312')
   assert.equal(feedView({ state: 'done', fetched: 5 }).text, 'Бумаг: 5')
+})
+
+test('порядок строк: готовые сверху, идущие внизу, внутри группы порядок сохраняется', () => {
+  const f = (id, state, pct) => ({ id, state, pct })
+  const ids = orderFeeds([f('a', 'fetch', 30), f('b', 'done'), f('c', 'queued'), f('d', 'done'), f('e', 'error'), f('g', 'fetch')]).map(x => x.id)
+  assert.deepEqual(ids, ['b', 'd', 'e', 'c', 'a', 'g'])
 })

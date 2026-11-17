@@ -46,3 +46,15 @@ describe('SyncPanel', () => {
     expect(w.emitted('close')).toHaveLength(1)
   })
 })
+
+describe('SyncPanel: готовый Binance одной строкой', () => {
+  it('Binance 100% — без счетов и стрелки, банк — как раньше', () => {
+    const w = mountPanel({ clients: [
+      client({ kind: 'binance', name: 'Binance', percent: 100, finished: true, accounts: [{ id: 'x', label: 'Spot-счёт', state: 'done' }] }),
+      client({ kind: 'bank', name: 'Mono', percent: 100, finished: true, accounts: [{ id: 'y', label: 'Карта-счёт', state: 'done' }] })
+    ] })
+    expect(w.text()).toContain('Binance')
+    expect(w.text()).not.toContain('Spot-счёт')
+    expect(w.text()).toContain('Карта-счёт')
+  })
+})

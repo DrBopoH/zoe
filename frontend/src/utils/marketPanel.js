@@ -15,8 +15,15 @@ export const feedView = (f) => {
   return { mode: pct > 0 ? 'pct' : 'run', pct, text: f.note || '' }
 }
 
+// Порядок строк в окне: готовые сверху (они схлопнуты в одну строку «Название ✓»), дальше ошибки и очередь,
+// идущие — внизу, где виден их бар. Внутри группы порядок источников не меняется.
+const feedRank = { done: 0, error: 1, queued: 2 }
+export const orderFeeds = (feeds) =>
+  feeds.map((f, i) => ({ f, i, r: feedRank[feedView(f).mode] ?? 3 })).sort((a, b) => a.r - b.r || a.i - b.i).map(x => x.f)
+
 // Время с начала опроса «м:сс»
 export const elapsedText = (startedAtSec, nowMs) => {
   const s = Math.max(0, Math.floor(nowMs / 1000 - startedAtSec))
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
+

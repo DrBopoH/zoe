@@ -70,4 +70,13 @@ describe('ToastStack', () => {
     await w.setProps({ lostSince: t0 + 100_000 }) // новый разрыв показывается снова
     expect(w.text()).toContain('Нет ответа')
   })
+
+  it('новые сверху, старые внизу', async () => {
+    const w = mountStack()
+    pushToast({ title: 'Первый' })
+    pushToast({ title: 'Второй' })
+    await w.vm.$nextTick()
+    const t = w.text()
+    expect(t.indexOf('Второй')).toBeLessThan(t.indexOf('Первый'))
+  })
 })
