@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -64,5 +65,18 @@ func TestStatementPath(t *testing.T) {
 	items, err := c.GetStatement("acc", time.Unix(1700000000, 0), time.Unix(1700003600, 0))
 	if err != nil || len(items) != 1 || items[0].Amount != -100 {
 		t.Fatalf("%+v %v", items, err)
+	}
+}
+
+// 400 у выписки несёт объяснение банка: по нему видно, край ли это истории или отклонённые параметры запроса.
+func TestStatementBadRequestKeepsBankText(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(400)
+		_, _ = w.Write([]byte(`{"errorDescription":"Value field 'to' out of bounds"}`))
+	})
+	_, err := c.GetStatement("acc", time.Unix(1, 0), time.Unix(2, 0))
+	var x *BadRequestError
+	if !errors.As(err, &x) || x.Msg != "Value field 'to' out of bounds" || !strings.Contains(err.Error(), "out of bounds") {
+		t.Fatalf("текст банка потерян: %v", err)
 	}
 }

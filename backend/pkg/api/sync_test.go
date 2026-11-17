@@ -23,6 +23,7 @@ type fakeBank struct {
 	limit   int
 	calls   [][2]int64
 	failAt  int // 0 — не падать; N — N-й запрос вернёт fatal
+	badAt   int // 0 — нет; N — N-й запрос банк отклонит (400), хотя счёт в этом окне существует
 	counter int
 }
 
@@ -33,6 +34,9 @@ func (b *fakeBank) fetch(from, to time.Time) ([]mono.StatementItemDTO, error) {
 	b.calls = append(b.calls, [2]int64{from.Unix(), to.Unix()})
 	if b.failAt > 0 && b.counter == b.failAt {
 		return nil, errBoom
+	}
+	if b.badAt > 0 && b.counter == b.badAt {
+		return nil, &mono.BadRequestError{Msg: "Value field 'to' out of bounds"}
 	}
 	if to.Unix() < b.opened {
 		return nil, &mono.BadRequestError{}
@@ -63,6 +67,7 @@ type env struct {
 	bank  *fakeBank
 	now   time.Time
 	sleep int
+	err   error // чем закончился последний обход
 }
 
 func newEnv(t *testing.T) *env {
@@ -88,7 +93,9 @@ func (e *env) run() walkStats {
 		fetch: e.bank.fetch, sleep: func(time.Duration) {}, pace: pace,
 		now: func() time.Time { return e.now }, status: func(string) {},
 	})
-	if err != nil && !errors.Is(err, errBoom) {
+	e.err = err
+	var bad *mono.BadRequestError
+	if err != nil && !errors.Is(err, errBoom) && !errors.As(err, &bad) {
 		e.t.Fatalf("walk: %v", err)
 	}
 	return st
@@ -228,6 +235,28 @@ func TestLateArrivingTx(t *testing.T) {
 	e.bank.add(late)
 	e.advance(5 * time.Hour)
 	e.run()
+	e.assertAllCached()
+}
+
+// Банк отклонил запрос свежего хвоста (400), хотя счёт давно открыт и история ниже уже в кеше: это не «раньше ничего нет».
+// Отрезок не помечается снятым, счёт получает ошибку с текстом банка, следующая синхронизация забирает тот же отрезок.
+func TestBadRequestOnTailIsNotHistoryEnd(t *testing.T) {
+	e := newEnv(t)
+	e.populate()
+	e.run()
+
+	e.advance(3 * 24 * time.Hour) // за три дня набежали операции
+	e.bank.badAt = e.bank.counter + 1
+	st := e.run()
+	if e.err == nil || !strings.Contains(e.err.Error(), "out of bounds") || st.Complete {
+		t.Fatalf("отказ банка на хвосте должен быть ошибкой счёта с текстом банка: err=%v complete=%v", e.err, st.Complete)
+	}
+
+	e.advance(time.Hour)
+	e.run()
+	if e.err != nil {
+		t.Fatal(e.err)
+	}
 	e.assertAllCached()
 }
 

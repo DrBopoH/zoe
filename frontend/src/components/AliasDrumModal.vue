@@ -10,6 +10,8 @@ import UiIconButton from './ui/UiIconButton.vue'
 import CardDrum from './CardDrum.vue'
 import TxResolveTable from './TxResolveTable.vue'
 import CardTilesPanel from './CardTilesPanel.vue'
+import { errText } from '../utils/errText.js'
+import { fixedText } from '../utils/numfmt.js'
 
 // Резолвер связей. Центр — алиас: он ограничивает барабан картами (IBAN), подключёнными к нему.
 // Барабан выбирает карту → её история. Справа все карты и PAN-сироты: перетащил на рядок контрагента —
@@ -138,7 +140,7 @@ const linkMany = async (pairs) => {
       if (u) done.push(u)
     }
   } catch (e) {
-    err.value = String(e.message || e)
+    err.value = errText(e)
   } finally {
     busy.value = false
     if (done.length) {
@@ -162,7 +164,7 @@ const doUndo = async () => {
     for (const u of list) await apiSend('DELETE', `/users/link-account?identifier=${q(u.identifier)}&alias=${q(u.alias)}`)
     emit('changed')
   } catch (e) {
-    err.value = String(e.message || e)
+    err.value = errText(e)
   }
 }
 
@@ -213,7 +215,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); clearTimeo
               <span v-if="err" class="text-rose-400 truncate">{{ err }}</span>
               <span v-else-if="dragCard">Отпусти на контрагента — карта привяжется к его алиасу</span>
               <span v-else>Перетащи карту справа на рядок контрагента</span>
-              <span class="ml-auto font-bold" :class="totals >= 0 ? 'text-emerald-400' : 'text-rose-400'">Итого {{ totals.toFixed(2) }}</span>
+              <span class="ml-auto font-bold" :class="totals >= 0 ? 'text-emerald-400' : 'text-rose-400'">Итого {{ fixedText(totals, 2) }}</span>
             </footer>
           </section>
 

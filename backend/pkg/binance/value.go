@@ -234,7 +234,7 @@ func (c *Client) ValueUAH(asset string, qty float64, tMs int64) (float64, error)
 			return 0, fmt.Errorf("нет пары для оценки %s", asset)
 		}
 	}
-	rate, err := c.minuteClose("USDTUAH", tMs)
+	rate, _, err := c.RateUAH(tMs)
 	if err != nil {
 		return 0, err
 	}

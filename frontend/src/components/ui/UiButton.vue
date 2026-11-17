@@ -1,6 +1,6 @@
 <script setup>
 defineProps({
-  variant: { type: String, default: 'primary' }, // primary | secondary | danger | amber | amber-outline | subtle | cancel | outline
+  variant: { type: String, default: 'primary' }, // primary | secondary | danger | amber | subtle | cancel | outline
   size: { type: String, default: 'md' }          // sm | md | lg
 })
 </script>

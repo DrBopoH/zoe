@@ -115,6 +115,17 @@ func (s *Server) HandleLoadSources(w http.ResponseWriter, r *http.Request) {
 	}
 	want := readAccounts(r)
 	_, failed := migrateLegacy()
+	// Макро-кеш собирается из файлов «Экономики» первым: курс доллара нужен при загрузке Binance. Только при полной загрузке
+	// (не по выбранным счетам) и только недостающие ряды.
+	economy := 0
+	if want == nil {
+		n, err := s.RestoreEconomy()
+		if err != nil {
+			log.Printf("[Sources] экономика: %v", err)
+			failed = append(failed, loadFailure{"Экономика", err.Error()})
+		}
+		economy = n
+	}
 	entries, bad := store().List()
 	for p, why := range bad {
 		failed = append(failed, loadFailure{filepath.Base(p), why})
@@ -145,7 +156,7 @@ func (s *Server) HandleLoadSources(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, map[string]interface{}{
-		"status": "success", "total": total, "loaded": loaded, "transactions": txCount, "failed": failed, "dir": sourcesDir(),
+		"status": "success", "total": total, "loaded": loaded, "transactions": txCount, "failed": failed, "dir": sourcesDir(), "economy": economy,
 	})
 }
 
@@ -206,7 +217,7 @@ type invAccount struct {
 
 // nameRank: файл от человека (имя = псевдоним владельца) важнее служебного снимка API и ряда минут.
 func nameRank(f *source.File) int {
-	if f.Origin == source.OriginAPI || f.Kind == source.KindSeries {
+	if f.Origin == source.OriginAPI || f.Kind == source.KindSeries || f.Kind == source.KindP2P { // имя счёта дают только выписки
 		return 0
 	}
 	return 1
@@ -252,6 +263,20 @@ func mergeSpans(in []db.Span) []db.Span {
 	return out
 }
 
+// fallbackLabel — чем опознать счёт, когда в кеше у него нет IBAN: у банков маска карты из файла, у брокерского счёта номер
+// договора, у Binance идентификатор профиля из выписки. Служебное слово Card («icu», «binance») подписью не служит.
+func fallbackLabel(f *source.File) string {
+	switch f.Kind {
+	case source.KindICU:
+		return f.Contract
+	case source.KindBinance:
+		return f.Profile
+	case source.KindP2P, source.KindSeries:
+		return ""
+	}
+	return f.Card
+}
+
 // HandleSources — GET /api/sources: все счета, у которых есть источник или данные в кеше, со сведениями о файлах и таймлайном.
 func (s *Server) HandleSources(w http.ResponseWriter, r *http.Request) {
 	if !allow(w, r, http.MethodGet) {
@@ -263,7 +288,7 @@ func (s *Server) HandleSources(w http.ResponseWriter, r *http.Request) {
 		failed = append(failed, loadFailure{filepath.Base(p), why})
 	}
 	counts, _ := s.storage.CacheCounts()
-	cached, _ := s.storage.GetAccounts()
+	cached, _ := s.storage.GetAllAccounts() // у Binance здесь идентификатор профиля из выписки, у брокерского — IBAN, привязанный к договору
 
 	byID := map[string]*invAccount{}
 	order := []string{}
@@ -287,6 +312,9 @@ func (s *Server) HandleSources(w http.ResponseWriter, r *http.Request) {
 			a.Name, nameRanks[f.AccountID] = f.Name, rank
 		}
 		a.Type = f.Kind
+		if f.Kind == source.KindP2P {
+			a.Type = source.KindBinance // это тот же счёт, не отдельный вид
+		}
 		if f.Account != nil {
 			a.Type = f.Account.Type
 			if f.Account.IBAN != "" {
@@ -294,11 +322,11 @@ func (s *Server) HandleSources(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if a.Label == "" {
-			a.Label = f.Card
+			a.Label = fallbackLabel(f)
 		}
 		a.Files = append(a.Files, invFile{ID: f.Hash, Kind: f.Kind, Name: f.Name, Created: f.Created, Origin: f.Origin, From: f.From, To: f.To, Count: f.Count()})
 		a.Records += f.Count()
-		if from, to := f.Cover(); to > 0 {
+		if from, to := f.Cover(); to > 0 && f.Kind != source.KindP2P { // покрытие оси — период выписки; ордера его не расширяют
 			spans[f.AccountID] = append(spans[f.AccountID], db.Span{From: from, To: to})
 		}
 		for _, t := range f.Txs {
@@ -369,27 +397,39 @@ func (s *Server) HandleSaveAPI(w http.ResponseWriter, r *http.Request) {
 	if !allow(w, r, http.MethodPost) {
 		return
 	}
-	want := readAccounts(r)
-	accs, err := s.storage.GetAccounts()
+	out, err := s.saveAPISources(readAccounts(r))
 	if err != nil {
 		failErr(w, err)
 		return
 	}
-	type res struct {
-		Account string `json:"account"`
-		Name    string `json:"name"`
-		Saved   bool   `json:"saved"`
-		Skipped string `json:"skipped,omitempty"`
-		Count   int    `json:"count"`
-		Error   string `json:"error,omitempty"`
+	writeJSON(w, map[string]any{"status": "success", "results": out})
+}
+
+// saveRes — итог записи одного счёта в файлы-источники.
+type saveRes struct {
+	Account string `json:"account"`
+	Name    string `json:"name"`
+	Saved   bool   `json:"saved"`
+	Skipped string `json:"skipped,omitempty"`
+	Count   int    `json:"count"`
+	Error   string `json:"error,omitempty"`
+}
+
+// saveAPISources пишет снятое с API в файлы-источники. want == nil — все счета, у которых есть что сохранять
+// (счета без данных API молча пропускаются); иначе только перечисленные, и «нечего сохранять» попадает в итог.
+// Тот же путь, что у кнопки «Сохранить с API» и у автозаписи после «Разведать».
+func (s *Server) saveAPISources(want map[string]bool) ([]saveRes, error) {
+	accs, err := s.storage.GetAccounts()
+	if err != nil {
+		return nil, err
 	}
-	out := []res{}
+	out := []saveRes{}
 	for _, a := range accs {
 		if want != nil && !want[a.ID] {
 			continue
 		}
 		f, err := s.snapshotAPI(a)
-		item := res{Account: a.ID, Name: a.Name}
+		item := saveRes{Account: a.ID, Name: a.Name}
 		switch {
 		case err != nil:
 			item.Error = err.Error()
@@ -411,7 +451,7 @@ func (s *Server) HandleSaveAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, item)
 	}
-	writeJSON(w, map[string]any{"status": "success", "results": out})
+	return out, nil
 }
 
 // HandleDeleteSource — DELETE /api/sources/file?id=<отпечаток>: снести файл-источник.

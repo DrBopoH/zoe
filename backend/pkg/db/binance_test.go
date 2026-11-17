@@ -367,3 +367,30 @@ func TestBinancePortfolioFromDetail(t *testing.T) {
 		t.Fatalf("состав: %+v", p)
 	}
 }
+
+// История C2C-ордеров дополняет выписку: идемпотентна по номеру ордера, статус берётся из последней выгрузки, вайп счёта её сносит.
+func TestBinanceP2POrders(t *testing.T) {
+	s, _, _ := newS(t)
+	a := P2POrder{ID: "1", T: 1_700_000_000_000, Side: "Buy", Asset: "USDT", Fiat: "UAH", Total: 1125, Price: 44.79, Qty: 25.11, Fee: 0.05, Status: "Pending"}
+	b := P2POrder{ID: "2", T: 1_700_000_900_000, Side: "Buy", Asset: "USDT", Fiat: "UAH", Total: 3997, Price: 44.9, Qty: 89.02, Fee: 0.17, Status: "Completed"}
+	if err := s.SaveBinanceP2P([]P2POrder{a, b}); err != nil {
+		t.Fatal(err)
+	}
+	a.Status = "Completed"
+	if err := s.SaveBinanceP2P([]P2POrder{a}); err != nil { // перекрывающаяся выгрузка
+		t.Fatal(err)
+	}
+	got, err := s.BinanceP2P()
+	if err != nil || len(got) != 2 || got[0].ID != "1" || got[0].Status != "Completed" || got[1].Total != 3997 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if c, _ := s.CacheCounts(); c[BinanceAccountID] != 2 {
+		t.Fatalf("ордера считаются в записях счёта: %v", c)
+	}
+	if err := s.WipeAccounts([]string{BinanceAccountID}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.BinanceP2P(); len(got) != 0 {
+		t.Fatalf("после сброса счёта ордеров нет: %+v", got)
+	}
+}

@@ -1,22 +1,33 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed, watch, provide, nextTick } from 'vue'
 import AppHeader from './components/AppHeader.vue'
-import SideMenu from './components/SideMenu.vue'
 import ScrollJumpButtons from './components/ScrollJumpButtons.vue'
 import ToastStack from './components/ToastStack.vue'
-import { pushToast } from './composables/useToasts.js'
+import { pushToast, pushRequestError } from './composables/useToasts.js'
 import { useWheelScroll } from './composables/useWheelScroll.js'
+import HomeView from './views/HomeView.vue'
 import SmetaView from './views/SmetaView.vue'
-import OperationalView from './views/OperationalView.vue'
-import PersonsView from './views/PersonsView.vue'
+import MarketView from './views/MarketView.vue'
+import DataView from './views/DataView.vue'
 import { cleanPersonName, isP2PTransaction } from './utils/formatters.js'
 import { apiGetJson, apiSend } from './utils/api.js'
 import { storageGet, storageSet } from './utils/storage.js'
+import { resolveNav } from './utils/nav.js'
+import { marketNotice } from './utils/marketNotice.js'
+import { syncOkLines } from './utils/syncNotice.js'
+import { isSyncing, autoSave, syncPath } from './composables/useSync.js'
+import { marketPanelOpen } from './utils/marketPanel.js'
 import { loadMasks } from './composables/useIbanMasks.js'
+import { pollDelay } from './utils/pollDelay.js'
+import { errText } from './utils/errText.js'
 
 const STORAGE_ACTIVE_TAB = 'economic_active_tab'
 
-const activeTab = ref(storageGet(STORAGE_ACTIVE_TAB, 'dashboard'))
+// Старые значения («Операционная»/«Лица») переводятся в «Учет» + раздел и сразу переписываются в новом виде
+const nav = resolveNav(storageGet(STORAGE_ACTIVE_TAB), storageGet('economic_data_section'))
+storageSet(STORAGE_ACTIVE_TAB, nav.tab)
+storageSet('economic_data_section', nav.section)
+const activeTab = ref(nav.tab)
 watch(activeTab, (newTab) => storageSet(STORAGE_ACTIVE_TAB, newTab))
 
 // Вкладки живут в KeepAlive (выбор счетов, свеча, раскрытые строки не сбрасываются). У каждой вкладки своя позиция прокрутки: уходя, запоминаем, возвращаясь — восстанавливаем (новая вкладка — с верха)
@@ -32,7 +43,6 @@ useWheelScroll() // колесо над слайдерами и горизонт
 const accounts = ref([])
 const transactions = ref([])
 const users = ref([]) // лица: имя и аватар подменяют алиас контрагента в истории
-const isSyncing = ref(false)
 
 // Версия данных на бэкенде: растёт при любой записи (синк, импорт, правки лиц).
 // Данные перезапрашиваем только когда версия изменилась.
@@ -52,9 +62,23 @@ const notifyResult = (last) => {
   if (last.finished_at <= lastFinishedAt) return
   lastFinishedAt = last.finished_at
   if (!last.errors || last.errors.length === 0) {
-    pushToast({ kind: 'ok', title: 'Снято', lines: [`Запросов к банку: ${last.requests}`], ttl: 6000 })
+    pushToast({ kind: 'ok', title: 'Снято', lines: syncOkLines(last), ttl: 6000 })
   }
 }
+
+// Рыночные данные (ОВДП, US Treasury) — отдельный процесс рядом с банками: свои итоги и по тосту на источник
+let marketSeenAt = null
+const notifyMarket = (last) => {
+  const r = marketNotice(marketSeenAt, last)
+  marketSeenAt = r.seenAt
+  r.toasts.forEach(pushToast)
+}
+
+// Окно процесса рыночных данных: висит, пока идёт опрос; крестик глушит именно этот запуск (started_at)
+const market = ref(null)
+const marketDismissed = ref(null)
+const marketPanel = computed(() => (marketPanelOpen(market.value, marketDismissed.value) ? market.value : null))
+const closeMarket = () => { marketDismissed.value = market.value?.started_at ?? null }
 
 // какой запуск синка пользователь закрыл крестиком (started_at)
 const dismissedRun = ref(null)
@@ -67,7 +91,16 @@ const panelState = computed(() => {
 })
 const closePanel = () => { dismissedRun.value = progress.value?.started_at ?? null }
 
+// Опрос статуса идёт цепочкой таймеров: следующий запрос планирует сам fetchStatus (в том числе вызванный вручную),
+// поэтому после старта синка частота растёт сразу, а не через очередной «простойный» интервал. На скрытой вкладке цепочка стоит.
 let pollTimer = null
+const schedulePoll = () => {
+  clearTimeout(pollTimer)
+  pollTimer = null
+  if (document.hidden) return
+  pollTimer = setTimeout(fetchStatus, pollDelay({ syncing: isSyncing.value, marketRunning: !!market.value?.running, lost: connLostSince.value !== null }))
+}
+const onVisibility = () => { if (document.hidden) { clearTimeout(pollTimer); pollTimer = null } else fetchStatus() }
 
 const personsCount = computed(() => {
   const set = new Set()
@@ -91,6 +124,9 @@ const fetchStatus = async () => {
     progress.value = data.progress || null
     if (lastFinishedAt === null && !data.progress?.last) lastFinishedAt = 0
     notifyResult(data.progress?.last)
+    if (marketSeenAt === null && !data.market?.last) marketSeenAt = 0
+    market.value = data.market || null
+    notifyMarket(data.market?.last)
 
     const ver = data.stats?.data_version
     if (typeof ver === 'number' && ver !== dataVersion.value) {
@@ -100,6 +136,8 @@ const fetchStatus = async () => {
   } catch (err) {
     console.error('Status fetch error:', err)
     if (connLostSince.value === null) connLostSince.value = Date.now()
+  } finally {
+    schedulePoll()
   }
 }
 
@@ -114,7 +152,7 @@ const loadData = async () => {
     errorMsg.value = failed ? String(failed.reason?.message || failed.reason) : ''
     loadMasks() // новые счета после синхронизации получают скрытый вид на бэкенде
   } catch (err) {
-    errorMsg.value = err.message
+    errorMsg.value = errText(err)
   }
 }
 
@@ -128,42 +166,38 @@ provide('refreshData', fetchData)
 
 const startFullSync = async () => {
   if (isSyncing.value) return
-  errorMsg.value = ''
   try {
-    await apiSend('POST', '/sync/full')
+    await apiSend('POST', syncPath(autoSave.value))
     await fetchStatus()
   } catch (err) {
-    errorMsg.value = err.message
+    pushRequestError('Не удалось запустить синк', err) // тост сам уходит; плашка «ERROR» остаётся только для загрузки данных
   }
 }
+
+provide('startSync', startFullSync) // кнопки «Разведать» во вкладке Смета и в окне «Выписки»
 
 onMounted(() => {
   fetchData()
 
   // Поллим только лёгкий статус; тяжёлые данные грузятся при смене data_version
-  pollTimer = setInterval(fetchStatus, 2000)
+  document.addEventListener('visibilitychange', onVisibility)
 })
 
 onUnmounted(() => {
-  if (pollTimer) clearInterval(pollTimer)
+  clearTimeout(pollTimer)
+  document.removeEventListener('visibilitychange', onVisibility)
 })
 </script>
 
 <template>
   <div class="min-h-screen bg-slate-950 text-slate-100 font-mono flex flex-col p-6 pt-24 sm:pt-20 select-none">
-    <SideMenu @refresh="fetchData" />
     <ScrollJumpButtons />
-    <ToastStack :progress="progress" :panel-state="panelState" :lost-since="connLostSince" @close-panel="closePanel" />
+    <ToastStack :progress="progress" :panel-state="panelState" :market="marketPanel" :lost-since="connLostSince" @close-panel="closePanel" @close-market="closeMarket" />
 
     <!-- Шапка прибита к верху экрана: страница скроллится под ней -->
     <div class="app-bar">
-      <div class="max-w-6xl w-full mx-auto px-6 pl-16 xl:pl-6 py-3">
-        <AppHeader
-          v-model:activeTab="activeTab"
-          :is-syncing="isSyncing"
-          :persons-count="personsCount"
-          @sync="startFullSync"
-        />
+      <div class="max-w-6xl w-full mx-auto px-6 py-3">
+        <AppHeader v-model:active-tab="activeTab" :is-syncing="isSyncing" @refresh="fetchData" />
       </div>
     </div>
 
@@ -172,9 +206,10 @@ onUnmounted(() => {
         ERROR: {{ errorMsg }}
       </div>
 
+      <KeepAlive><HomeView v-if="activeTab === 'home'" :accounts="accounts" :transactions="transactions" /></KeepAlive>
       <KeepAlive><SmetaView v-if="activeTab === 'dashboard'" :accounts="accounts" :transactions="transactions" /></KeepAlive>
-      <KeepAlive><OperationalView v-if="activeTab === 'accounts'" :accounts="accounts" :transactions="transactions" :users="users" /></KeepAlive>
-      <KeepAlive><PersonsView v-if="activeTab === 'entities'" :transactions="transactions" :accounts="accounts" :data-version="dataVersion" @refresh="fetchData" /></KeepAlive>
+      <KeepAlive><MarketView v-if="activeTab === 'market'" :accounts="accounts" :data-version="dataVersion" :running="!!market?.running" /></KeepAlive>
+      <KeepAlive><DataView v-if="activeTab === 'data'" :accounts="accounts" :transactions="transactions" :users="users" :data-version="dataVersion" :persons-count="personsCount" @refresh="fetchData" /></KeepAlive>
     </div>
   </div>
 </template>

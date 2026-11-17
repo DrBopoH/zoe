@@ -11,7 +11,7 @@ const open = ref(false)
 <template>
   <div>
     <UiGroup title="Кэш">
-      <UiButton variant="amber-outline" class="w-full" @click="open = true">Выписки</UiButton>
+      <UiButton variant="secondary" class="w-full" @click="open = true">Выписки</UiButton>
     </UiGroup>
 
     <StatementsModal :is-open="open" @close="open = false" @refresh="emit('refresh')" />

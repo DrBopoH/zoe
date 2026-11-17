@@ -2,12 +2,15 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"economic/pkg/binance"
 	"economic/pkg/db"
 	"economic/pkg/mono"
 	"economic/pkg/source"
@@ -224,5 +227,212 @@ func TestSaveAPIBinanceSeriesRestores(t *testing.T) {
 	}
 	if _, _, n := st.BinanceSeriesInfo(); n != 0 {
 		t.Fatal("устаревший ряд не должен попасть в кеш")
+	}
+}
+
+// «Разведать» с галочкой: после обхода снятое с API само попадает в файлы-источники, итог — в результате синка
+func TestAutoSaveAfterSync(t *testing.T) {
+	t.Setenv("ECONOMIC_SOURCES_DIR", t.TempDir())
+	e := newEnv(t)
+	acc := mono.AccountDTO{ID: "acc1", Type: "black", CurrencyCode: 980, Balance: 100, MaskedPan: []string{"5375****1111"}, IBAN: "UA00"}
+	if err := e.st.SaveAccounts([]mono.AccountDTO{acc}, "Ivan"); err != nil {
+		t.Fatal(err)
+	}
+	e.st.SaveTransactions("acc1", []mono.StatementItemDTO{{ID: "t1", Time: 1_700_000_000, Description: "кава", Amount: -5000, OperationAmount: -5000, CurrencyCode: 980}})
+	e.st.AddCoverage("acc1", db.HistoryStart, 1_700_200_000)
+
+	last := func() *syncResult {
+		_, body := post2(t, e.s.HandleGetStatus)
+		var st struct{ Progress struct{ Last *syncResult } }
+		if err := json.Unmarshal(body, &st); err != nil {
+			t.Fatal(err)
+		}
+		return st.Progress.Last
+	}
+
+	e.s.prog.begin()
+	e.s.saveToSources(context.Background())
+	e.s.prog.finish()
+	if l := last(); l == nil || !l.AutoSave || l.Saved != 1 || len(l.Errors) != 0 {
+		t.Fatalf("итог автозаписи: %+v", l)
+	}
+	if list, _ := store().List(); len(list) != 1 || list[0].File.Origin != source.OriginAPI {
+		t.Fatalf("источник должен появиться: %+v", list)
+	}
+
+	// повторная разведка без новых данных: записывать нечего
+	e.s.prog.begin()
+	e.s.saveToSources(context.Background())
+	e.s.prog.finish()
+	if l := last(); l.Saved != 0 || !l.AutoSave {
+		t.Fatalf("тот же снимок второй раз не пишется: %+v", l)
+	}
+
+	// без галочки итог не говорит про автозапись
+	e.s.prog.begin()
+	e.s.prog.finish()
+	if l := last(); l.AutoSave {
+		t.Fatalf("автозапись не запрашивали: %+v", l)
+	}
+
+	// отменённый обход (сброс кеша) ничего не пишет
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	before, _ := store().List()
+	e.s.prog.begin()
+	e.s.saveToSources(ctx)
+	e.s.prog.finish()
+	if after, _ := store().List(); len(after) != len(before) || last().AutoSave {
+		t.Fatal("после отмены запись не нужна")
+	}
+}
+
+func post2(t *testing.T, h http.HandlerFunc) (int, []byte) {
+	t.Helper()
+	w := httptest.NewRecorder()
+	h(w, httptest.NewRequest(http.MethodGet, "/api/sync/status", nil))
+	return w.Code, w.Body.Bytes()
+}
+
+// История C2C-ордеров — дополнение к выписке того же счёта: свой файл .zoe в папке binance, имя и профиль счёта не меняет,
+// после сброса кеша возвращается через «Загрузить».
+func TestP2PHistoryIsSourceOfBinanceAccount(t *testing.T) {
+	t.Setenv("ECONOMIC_SOURCES_DIR", t.TempDir())
+	s := newICUServer(t)
+	now := time.Now().UTC().Truncate(time.Minute)
+	bnF, err := parseSource(stmtName, []byte(stmtFor(now.Add(-3*time.Hour), now.Add(-2*time.Hour))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store().Put(bnF); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.applySource(bnF); err != nil {
+		t.Fatal(err)
+	}
+	profile := s.storage.BinanceProfile()
+
+	csv := "\xef\xbb\xbfНомер ордера,Тип ордеру,Актив,Тип фіатної валюти,Загальна ціна,Ціна,Кількість,Обмінний курс,Комісія мейкера,Комісія тейкера,Контрагент,Статус,Час створення\n" +
+		"22891811517163294720,Buy,USDT,UAH,3997,44.9,89.02,,,0.17,X,Completed,2026-05-24 12:27:19\n"
+	pf, err := parseSource("Binance-Історія-C2C-ордерів-202611131224(UTC+2)-part1-of1.csv", []byte(csv))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pf.Kind != source.KindP2P || pf.AccountID != db.BinanceAccountID || pf.Card != "binance" || pf.Profile != "" || pf.Count() != 1 {
+		t.Fatalf("%+v", pf)
+	}
+	if _, added, err := store().Put(pf); err != nil || !added {
+		t.Fatalf("put: %v %v", added, err)
+	}
+	if _, err := s.applySource(pf); err != nil {
+		t.Fatal(err)
+	}
+	if s.storage.BinanceProfile() != profile || profile == "" {
+		t.Fatalf("профиль счёта задаёт выписка, а не история ордеров: %q → %q", profile, s.storage.BinanceProfile())
+	}
+	if got, _ := s.storage.BinanceP2P(); len(got) != 1 || got[0].Total != 3997 || got[0].T != 1779618439000 {
+		t.Fatalf("%+v", got)
+	}
+
+	if err := s.storage.WipeCache(); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	s.HandleLoadSources(rec, httptest.NewRequest(http.MethodPost, "/api/sources/load", nil))
+	if got, _ := s.storage.BinanceP2P(); len(got) != 1 {
+		t.Fatalf("после «Загрузить» ордера вернулись: %+v %s", got, rec.Body.String())
+	}
+	rec = httptest.NewRecorder()
+	s.HandleBinanceP2P(rec, httptest.NewRequest(http.MethodGet, "/api/binance/p2p", nil))
+	if !strings.Contains(rec.Body.String(), `"total":3997`) {
+		t.Fatalf("%s", rec.Body.String())
+	}
+	// инспекция не требует решать алиас: имя счёта история ордеров не задаёт
+	for _, p := range s.inspect(pf, db.BinanceAccountID).Problems {
+		if p.Code == "alias" {
+			t.Fatalf("алиас: %+v", p)
+		}
+	}
+}
+
+// Файлы в разных поясах (на имени одного пометки нет): время ордеров выравнивается по зачислениям в журнале на чтении,
+// сам файл-источник не меняется, сдвиг виден в заголовке.
+func TestP2PTimeAlignedToLedger(t *testing.T) {
+	s := newICUServer(t)
+	at := time.Date(2026, 5, 19, 7, 56, 7, 0, time.UTC)
+	var rows []db.BinanceRow
+	var orders []db.P2POrder
+	for i, v := range []float64{25.06, 88.85, 40.1} {
+		o := at.Add(time.Duration(i) * 26 * time.Hour)
+		rows = append(rows, db.BinanceRow{T: o.Add(6 * time.Minute).UnixMilli(), Account: "Funding", Op: "P2P Trading", Asset: "USDT", Delta: v, Kind: binance.KindP2P})
+		orders = append(orders, db.P2POrder{ID: string(rune('a' + i)), T: o.Add(-2 * time.Hour).UnixMilli(), Side: "Buy", Asset: "USDT", Fiat: "UAH", Qty: v + 0.05, Fee: 0.05, Status: "Completed"})
+	}
+	if err := s.storage.SaveBinanceStatement("x.csv", "BN1", rows); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.storage.SaveBinanceP2P(orders); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	s.HandleBinanceP2P(rec, httptest.NewRequest(http.MethodGet, "/api/binance/p2p", nil))
+	if rec.Header().Get("X-Time-Shift-Minutes") != "120" {
+		t.Fatalf("сдвиг: %q", rec.Header().Get("X-Time-Shift-Minutes"))
+	}
+	var got []db.P2POrder
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || len(got) != 3 || got[0].T != at.UnixMilli() {
+		t.Fatalf("время ордера должно встать на момент создания: %v %+v", err, got)
+	}
+	if raw, _ := s.storage.BinanceP2P(); raw[0].T != at.Add(-2*time.Hour).UnixMilli() {
+		t.Fatal("в базе время остаётся как в файле")
+	}
+}
+
+// В окне «Выписки» у брокерского счёта и Binance в поле номера — настоящий идентификатор, а не служебное «icu» / «binance»:
+// у Binance идентификатор профиля из выписки, у брокерского — номер договора, а привязанный к нему IBAN его заменяет.
+func TestSourcesLabelsAreIdentifiersNotServiceWords(t *testing.T) {
+	t.Setenv("ECONOMIC_SOURCES_DIR", t.TempDir())
+	s := newICUServer(t)
+	icuF := icuFile("ОВГЗ Тест.pdf", fixtureReport(t))
+	now := time.Now().UTC().Truncate(time.Minute)
+	bnF, err := parseSource(stmtName, []byte(stmtFor(now.Add(-3*time.Hour), now.Add(-2*time.Hour))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []*source.File{icuF, bnF} {
+		if _, _, err := store().Put(f); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.applySource(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	labels := func() map[string]string {
+		_, body := call(t, s.HandleSources, http.MethodGet, "/api/sources", "")
+		var out struct {
+			Accounts []struct{ ID, Label string }
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			t.Fatal(err)
+		}
+		m := map[string]string{}
+		for _, a := range out.Accounts {
+			m[a.ID] = a.Label
+		}
+		return m
+	}
+	m := labels()
+	if m[db.BinanceAccountID] != "BN7" {
+		t.Fatalf("Binance: ждали идентификатор профиля BN7, получили %q", m[db.BinanceAccountID])
+	}
+	if m[icuF.AccountID] != icuF.Contract || icuF.Contract == "" {
+		t.Fatalf("брокерский: ждали номер договора %q, получили %q", icuF.Contract, m[icuF.AccountID])
+	}
+	// после сброса кеша файлы остаются: подпись не превращается в «icu» / «binance»
+	if err := s.storage.WipeCache(); err != nil {
+		t.Fatal(err)
+	}
+	m = labels()
+	if m[db.BinanceAccountID] != "BN7" || m[icuF.AccountID] != icuF.Contract {
+		t.Fatalf("после сброса: %v", m)
 	}
 }

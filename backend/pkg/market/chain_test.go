@@ -1,0 +1,214 @@
+package market
+
+import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+)
+
+// chainServer — один сервер за все адреса контура; fail — часть пути, на которую отвечать ошибкой.
+func chainServer(t *testing.T, fail string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if fail != "" && strings.Contains(r.URL.Path, fail) {
+			http.Error(w, "boom", http.StatusBadGateway)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		switch {
+		case strings.Contains(r.URL.Path, "adv/search"):
+			// первое объявление нерабочее (остаток на 100 ₴), дальше рабочие: цены 47,0 47,1 47,2 (медиана 47,1); продажа — 46,0 46,2 46,1
+			if strings.Contains(string(body), `"BUY"`) {
+				w.Write([]byte(`{"data":[{"adv":{"price":"40.00","tradableQuantity":"2.5","minSingleTransAmount":"50","maxSingleTransAmount":"100"}},` +
+					`{"adv":{"price":"47.00","tradableQuantity":"1000","minSingleTransAmount":"1000","maxSingleTransAmount":"50000"}},` +
+					`{"adv":{"price":"47.20","tradableQuantity":"1000","minSingleTransAmount":"1000","maxSingleTransAmount":"50000"}},` +
+					`{"adv":{"price":"47.10","tradableQuantity":"1000","minSingleTransAmount":"1000","maxSingleTransAmount":"50000"}}]}`))
+			} else {
+				w.Write([]byte(`{"data":[{"adv":{"price":"46.00","tradableQuantity":"1000","minSingleTransAmount":"100000","maxSingleTransAmount":"200000"}},` +
+					`{"adv":{"price":"46.00","tradableQuantity":"1000","minSingleTransAmount":"500","maxSingleTransAmount":"800"}},` +
+					`{"adv":{"price":"46.20","tradableQuantity":"1000","minSingleTransAmount":"500","maxSingleTransAmount":"50000"}}]}`))
+			}
+		case strings.Contains(r.URL.Path, "fundingRate"):
+			// сутки 2026-11-10: три выплаты по 0,0001 → среднее 0,0001 × 3 × 365 × 100 = 10,95 % годовых
+			w.Write([]byte(`[{"fundingTime":1794614400000,"fundingRate":"0.00010000"},{"fundingTime":1794643200000,"fundingRate":"0.00010000"},{"fundingTime":1794672000000,"fundingRate":"0.00010000"},{"fundingTime":1794700800002,"fundingRate":"-0.00020000"}]`))
+		case strings.Contains(r.URL.Path, "openInterestHist"):
+			w.Write([]byte(`[{"sumOpenInterestValue":"7225625852.83","timestamp":1794528000000},{"sumOpenInterestValue":"bad","timestamp":1794614400000}]`))
+		case strings.Contains(r.URL.Path, "stablecoincharts"):
+			w.Write([]byte(`[{"date":"1794009600","totalCirculatingUSD":{"peggedUSD":170000000000}},{"date":"1794096000","totalCirculatingUSD":{"peggedUSD":171000000000}},{"date":"1794700800","totalCirculatingUSD":{"peggedUSD":175362324347.73}},{"date":"1","totalCirculatingUSD":{"peggedUSD":0}}]`))
+		case strings.Contains(r.URL.Path, "fee-rates"):
+			w.Write([]byte(`[{"timestamp":1794700800,"avgFee_50":1},{"timestamp":1794704400,"avgFee_50":3}]`))
+		case strings.Contains(r.URL.Path, "fees/recommended"):
+			w.Write([]byte(`{"halfHourFee":10}`))
+		case strings.Contains(r.URL.Path, "getchainparameters"):
+			w.Write([]byte(`{"chainParameter":[{"key":"getTransactionFee","value":1000},{"key":"getEnergyFee","value":100}]}`))
+		case r.Method == http.MethodPost && strings.Contains(string(body), "eth_gasPrice"):
+			w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"0x3b9aca00"}`)) // 1 гвей
+		case strings.Contains(r.URL.Path, "ticker/price"):
+			switch r.URL.Query().Get("symbol") {
+			case "BTCUSDT":
+				w.Write([]byte(`{"price":"60000.00"}`))
+			case "TRXUSDT":
+				w.Write([]byte(`{"price":"0.30"}`))
+			case "ETHUSDT":
+				w.Write([]byte(`{"price":"2000.00"}`))
+			}
+		case strings.Contains(r.URL.Path, "/global"):
+			w.Write([]byte(`{"data":{"market_cap_percentage":{"btc":58.123,"eth":10},"total_market_cap":{"usd":2205249867927.15}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func chainClient(srv *httptest.Server) *Client {
+	c := NewClient()
+	c.BinanceBase, c.P2PBase, c.FuturesBase, c.LlamaBase, c.MempoolBase, c.TronBase, c.EthRPCBase, c.GeckoBase = srv.URL, srv.URL, srv.URL, srv.URL, srv.URL, srv.URL, srv.URL, srv.URL
+	c.Now = func() time.Time { return time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC) }
+	return c
+}
+
+func TestChainBuildsAllSeries(t *testing.T) {
+	pts, res := chainClient(chainServer(t, "")).Chain(context.Background(), nil)
+	if res.Error != "" || res.Source != SourceChain || res.Fetched != len(pts) {
+		t.Fatalf("%+v", res)
+	}
+	if len(res.Tail) != len(SnapshotSeries) || !IsSnapshot(SerP2PAsk) || IsSnapshot(SerFundBTC) {
+		t.Fatalf("снимки идут хвостом, чтобы копить историю: %v", res.Tail)
+	}
+	by := byID(pts)
+	for _, id := range chainSeries {
+		if len(by[id]) == 0 {
+			t.Errorf("нет ряда %s", id)
+		}
+	}
+	// P2P: нерабочее объявление пропущено, медиана 47,00 47,10 47,20 → 47,10; продажа: объявление с минимумом 20 000 ₴ и с максимумом 5 000 ₴ не подходят → одно рабочее 46,20
+	if a := by[SerP2PAsk]; len(a) != 1 || a[0].Value != 47.1 || a[0].Date != "2026-11-16" {
+		t.Fatalf("ask: %+v", a)
+	}
+	if b := by[SerP2PBid]; len(b) != 1 || b[0].Value != 46.2 {
+		t.Fatalf("bid: %+v", b)
+	}
+	// Фандинг: сутки 2026-11-12 — три выплаты по 0,0001 → 10,95 % годовых; следующие сутки — одна выплата −0,0002 → −21,9
+	f := by[SerFundBTC]
+	if len(f) != 2 || f[0].Value != 10.95 || f[1].Value != -21.9 {
+		t.Fatalf("funding: %+v", f)
+	}
+	if o := by[SerOIBTC]; len(o) != 1 || o[0].Value != 7.23 {
+		t.Fatalf("oi: %+v", o)
+	}
+	// USDT: три точки одной недели → последняя; нулевая пропущена
+	if s := by[SerStableUSDT]; len(s) == 0 || s[len(s)-1].Value != 175.362 {
+		t.Fatalf("usdt: %+v", s)
+	}
+	// BTC: 10 сат/vB × 140 vB = 1400 сат = 0,000014 BTC × 60 000 = 0,84 $; медиана блоков за сутки (1 и 3 → 2)
+	if v := by[SerFeeBTCUSD]; len(v) != 1 || v[0].Value != 0.84 {
+		t.Fatalf("btc fee: %+v", v)
+	}
+	if v := by[SerFeeBTCSat]; len(v) != 1 || v[0].Value != 2 {
+		t.Fatalf("btc sat: %+v", v)
+	}
+	// TRON: (65 000 × 100 + 345 × 1000) / 1e6 = 6,845 TRX × 0,30 = 2,0535 $
+	if v := by[SerFeeTronUSD]; len(v) != 1 || v[0].Value != 2.0535 {
+		t.Fatalf("tron fee: %+v", v)
+	}
+	// ETH: 65 000 газа × 1 гвей = 0,000065 ETH × 2000 = 0,13 $
+	if v := by[SerFeeEthUSD]; len(v) != 1 || v[0].Value != 0.13 {
+		t.Fatalf("eth fee: %+v", v)
+	}
+	if d := by[SerDomBTC]; len(d) != 1 || d[0].Value != 58.12 {
+		t.Fatalf("dominance: %+v", d)
+	}
+	if m := by[SerMcapTotal]; len(m) != 1 || m[0].Value != 2.205 {
+		t.Fatalf("mcap: %+v", m)
+	}
+}
+
+func TestChainOneFailureKeepsRest(t *testing.T) {
+	for _, tc := range []struct{ fail, lost, kept string }{
+		{"adv/search", SerP2PAsk, SerFundBTC},
+		{"fundingRate", SerFundBTC, SerP2PAsk},
+		{"stablecoincharts", SerStableUSDT, SerFeeEthUSD},
+		{"getchainparameters", SerFeeTronUSD, SerFeeBTCUSD},
+		{"/global", SerDomBTC, SerOIBTC},
+	} {
+		pts, res := chainClient(chainServer(t, tc.fail)).Chain(context.Background(), nil)
+		by := byID(pts)
+		if res.Error == "" || len(by[tc.lost]) != 0 || len(by[tc.kept]) == 0 {
+			t.Errorf("%s: упал только %s: %q %v", tc.fail, tc.lost, res.Error, len(by))
+		}
+	}
+}
+
+func TestChainWithoutBasesPollsNothing(t *testing.T) {
+	c := NewClient()
+	c.P2PBase, c.FuturesBase, c.LlamaBase, c.MempoolBase, c.TronBase, c.EthRPCBase, c.GeckoBase = "", "", "", "", "", "", ""
+	if pts, res := c.Chain(context.Background(), nil); len(pts) != 0 || res.Error != "" {
+		t.Fatalf("%d %q", len(pts), res.Error)
+	}
+}
+
+func TestP2PRejectsEmptyAds(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"data":[]}`)) }))
+	defer srv.Close()
+	c := chainClient(srv)
+	if _, err := c.p2pPrice(context.Background(), "BUY"); err == nil {
+		t.Fatal("пустая выдача — ошибка, а не нулевая цена")
+	}
+}
+
+func TestNextTickFollowsGridAcrossRestarts(t *testing.T) {
+	h := time.Hour
+	at := func(hh, mm int) time.Time { return time.Date(2026, 11, 16, hh, mm, 0, 0, time.UTC) }
+	cases := []struct {
+		name      string
+		now, last time.Time
+		want      time.Duration
+	}{
+		{"снимка не было — сразу", at(12, 40), time.Time{}, 0},
+		{"слот 12:00 уже снят — ждать до 13:00", at(12, 40), at(12, 0), 20 * time.Minute},
+		{"рестарт в 12:50, снят 11:00 — снять сразу", at(12, 50), at(11, 0), 0},
+		{"точно на границе, предыдущий слот снят", at(13, 0), at(12, 0), 0},
+		{"только что снят слот", at(13, 0), at(13, 0), time.Hour},
+	}
+	for _, c := range cases {
+		if got := NextTick(c.now, c.last, h); got != c.want {
+			t.Errorf("%s: %v, ждали %v", c.name, got, c.want)
+		}
+	}
+	if NextTick(at(1, 0), time.Time{}, 0) != 0 {
+		t.Error("нулевой шаг — не ждать")
+	}
+}
+
+// Живой ответ Binance 16.11.2026: у большинства объявлений лимиты совпадают (фиксированная сумма). Раньше фильтр «влезает 10 000 ₴» отбрасывал все 20.
+func TestP2PPriceFromFixedAmountAds(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ad := func(p, q, lo, hi string) string {
+			return `{"adv":{"price":"` + p + `","tradableQuantity":"` + q + `","minSingleTransAmount":"` + lo + `","maxSingleTransAmount":"` + hi + `"}}`
+		}
+		w.Write([]byte(`{"data":[` + strings.Join([]string{
+			ad("46.34", "17.98", "500", "500"),      // пыль: сделка на 500 ₴
+			ad("46.36", "356.41", "1274", "1274"),   // 1-я рабочая
+			ad("46.37", "119.90", "718", "718"),     // пыль
+			ad("46.38", "99.92", "1149", "1150"),    // 2-я
+			ad("46.39", "99.93", "400", "400"),      // пыль
+			ad("46.40", "401.67", "18400", "18400"), // 3-я
+			ad("46.40", "149.92", "2555", "2555"),   // 4-я
+			ad("46.41", "143.14", "620", "621"),     // пыль
+			ad("46.43", "251.94", "522", "523"),     // пыль
+			ad("46.43", "99.92", "4490", "4490"),    // 5-я
+		}, ",") + `]}`))
+	}))
+	defer srv.Close()
+	c := chainClient(srv)
+	got, err := c.p2pPrice(context.Background(), "BUY")
+	if err != nil || got != 46.40 {
+		t.Fatalf("медиана пяти первых рабочих: %v %v", got, err)
+	}
+}

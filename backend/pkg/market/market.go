@@ -1,0 +1,293 @@
+// Package market — публичные рыночные данные по облигациям: ОВДП (реестр депозитария и результаты
+// аукционов Минфина через открытые данные НБУ) и казначейские бумаги США (FiscalData). Ключей нет,
+// ничего личного не уходит наружу: запросы только на чтение публичных справочников.
+//
+// Формат ответов внешних API проверяется по их документации, а не по живому ответу, поэтому разбор терпимый:
+// поле ищется по списку возможных имён, пустое и "null" — «нет значения», незнакомые поля игнорируются.
+// Запись без ISIN/CUSIP пропускается и считается в Result.Skipped.
+package market
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+)
+
+const (
+	SourceNBU = "nbu" // ОВДП: реестр депозитария НБУ + результаты аукционов
+	SourceUST = "ust" // US Treasury: аукционы FiscalData
+
+	DefaultNBUBase      = "https://bank.gov.ua"
+	DefaultFREDBase     = "https://fred.stlouisfed.org"
+	DefaultBinanceBase  = "https://api.binance.com"
+	DefaultFNGBase      = "https://api.alternative.me"
+	DefaultShillerBase  = "https://raw.githubusercontent.com"
+	DefaultEurostatBase = "https://ec.europa.eu"
+	DefaultECBBase      = "https://data-api.ecb.europa.eu"
+	DefaultBoEBase      = "https://www.bankofengland.co.uk"
+	DefaultONSBase      = "https://www.ons.gov.uk"
+	DefaultBISBase      = "https://stats.bis.org"
+	DefaultWBBase       = "https://api.worldbank.org"
+	DefaultYahooBase    = "https://query1.finance.yahoo.com"
+	DefaultUSTBase      = "https://api.fiscaldata.treasury.gov/services/api/fiscal_service"
+	DefaultP2PBase      = "https://p2p.binance.com"
+	DefaultFuturesBase  = "https://fapi.binance.com"
+	DefaultLlamaBase    = "https://stablecoins.llama.fi"
+	DefaultMempoolBase  = "https://mempool.space"
+	DefaultTronBase     = "https://api.trongrid.io"
+	DefaultEthRPCBase   = "https://ethereum-rpc.publicnode.com"
+	DefaultGeckoBase    = "https://api.coingecko.com"
+
+	maxBody = 32 << 20 // реестр ОВДП — единицы мегабайт; больше — это уже не он
+)
+
+// Security — одна облигация из публичного источника.
+type Security struct {
+	Source      string  `json:"source"`
+	ID          string  `json:"id"` // ISIN (nbu) или CUSIP (ust)
+	Name        string  `json:"name"`
+	Currency    string  `json:"currency"`               // UAH | USD | EUR
+	Maturity    string  `json:"maturity"`               // YYYY-MM-DD
+	Issued      string  `json:"issued,omitempty"`       // дата размещения/выпуска
+	CouponRate  float64 `json:"coupon_rate"`            // годовая ставка, %; 0 — бескупонная или неизвестна
+	Nominal     float64 `json:"nominal"`                // номинал одной бумаги в её валюте
+	Yield       float64 `json:"yield,omitempty"`        // доходность последнего аукциона, %
+	LastAuction string  `json:"last_auction,omitempty"` // дата последнего аукциона
+}
+
+// Result — итог одного обновления источника.
+type Result struct {
+	Source  string `json:"source"`
+	Fetched int    `json:"fetched"`           // записей получено и разобрано
+	Skipped int    `json:"skipped,omitempty"` // записей без идентификатора или не облигаций
+	Error   string `json:"error,omitempty"`
+	// Tail — ряды, пришедшие только хвостом (с даты из LastDate): сохраняются поверх кеша, а не вместо него
+	Tail []string `json:"-"`
+}
+
+// Client ходит в НБУ и FiscalData. Базовые адреса и часы подменяются в тестах.
+type Client struct {
+	HTTP    *http.Client
+	NBUBase string
+	USTBase string
+	// FREDBase — адрес FRED (ставка ФРС, инфляция США, доходность Treasury); публичный CSV без ключа
+	FREDBase string
+	// BinanceBase — публичные свечи Binance (без ключа, без подписи); FNGBase — индекс страха и жадности крипторынка
+	BinanceBase string
+	FNGBase     string
+	// ShillerBase — GitHub raw с месячными данными Шиллера по S&P 500 с 1871 года (датасет datasets/s-and-p-500)
+	ShillerBase string
+	// EurostatBase — инфляция еврозоны (HICP, годовое изменение) из SDMX-CSV Евростата; пустая строка отключает опрос (тесты)
+	EurostatBase string
+	// ECBBase — SDMX-API ЕЦБ (ставки, €STR, кривая доходности); пустая строка отключает опрос (тесты)
+	ECBBase string
+	// BoEBase, ONSBase, BISBase — Банк Англии (IADB), Управление нац. статистики Великобритании и BIS (SDMX): пакеты стран; пустая строка отключает опрос (тесты)
+	BoEBase, ONSBase, BISBase string
+	// WBBase — Всемирный банк (годовые показатели стран, которых нет в BIS); пустая строка отключает опрос (тесты)
+	WBBase string
+	// Крипто-контур (источник «chain»): P2P Binance, фьючерсы Binance, DefiLlama, mempool.space, TronGrid, публичный RPC Ethereum, CoinGecko; пустая строка отключает часть (тесты)
+	P2PBase, FuturesBase, LlamaBase, MempoolBase, TronBase, EthRPCBase, GeckoBase string
+	// YahooBase — график индекса биржи (KOSPI, TAIEX), публичный JSON без ключа; пустая строка отключает опрос (тесты)
+	YahooBase string
+	// NasdaqBase, SECBase — список компаний для раздела «Акции» (Nasdaq screener, реестр тикеров SEC); пустая строка отключает опрос (тесты)
+	NasdaqBase, SECBase string
+	// EDGARBase — data.sec.gov: кадры отчётности (число акций, выручка, прибыль); пустая строка отключает опрос (тесты)
+	EDGARBase string
+	Now       func() time.Time
+	// Limiter — паузы между запросами к одному хосту (nil — без пауз)
+	Limiter *HostLimiter
+	// LastDate — до какой даты ряд уже лежит в кеше (пусто — нет такого). По ней тяжёлые дневные ряды FRED докачиваются хвостом, а не целиком.
+	// nil — всегда качать всю историю.
+	LastDate func(series string) string
+	// USTYears — за сколько лет назад брать аукционы США (по умолчанию 3: хватает на все бумаги, что ещё в обращении
+	// у 2-летних и 3-летних выпусков; долгие бумаги подтянутся при следующих обновлениях по мере появления).
+	USTYears int
+	// Retries — сколько раз повторить запрос, если источник не ответил (таймаут, обрыв, 429, 502–504); RetryWait — пауза перед повтором (растёт с номером)
+	Retries   int
+	RetryWait time.Duration
+	// AuctionDays — сколько последних дней перебирать в результатах аукционов ОВДП (по умолчанию 14).
+	AuctionDays int
+}
+
+// DefaultRetryWait — пауза перед первым повтором запроса; тесты ставят её в миллисекунды.
+var DefaultRetryWait = time.Second
+
+func NewClient() *Client {
+	return &Client{HTTP: &http.Client{Timeout: 30 * time.Second}, NBUBase: DefaultNBUBase, USTBase: DefaultUSTBase, FREDBase: DefaultFREDBase, BinanceBase: DefaultBinanceBase, FNGBase: DefaultFNGBase, ShillerBase: DefaultShillerBase, EurostatBase: DefaultEurostatBase, ECBBase: DefaultECBBase, BoEBase: DefaultBoEBase, ONSBase: DefaultONSBase, BISBase: DefaultBISBase, WBBase: DefaultWBBase, YahooBase: DefaultYahooBase, NasdaqBase: DefaultNasdaqBase, SECBase: DefaultSECBase, EDGARBase: DefaultEDGARBase, P2PBase: DefaultP2PBase, FuturesBase: DefaultFuturesBase, LlamaBase: DefaultLlamaBase, MempoolBase: DefaultMempoolBase, TronBase: DefaultTronBase, EthRPCBase: DefaultEthRPCBase, GeckoBase: DefaultGeckoBase, Now: time.Now, Limiter: NewHostLimiter(DefaultHostGaps()).WithSlots(DefaultHostSlots()), Retries: 2, RetryWait: DefaultRetryWait}
+}
+
+func (c *Client) now() time.Time {
+	if c.Now != nil {
+		return c.Now()
+	}
+	return time.Now()
+}
+
+func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
+	return c.getHeaders(ctx, url, map[string]string{"Accept": "application/json"})
+}
+
+// getHeaders — тот же запрос со своими заголовками (Евростату нужен Accept для CSV и внятный User-Agent: стандартный Go он не любит).
+func (c *Client) getHeaders(ctx context.Context, url string, headers map[string]string) ([]byte, error) {
+	return c.do(ctx, http.MethodGet, url, nil, headers)
+}
+
+// postJSON — POST с JSON-телом (P2P Binance и RPC Ethereum принимают только его).
+func (c *Client) postJSON(ctx context.Context, url string, payload []byte) ([]byte, error) {
+	return c.do(ctx, http.MethodPost, url, payload, map[string]string{"Accept": "application/json", "Content-Type": "application/json"})
+}
+
+func (c *Client) do(ctx context.Context, method, url string, payload []byte, headers map[string]string) ([]byte, error) {
+	var lastErr error
+	for attempt := 0; attempt <= c.Retries; attempt++ {
+		if attempt > 0 { // повтор только после паузы и только пока опрос не отменён
+			select {
+			case <-ctx.Done():
+				return nil, lastErr
+			case <-time.After(c.RetryWait * time.Duration(attempt)):
+			}
+		}
+		body, retry, err := c.once(ctx, method, url, payload, headers)
+		if err == nil || !retry {
+			return body, err
+		}
+		lastErr = err
+	}
+	return nil, lastErr
+}
+
+// once — один запрос. retry — стоит ли повторить: сбой связи, таймаут источника, 429 и 502–504 проходят сами; остальное (404, 500, битый ответ) — нет.
+func (c *Client) once(ctx context.Context, method, url string, payload []byte, headers map[string]string) (body []byte, retry bool, err error) {
+	var rd io.Reader
+	if payload != nil {
+		rd = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, rd)
+	if err != nil {
+		return nil, false, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	release, err := c.Limiter.Acquire(ctx, req.URL.Host)
+	if err != nil {
+		return nil, false, err
+	}
+	defer release()
+	h := c.HTTP
+	if h == nil {
+		h = http.DefaultClient
+	}
+	resp, err := h.Do(req)
+	if err != nil {
+		return nil, ctx.Err() == nil, err
+	}
+	defer resp.Body.Close()
+	body, err = io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
+	if err != nil {
+		return nil, ctx.Err() == nil, err
+	}
+	if len(body) > maxBody {
+		return nil, false, fmt.Errorf("ответ больше %d МБ", maxBody>>20)
+	}
+	if resp.StatusCode != http.StatusOK {
+		code := resp.StatusCode
+		return nil, code == http.StatusTooManyRequests || code == http.StatusBadGateway || code == http.StatusServiceUnavailable || code == http.StatusGatewayTimeout, &HTTPError{Code: code}
+	}
+	return body, false, nil
+}
+
+// HTTPError — источник ответил не 200. Текст прежний («HTTP 404»); код нужен тем, для кого 404 — не сбой, а «данных нет» (кадры SEC).
+type HTTPError struct{ Code int }
+
+func (e *HTTPError) Error() string { return fmt.Sprintf("HTTP %d", e.Code) }
+
+// ───────────────────────── разбор полей ─────────────────────────
+
+type record map[string]any
+
+// str — первое непустое значение из перечисленных ключей (регистр ключа не важен).
+func (r record) str(keys ...string) string {
+	for _, k := range keys {
+		for rk, v := range r {
+			if !strings.EqualFold(rk, k) || v == nil {
+				continue
+			}
+			var s string
+			switch x := v.(type) {
+			case string:
+				s = strings.TrimSpace(x)
+			case float64:
+				s = strconv.FormatFloat(x, 'f', -1, 64)
+			default:
+				continue
+			}
+			if s != "" && !strings.EqualFold(s, "null") {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+// num — число из строки или числа: "16,44", "16.44", 16.44; пустое, "null" и мусор → 0.
+func (r record) num(keys ...string) float64 {
+	s := strings.ReplaceAll(strings.ReplaceAll(r.str(keys...), " ", ""), ",", ".")
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+// date — YYYY-MM-DD из ISO, DD.MM.YYYY или YYYYMMDD (с хвостом «T…» или временем); не разобралось → "".
+func (r record) date(keys ...string) string { return normDate(r.str(keys...)) }
+
+func normDate(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexAny(s, "T "); i > 0 {
+		s = s[:i]
+	}
+	for _, layout := range []string{"2006-01-02", "02.01.2006", "20060102"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.Format("2006-01-02")
+		}
+	}
+	return ""
+}
+
+// records разбирает JSON-массив объектов; {"data":[…]} (FiscalData) тоже понимает.
+func records(body []byte) ([]record, error) {
+	var arr []record
+	if err := json.Unmarshal(body, &arr); err == nil {
+		return arr, nil
+	}
+	var wrap struct {
+		Data []record `json:"data"`
+	}
+	if err := json.Unmarshal(body, &wrap); err != nil {
+		return nil, fmt.Errorf("ответ не JSON-массив: %w", err)
+	}
+	return wrap.Data, nil
+}
+
+func upperCur(s string) string {
+	s = strings.ToUpper(strings.TrimSpace(s))
+	switch s {
+	case "980":
+		return "UAH"
+	case "840":
+		return "USD"
+	case "978":
+		return "EUR"
+	case "":
+		return "UAH"
+	}
+	return s
+}

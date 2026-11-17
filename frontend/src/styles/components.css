@@ -14,6 +14,10 @@
   .ui-select {
     @apply cursor-pointer;
   }
+  /* Числовое поле без родных стрелок-счётчиков браузера (белые кнопки на тёмной теме) */
+  .ui-input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
+  .ui-input[type='number']::-webkit-inner-spin-button,
+  .ui-input[type='number']::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
   .ui-input--invalid {
     @apply border-rose-500/80 focus:border-rose-400;
   }
@@ -37,9 +41,6 @@
   }
   .ui-btn--amber {
     @apply bg-amber-600 text-slate-950 hover:bg-amber-500 disabled:bg-slate-800 disabled:text-slate-600 disabled:shadow-none;
-  }
-  .ui-btn--amber-outline {
-    @apply bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20;
   }
   .ui-btn--subtle {
     @apply bg-slate-800 text-emerald-400 border border-slate-700 hover:bg-slate-700;
@@ -93,7 +94,7 @@
 
   /* ── Боковое меню: кнопка-бургер + выезжающая панель разделов ── */
   .ui-burger {
-    @apply fixed top-3 left-3 z-40 w-9 h-9 flex items-center justify-center rounded border border-slate-800 bg-slate-900/90 text-slate-400 cursor-pointer transition-colors hover:text-emerald-400 hover:border-emerald-500/40 backdrop-blur;
+    @apply shrink-0 w-9 h-9 flex items-center justify-center rounded border border-slate-800 bg-slate-900/90 text-slate-400 cursor-pointer transition-colors hover:text-emerald-400 hover:border-emerald-500/40;
   }
   .ui-drawer-backdrop {
     @apply fixed inset-0 z-40 bg-slate-950/60 backdrop-blur-sm;
@@ -105,6 +106,7 @@
     @apply w-full flex items-center justify-between px-3 py-2 rounded text-left uppercase font-bold cursor-pointer transition-colors text-slate-400 hover:text-slate-200 hover:bg-slate-800/60;
   }
   .ui-drawer-item--active { @apply bg-slate-800 text-emerald-400; }
+  .ui-drawer-chevron { @apply text-slate-500 transition-transform duration-150; }
 
   /* ── Раздел = один монолитный контур, группы внутри без перегородок ── */
   .ui-groups {

@@ -1,0 +1,90 @@
+package market
+
+import (
+	"context"
+	"encoding/csv"
+	"fmt"
+	"math"
+	"strconv"
+	"strings"
+)
+
+// Фондовый рынок США из FRED (тот же публичный CSV без ключа): три главных индекса, последнее закрытие недели.
+// FRED отдаёт S&P 500 и Dow Jones примерно за последние 10 лет (лицензия), NASDAQ Composite — с 1971 года.
+// Историю S&P 500 до окна FRED добирает месячный ряд Роберта Шиллера (с 1871 года, среднее за месяц) из открытого датасета на GitHub.
+const (
+	SourceStocks = "stocks"
+
+	SerStockSP500  = "stock_sp500"  // S&P 500 (SP500), пункты
+	SerStockNasdaq = "stock_nasdaq" // NASDAQ Composite (NASDAQCOM), пункты
+	SerStockDow    = "stock_dow"    // Dow Jones Industrial Average (DJIA), пункты
+)
+
+// Stocks — ряды фондовых индексов. Сбой одного индекса не убивает остальные, ошибка — в Result.Error.
+func (c *Client) Stocks(ctx context.Context, rep Reporter) ([]SeriesPoint, Result) {
+	res := Result{Source: SourceStocks}
+	r := c.fredAll(ctx, rep, []fredJob{{"SP500", "S&P 500", ""}, {"NASDAQCOM", "NASDAQ", SerStockNasdaq}, {"DJIA", "Dow Jones", SerStockDow}})
+	errs := r.Errs
+	var out []SeriesPoint
+	out = append(out, weekly(toPoints(SerStockNasdaq, r.Obs["NASDAQCOM"]))...)
+	out = append(out, weekly(toPoints(SerStockDow, r.Obs["DJIA"]))...)
+	rep.report(92, "S&P 500: история с 1871 года")
+	hist, err := c.shillerSP500(ctx)
+	if err != nil {
+		errs = append(errs, err.Error())
+	}
+	out = append(out, stitchHistory(hist, weekly(toPoints(SerStockSP500, r.Obs["SP500"])))...) // недельный ряд FRED + месячная история до него
+	rep.report(95, "")
+	res.Fetched, res.Skipped = len(out), r.Skipped
+	res.Error, res.Tail = strings.Join(errs, "; "), r.Tail
+	return out, res
+}
+
+// stitchHistory: месячная история + недельный ряд; из истории берутся только точки раньше первой недельной.
+func stitchHistory(hist, recent []SeriesPoint) []SeriesPoint {
+	if len(recent) == 0 {
+		return hist
+	}
+	first := recent[0].Date
+	var out []SeriesPoint
+	for _, p := range hist {
+		if p.Date < first {
+			out = append(out, p)
+		}
+	}
+	return append(out, recent...)
+}
+
+// shillerRows скачивает таблицу Шиллера (Date, SP500, Dividend, Earnings, …, PE10) и возвращает строки вместе с заголовком.
+func (c *Client) shillerRows(ctx context.Context) ([][]string, error) {
+	body, err := c.get(ctx, strings.TrimRight(c.ShillerBase, "/")+"/datasets/s-and-p-500/main/data/data.csv")
+	if err != nil {
+		return nil, fmt.Errorf("Шиллер S&P 500: %w", err)
+	}
+	rows, err := csv.NewReader(strings.NewReader(string(body))).ReadAll()
+	if err != nil || len(rows) < 2 || len(rows[0]) < 2 {
+		return nil, fmt.Errorf("Шиллер S&P 500: пустой или неверный ответ")
+	}
+	return rows, nil
+}
+
+// shillerSP500 читает месячный S&P 500 (колонки Date, SP500, …) из датасета datasets/s-and-p-500.
+func (c *Client) shillerSP500(ctx context.Context) ([]SeriesPoint, error) {
+	rows, err := c.shillerRows(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []SeriesPoint
+	for _, r := range rows[1:] {
+		if len(r) < 2 {
+			continue
+		}
+		d := normDate(r[0])
+		v, err := strconv.ParseFloat(strings.TrimSpace(r[1]), 64)
+		if d == "" || err != nil || math.IsNaN(v) || v <= 0 {
+			continue
+		}
+		out = append(out, SeriesPoint{Series: SerStockSP500, Date: d, Value: v})
+	}
+	return out, nil
+}

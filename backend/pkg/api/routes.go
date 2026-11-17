@@ -20,12 +20,25 @@ func (s *Server) Handler() http.Handler {
 		{"/api/icu/ledger", s.HandleICULedger},
 		{"/api/icu/bonds", s.HandleICUBonds},
 
+		// Рыночные облигации: ОВДП (НБУ) и US Treasury, публичные данные в кеше
+		{"/api/market/bonds", s.HandleMarketBonds},
+		{"/api/market/companies", s.HandleMarketCompanies}, // список компаний для раздела «Акции» (Nasdaq + SEC)
+		{"/api/market/stock", s.HandleMarketStock},         // компания и её месячная история цен (по требованию подтягивается с Yahoo)
+		{"/api/market/sync", s.HandleMarketSync},
+		{"/api/market/lists", s.HandleMarketLists},   // свои списки ISIN (например «icu» — доступно к покупке в брокере)
+		{"/api/market/curve", s.HandleMarketCurve},   // кривая доходности рынка (точки срок → %) для оценки бумаг без цены
+		{"/api/macro", s.HandleMacro},                // ставки НБУ и инфляция (ряды из кеша)
+		{"/api/macro/catalog", s.HandleMacroCatalog}, // какие ряды даёт каждый источник (id для фронта)
+		{"/api/macro/ticks", s.HandleMacroTicks},     // часовая история рядов-снимков (P2P, комиссии, доминация)
+		{"/api/macro/sources", s.HandleMacroSources}, // здоровье источников: свежесть рядов, ошибки (страница «Источники»)
+
 		// Binance (только чтение кеша; обновляется через «Разведать»)
 		{"/api/binance", s.HandleBinance},
 		{"/api/binance/candles", s.HandleBinanceCandles}, // свечи оценки портфеля для графика
 		{"/api/binance/moves", s.HandleBinanceMoves},     // переводы между кошельками для истории
 		{"/api/binance/trades", s.HandleBinanceTrades},   // покупки и продажи монет для истории
 		{"/api/binance/swaps", s.HandleBinanceSwaps},     // Convert, пыль → BNB, стейкинг для истории
+		{"/api/binance/p2p", s.HandleBinanceP2P},         // C2C-ордера: сумма в фиате, цена, комиссия
 
 		// Синхронизация, импорт и очистка кеша
 		{"/api/sync/status", s.HandleGetStatus},
@@ -52,5 +65,5 @@ func (s *Server) Handler() http.Handler {
 	for _, r := range routes {
 		mux.HandleFunc(r.path, r.h)
 	}
-	return s.EnableCORS(mux.ServeHTTP)
+	return s.EnableCORS(gzipJSON(mux.ServeHTTP))
 }

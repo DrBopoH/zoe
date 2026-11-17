@@ -30,9 +30,11 @@ func (s *Storage) CacheCounts() (map[string]int, error) {
 		}
 		rows.Close()
 	}
-	var n int
-	if err := s.cacheDB.QueryRow(`SELECT COUNT(*) FROM binance_ledger`).Scan(&n); err == nil && n > 0 {
-		out[BinanceAccountID] += n
+	for _, t := range []string{"binance_ledger", "binance_p2p"} { // журнал выписки и история C2C-ордеров
+		var n int
+		if err := s.cacheDB.QueryRow(`SELECT COUNT(*) FROM ` + t).Scan(&n); err == nil && n > 0 {
+			out[BinanceAccountID] += n
+		}
 	}
 	return out, nil
 }
@@ -59,7 +61,7 @@ func (s *Storage) WipeAccounts(ids []string) error {
 			}
 		}
 		if id == BinanceAccountID {
-			for _, t := range []string{"binance_ledger", "binance_minutes", "binance_state"} {
+			for _, t := range []string{"binance_ledger", "binance_p2p", "binance_minutes", "binance_state"} {
 				if _, err := tx.Exec(`DELETE FROM ` + t); err != nil {
 					return err
 				}

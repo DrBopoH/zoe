@@ -1,9 +1,13 @@
 package api
 
 import (
+	"compress/gzip"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
+	"strings"
+	"sync"
 )
 
 // Общий слой HTTP-ответов: вместо 77 ручных http.Error и 58 json.NewEncoder в каждом хендлере.
@@ -58,3 +62,70 @@ func allow(w http.ResponseWriter, r *http.Request, methods ...string) bool {
 
 // writeMethods — методы записи (раньше везде «POST или PUT»).
 var writeMethods = []string{http.MethodPost, http.MethodPut}
+
+// gzipWriter сжимает только JSON-ответы: тип известен к первой записи (writeJSON ставит заголовок заранее),
+// текстовые ошибки http.Error уходят как были.
+// gzPool — сжиматели переиспользуются: каждый GET раньше заводил свой (сотни КБ буферов). Уровень BestSpeed: на localhost и в домашней сети
+// важнее скорость, чем лишние ~15% размера (ответ «курсов» за 30 лет: 450 мс → 100 мс процессорного времени при 2,5 → 2,9 МБ).
+var gzPool = sync.Pool{New: func() any {
+	zw, _ := gzip.NewWriterLevel(io.Discard, gzip.BestSpeed) // ошибка бывает только для неверного уровня
+	return zw
+}}
+
+type gzipWriter struct {
+	http.ResponseWriter
+	gz      *gzip.Writer
+	decided bool
+}
+
+func (g *gzipWriter) decide() {
+	if g.decided {
+		return
+	}
+	g.decided = true
+	h := g.Header()
+	if strings.HasPrefix(h.Get("Content-Type"), "application/json") && h.Get("Content-Encoding") == "" {
+		h.Set("Content-Encoding", "gzip")
+		h.Del("Content-Length")
+		g.gz = gzPool.Get().(*gzip.Writer)
+		g.gz.Reset(g.ResponseWriter)
+	}
+	h.Add("Vary", "Accept-Encoding")
+}
+
+func (g *gzipWriter) WriteHeader(code int) {
+	g.decide()
+	g.ResponseWriter.WriteHeader(code)
+}
+
+func (g *gzipWriter) Write(b []byte) (int, error) {
+	g.decide()
+	if g.gz != nil {
+		return g.gz.Write(b)
+	}
+	return g.ResponseWriter.Write(b)
+}
+
+func (g *gzipWriter) close() {
+	if g.gz != nil {
+		if err := g.gz.Close(); err != nil {
+			log.Printf("[HTTP] gzip не закрыт: %v", err)
+		}
+		gzPool.Put(g.gz)
+		g.gz = nil
+	}
+}
+
+// gzipJSON сжимает JSON в ответах на GET, если клиент умеет gzip: список транзакций на десятки тысяч строк
+// сжимается в разы, а на localhost и по домашней сети (телефон) это заметно по скорости загрузки.
+func gzipJSON(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			next(w, r)
+			return
+		}
+		g := &gzipWriter{ResponseWriter: w}
+		defer g.close()
+		next(g, r)
+	}
+}

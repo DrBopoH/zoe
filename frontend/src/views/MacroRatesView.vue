@@ -1,0 +1,31 @@
+<script setup>
+import { computed } from 'vue'
+import MacroPanel from '../components/MacroPanel.vue'
+import MarketHeader from '../components/MarketHeader.vue'
+import { useMarketRefresh } from '../composables/useMarketRefresh.js'
+import { macroSummary, signedPct, plainPct } from '../utils/macro.js'
+
+// Экран «Ставка НБУ»: облікова ставка, овернайт и реальная ставка с поправкой на последнюю инфляцию.
+const props = defineProps({
+  series: { type: Object, default: () => ({}) },
+  today: { type: String, required: true },
+  running: { type: Boolean, default: false }
+})
+const { refresh } = useMarketRefresh(() => 'rates')
+const IDS = ['policy_rate', 'overnight_cd', 'overnight_loans']
+const sum = computed(() => macroSummary(props.series, props.today))
+</script>
+
+<template>
+  <div class="space-y-4">
+    <MarketHeader title="Ставка НБУ" :running="running" @refresh="refresh">
+    </MarketHeader>
+    <MacroPanel title="Ключевые ставки НБУ" :series="series" :today="today" :ids="IDS">
+      <template #summary>
+        <span class="text-slate-400">Облікова ставка <b class="text-emerald-400 tabular-nums">{{ plainPct(sum.policy) }}</b></span>
+        <span v-if="sum.overnightCD !== null" class="text-slate-400" title="Ставка по депозитным сертификатам овернайт">Сертификаты овернайт <b class="text-sky-300 tabular-nums">{{ plainPct(sum.overnightCD) }}</b></span>
+        <span v-if="sum.realPolicy !== null" class="text-slate-400" title="(1 + ставка) / (1 + инфляция) − 1, инфляция г/г за последний известный месяц">Реальная ставка <b class="tabular-nums" :class="sum.realPolicy >= 0 ? 'text-emerald-400' : 'text-rose-400'">{{ signedPct(sum.realPolicy) }}</b></span>
+      </template>
+    </MacroPanel>
+  </div>
+</template>

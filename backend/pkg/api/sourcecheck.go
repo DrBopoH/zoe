@@ -125,7 +125,7 @@ func (s *Server) inspect(f *source.File, target string) *inspection {
 			Text: fmt.Sprintf("Счёт уже есть («%s»). «Добавить» создаёт только новые счета — этим файлом можно обновить существующий.", in.ExistingAlias)})
 	}
 	// алиас: у существующего счёта он уже есть
-	if in.Exists && in.ExistingAlias != "" && strings.TrimSpace(in.ExistingAlias) != strings.TrimSpace(f.Name) {
+	if in.Exists && f.Kind != source.KindP2P && in.ExistingAlias != "" && strings.TrimSpace(in.ExistingAlias) != strings.TrimSpace(f.Name) { // историю ордеров алиас не задаёт
 		in.Problems = append(in.Problems, problem{Code: "alias", Choice: "alias",
 			Text: fmt.Sprintf("У счёта уже есть алиас «%s», а файл называется «%s». К алиасу могут быть привязаны лица — выбери, какое имя оставить.", in.ExistingAlias, f.Name)})
 	}

@@ -9,12 +9,14 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"economic/pkg/binance"
 	"economic/pkg/db"
+	"economic/pkg/market"
 )
 
 // Binance — такой же источник, как банки: выписка (CSV) загружается общим импортом (importSource), всё полученное — кеш
@@ -123,6 +125,11 @@ func (s *Server) syncBinance(ctx context.Context, progress func(done, total int)
 	if err != nil {
 		return err
 	}
+	// Пара USDTUAH снята с торгов: после её последней свечи гривневый курс USDT — официальный курс доллара НБУ.
+	c.UAHRate = s.nbuUSDRate()
+	if r, external, err := c.RateUAH(time.Now().UnixMilli()); err == nil && (external || prices["USDTUAH"] <= 0) {
+		prices["USDTUAH"] = r // тикер снятой пары пуст или застыл на последней сделке
+	}
 	v, ok := binance.Value(h, prices)
 	if !ok {
 		return errors.New("нет курса USDT/UAH — оценить портфель в гривнах нечем")
@@ -140,6 +147,7 @@ func (s *Server) syncBinance(ctx context.Context, progress func(done, total int)
 		start   int64
 		vals    []float64
 		replace bool
+		tailErr error // хвост ряда дописать не вышло: оценка и баланс сохраняются, но обход кончается ошибкой, а не «Готово»
 	)
 	syms := func() (map[string]binance.Sym, error) { return c.Symbols() }
 	end := now.UnixMilli() / 60_000 * 60_000
@@ -148,8 +156,10 @@ func (s *Server) syncBinance(ctx context.Context, progress func(done, total int)
 		// минуты. Остатки берём из настоящей таймлайны — после новой выписки внутри хвоста есть движения, текущие остатки не годятся.
 		sm, err := syms()
 		if err != nil {
+			tailErr = err
 			warns = append(warns, "минутный ряд: "+err.Error())
 		} else if res, err := c.Series(binance.Timeline(flows, now.UnixMilli()), last*1000, end, sm, progress); err != nil {
+			tailErr = err
 			warns = append(warns, "минутный ряд: "+err.Error())
 		} else if len(res.Values) > 0 {
 			start, vals = res.StartMs/1000, res.Values
@@ -199,7 +209,28 @@ func (s *Server) syncBinance(ctx context.Context, progress func(done, total int)
 	first, last, n := s.storage.BinanceSeriesInfo()
 	log.Printf("[Sync] Binance: портфель %.2f ₴, ряд %s — %s (%d мин), %s", v.TotalUAH,
 		time.Unix(first, 0).Format("2006-01-02"), time.Unix(last, 0).Format("2006-01-02 15:04"), n, map[bool]string{true: "собран с нуля", false: "дописан"}[replace])
+	if tailErr != nil && !errors.Is(tailErr, binance.ErrStopped) {
+		return fmt.Errorf("минутный ряд не дописан (кончается %s): %w", time.Unix(last, 0).Format("02.01.2006 15:04"), tailErr)
+	}
 	return nil
+}
+
+// nbuUSDRate — официальный курс доллара НБУ из кеша рыночных данных: гривен за доллар на день момента tMs (по UTC),
+// а если на этот день курса нет (выходной, ряд ещё не обновлён) — последний известный раньше. 0 — курса нет вовсе.
+func (s *Server) nbuUSDRate() func(tMs int64) float64 {
+	series, _, err := s.storage.MacroSeries([]string{market.SerUSDUAH})
+	pts := series[market.SerUSDUAH]
+	if err != nil || len(pts) == 0 {
+		return func(int64) float64 { return 0 }
+	}
+	return func(tMs int64) float64 {
+		day := time.UnixMilli(tMs).UTC().Format("2006-01-02")
+		i := sort.Search(len(pts), func(i int) bool { return pts[i].Date > day }) // первая точка позже дня
+		if i == 0 {
+			return 0
+		}
+		return pts[i-1].Value
+	}
 }
 
 // valueBinanceTxs оценивает в ₴ внешние движения, которых ещё нет среди операций счёта, и сразу кладёт их в кеш.
@@ -323,4 +354,49 @@ func (s *Server) HandleBinanceTrades(w http.ResponseWriter, r *http.Request) {
 // GET /api/binance/swaps — обмены монет внутри кошельков (Convert, пыль → BNB, стейкинг): строки истории, капитал не меняют.
 func (s *Server) HandleBinanceSwaps(w http.ResponseWriter, r *http.Request) {
 	bnList(s, w, r, binance.Swaps)
+}
+
+// alignedP2P — ордера со временем, выровненным по журналу: если два файла прочитаны в разных поясах, зачисления в Funding
+// (binance.DetectShift) показывают, на сколько сдвинуть ордера. Файлы-источники не меняются, сдвиг считается на чтении.
+func (s *Server) alignedP2P() ([]db.P2POrder, time.Duration, error) {
+	orders, err := s.storage.BinanceP2P()
+	if err != nil || len(orders) == 0 {
+		return orders, 0, err
+	}
+	ledger, err := s.storage.BinanceLedger()
+	if err != nil {
+		return nil, 0, err
+	}
+	rows := make([]binance.Row, len(ledger))
+	for i, r := range ledger {
+		rows[i] = binance.Row{T: r.T, Account: r.Account, Op: r.Op, Asset: r.Asset, Delta: r.Delta, Note: r.Note}
+	}
+	bo := make([]binance.P2POrder, len(orders))
+	for i, o := range orders {
+		bo[i] = binance.P2POrder{ID: o.ID, Side: o.Side, Asset: o.Asset, Status: o.Status, Qty: o.Qty, Fee: o.Fee, T: o.T}
+	}
+	shift, _ := binance.DetectShift(bo, rows)
+	if shift != 0 {
+		for i := range orders {
+			orders[i].T += shift.Milliseconds()
+		}
+	}
+	return orders, shift, nil
+}
+
+// GET /api/binance/p2p — история C2C-ордеров (гривневая сторона P2P), загруженная из выписки ордеров; пусто — не загружена.
+// Время выровнено по журналу выписки; если понадобился сдвиг (файлы в разных поясах), он в заголовке X-Time-Shift-Minutes.
+func (s *Server) HandleBinanceP2P(w http.ResponseWriter, r *http.Request) {
+	if !allow(w, r, http.MethodGet) {
+		return
+	}
+	orders, shift, err := s.alignedP2P()
+	if err != nil {
+		failErr(w, err)
+		return
+	}
+	if shift != 0 {
+		w.Header().Set("X-Time-Shift-Minutes", strconv.Itoa(int(shift/time.Minute)))
+	}
+	writeJSON(w, orders)
 }

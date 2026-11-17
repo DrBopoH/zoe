@@ -7,4 +7,12 @@ export default defineConfig({
     vue(),
     tailwindcss(),
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        // Модель распознавания (tesseract.js) ищется по имени <язык>.traineddata.gz в каталоге: хеш в имени ломает поиск
+        assetFileNames: (info) => ((info.names || [info.name || '']).some((n) => /\.traineddata\.gz$/.test(n)) ? 'ocr/[name][extname]' : 'assets/[name]-[hash][extname]')
+      }
+    }
+  }
 })

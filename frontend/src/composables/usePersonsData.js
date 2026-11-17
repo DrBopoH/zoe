@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { apiSend, apiGetJson, q } from '../utils/api.js'
 import { loadJSON, saveJSON } from '../utils/storage.js'
+import { pushRequestError } from './useToasts.js'
 const STORAGE_CARD_ORDER = 'persons_card_order'
 
 export function usePersonsData(emit) {
@@ -65,7 +66,7 @@ export function usePersonsData(emit) {
       structures.value = rawStructures || []
       users.value = applyCardOrder(rawUsers || [])
     } catch (err) {
-      console.error('Fetch users error:', err)
+      pushRequestError('Не удалось загрузить лица', err)
     }
   }
 
@@ -186,7 +187,7 @@ export function usePersonsData(emit) {
       initialEditForm.value = { name: '', avatar_url: '' }
       if (emit) emit('refresh')
     } catch (err) {
-      console.error('Save user error:', err)
+      pushRequestError('Не удалось сохранить лицо', err)
     }
   }
 
@@ -198,7 +199,7 @@ export function usePersonsData(emit) {
       await fetchUsers()
       if (emit) emit('refresh')
     } catch (err) {
-      console.error('Delete user error:', err)
+      pushRequestError('Не удалось удалить лицо', err)
     }
   }
 
@@ -211,7 +212,7 @@ export function usePersonsData(emit) {
       await fetchUsers()
       if (emit) emit('refresh')
     } catch (err) {
-      console.error('Paste to avatar error:', err)
+      pushRequestError('Не удалось вставить аватар', err)
     }
   }
 
@@ -223,7 +224,7 @@ export function usePersonsData(emit) {
       await fetchUsers()
       if (emit) emit('refresh')
     } catch (err) {
-      console.error('Paste to name error:', err)
+      pushRequestError('Не удалось вставить имя', err)
     }
   }
 

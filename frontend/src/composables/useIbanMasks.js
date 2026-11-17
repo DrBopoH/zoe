@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { apiGetJson, apiSend } from '../utils/api.js'
+import { pushRequestError } from './useToasts.js'
 
 // Скрытые виды IBAN из core.db — общие на весь экран (счета рисуются в разных местах, прокидывать пропсами незачем).
 // Нет записи на бэкенде — он сам генерирует маску из цифр; тут только читаем и пишем свой псевдоним.
@@ -12,7 +13,7 @@ export const loadMasks = async () => {
   try {
     masks.value = (await apiGetJson('/iban-masks')) || {}
   } catch (err) {
-    console.error('IBAN masks load error:', err)
+    pushRequestError('Маски счетов не загрузились', err)
   }
 }
 

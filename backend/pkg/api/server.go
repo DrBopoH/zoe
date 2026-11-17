@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +26,11 @@ type Server struct {
 	syncStatus string
 
 	bn binanceState // Binance (read-only), см. handlers_binance.go
+	mk marketState  // облигации ОВДП и US Treasury из публичных API, см. handlers_market.go
+
+	// общий контекст рыночных данных, запущенных отдельно от «Разведать»; сброс кеша его отменяет и создаёт заново
+	marketCtx    context.Context
+	marketCancel context.CancelFunc
 
 	prog progress // структурированный прогресс синка для панели на фронте
 
@@ -56,8 +63,32 @@ func (s *Server) SetAllowedOrigins(origins []string) {
 	}
 }
 
+// hostAllowed — защита от DNS-rebinding: чужое имя, привязанное к 127.0.0.1, не проходит, даже если браузер не шлёт Origin (GET той же «страницы»).
+// Своими считаются loopback-имена и хосты из списка Origin фронта (для доступа с другого устройства: HOST=0.0.0.0 + его Origin).
+func (s *Server) hostAllowed(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.ToLower(strings.Trim(host, "[]"))
+	switch host {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	for o := range s.allowedOrigins {
+		if u, err := url.Parse(o); err == nil && strings.EqualFold(u.Hostname(), host) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) EnableCORS(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.hostAllowed(r.Host) {
+			http.Error(w, "Host not allowed", http.StatusForbidden)
+			return
+		}
 		// Раньше было "*": любая открытая вкладка браузера могла читать финансы и стирать кеш.
 		// Запросы без Origin (curl, сам фронт через прокси) пропускаем — бэкенд слушает только localhost.
 		if origin := r.Header.Get("Origin"); origin != "" {
@@ -93,6 +124,12 @@ func (s *Server) beginSync() (ctx context.Context, done chan struct{}, ok bool) 
 // abortSync останавливает идущий «Разведать» и ждёт, пока он отпустит кеш (не дольше нескольких секунд).
 // Остановленный обход сам ничего не пишет в кеш и не трогает состояние: оно уже сброшено здесь.
 func (s *Server) abortSync() {
+	s.cancelMarket()
+	s.abortBankSync()
+	s.waitMarket(3 * time.Second) // и рыночный опрос, запущенный вместе с «Разведать» (его контекст — банковский)
+}
+
+func (s *Server) abortBankSync() {
 	s.syncMutex.Lock()
 	cancel, done, was := s.syncCancel, s.syncDone, s.isSyncing
 	if was {
@@ -108,4 +145,15 @@ func (s *Server) abortSync() {
 	case <-time.After(3 * time.Second):
 	}
 	s.prog.reset()
+}
+
+// cancelMarket отменяет отдельно запущенный опрос рыночных данных; следующий запуск создаст контекст заново.
+func (s *Server) cancelMarket() {
+	s.syncMutex.Lock()
+	cancel := s.marketCancel
+	s.marketCtx, s.marketCancel = nil, nil
+	s.syncMutex.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }

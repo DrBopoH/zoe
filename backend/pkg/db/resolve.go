@@ -33,53 +33,58 @@ func (c *cacheIndex) parentFor(pan string) string {
 	return c.ibanByPAN[idKey(pan)]
 }
 
-// loadCacheIndex строит индекс из кеша. Правила совпадают с фронтом (buildCacheIndex):
-//  1. имя аккаунта в банке (accounts.name без «(тип)») → его IBAN и все PAN
-//  2. контрагент операции (counter_name, а если пусто — контакт из description)
-//     → counter_iban (+ PAN этого счёта, если он нам известен)
-//
-// Сравнение — точное, без LIKE.
-func (s *Storage) loadCacheIndex() (*cacheIndex, error) {
-	accs, err := s.GetAccounts()
-	if err != nil {
-		return nil, err
+// add добавляет связь «алиас → идентификатор» в индекс, сливая дубли.
+func (c *cacheIndex) add(key string, l cacheLink) {
+	if key == "" || l.ID == "" {
+		return
 	}
-	accs = s.withBinanceProfile(accs)
-	idx := &cacheIndex{byAlias: map[string][]cacheLink{}, ibanByPAN: map[string]string{}, pansByIBAN: map[string][]string{}}
-	add := func(key string, l cacheLink) {
-		if key == "" || l.ID == "" {
-			return
+	list := c.byAlias[key]
+	for i, ex := range list {
+		if !sameID(ex.ID, l.ID) {
+			continue
 		}
-		list := idx.byAlias[key]
-		for i, ex := range list {
-			if !sameID(ex.ID, l.ID) {
-				continue
-			}
-			// та же карта: полный номер вытесняет частичный (414949****72 → 414949******0172)
-			if isPartialPAN(ex.ID) && !isPartialPAN(l.ID) {
-				list[i].ID = l.ID
-				if l.Parent != "" {
-					list[i].Parent = l.Parent
-				}
-			} else if ex.Parent == "" && l.Parent != "" {
+		// та же карта: полный номер вытесняет частичный (414949****72 → 414949******0172)
+		if isPartialPAN(ex.ID) && !isPartialPAN(l.ID) {
+			list[i].ID = l.ID
+			if l.Parent != "" {
 				list[i].Parent = l.Parent
 			}
-			return
+		} else if ex.Parent == "" && l.Parent != "" {
+			list[i].Parent = l.Parent
 		}
-		idx.byAlias[key] = append(list, l)
+		return
 	}
+	c.byAlias[key] = append(list, l)
+}
 
-	byIBAN := map[string]Account{}
-	byPAN := map[string]Account{}     // idKey(PAN) → наш счёт
-	byLoose := map[string][]Account{} // BIN6+последние2 → наши счета (используем, только если он один)
+// addAccount добавляет под ключом алиаса весь счёт: его IBAN и каждую карту (с IBAN как родителем).
+func (c *cacheIndex) addAccount(key string, a Account) {
+	if a.IBAN != "" {
+		c.add(key, cacheLink{a.IBAN, ""})
+	}
+	for _, p := range a.Pans {
+		c.add(key, cacheLink{p, a.IBAN})
+	}
+}
+
+// ownAccounts — наши счета, найденные по IBAN, по карте и по «ослабленному» номеру карты.
+type ownAccounts struct {
+	byIBAN  map[string]Account
+	byPAN   map[string]Account   // idKey(PAN) → наш счёт
+	byLoose map[string][]Account // BIN6+последние2 → наши счета (используем, только если он один)
+}
+
+// indexAccounts строит индекс по нашим счетам: имя аккаунта в банке даёт его IBAN и все карты; заодно заполняет связи карта↔IBAN.
+func indexAccounts(idx *cacheIndex, accs []Account) ownAccounts {
+	own := ownAccounts{byIBAN: map[string]Account{}, byPAN: map[string]Account{}, byLoose: map[string][]Account{}}
 	for _, a := range accs {
 		if a.IBAN != "" {
-			byIBAN[normID(a.IBAN)] = a
+			own.byIBAN[normID(a.IBAN)] = a
 		}
 		for _, p := range a.Pans {
-			byPAN[idKey(p)] = a
+			own.byPAN[idKey(p)] = a
 			if lk := looseKey(p); lk != "" {
-				byLoose[lk] = append(byLoose[lk], a)
+				own.byLoose[lk] = append(own.byLoose[lk], a)
 			}
 		}
 		for _, p := range a.Pans {
@@ -88,35 +93,33 @@ func (s *Storage) loadCacheIndex() (*cacheIndex, error) {
 				idx.pansByIBAN[normID(a.IBAN)] = append(idx.pansByIBAN[normID(a.IBAN)], p)
 			}
 		}
-		key := aliasKey(cleanAccountName(a.Name))
-		if a.IBAN != "" {
-			add(key, cacheLink{a.IBAN, ""})
-		}
-		for _, p := range a.Pans {
-			add(key, cacheLink{p, a.IBAN})
+		idx.addAccount(aliasKey(cleanAccountName(a.Name)), a)
+	}
+	return own
+}
+
+// byCard — чей это счёт по номеру карты контрагента: точно по idKey, иначе по BIN+2 при однозначности.
+func (o ownAccounts) byCard(pan string) (Account, bool) {
+	if k := reliableKey(pan); k != "" {
+		if a, ok := o.byPAN[k]; ok {
+			return a, true
 		}
 	}
-
-	// ownByPAN: чей это счёт по номеру карты контрагента (точно по idKey, иначе по BIN+2 при однозначности)
-	ownByPAN := func(pan string) (Account, bool) {
-		if k := reliableKey(pan); k != "" {
-			if a, ok := byPAN[k]; ok {
-				return a, true
-			}
-		}
-		if lk := looseKey(pan); lk != "" && len(byLoose[lk]) == 1 {
-			return byLoose[lk][0], true
-		}
-		return Account{}, false
+	if lk := looseKey(pan); lk != "" && len(o.byLoose[lk]) == 1 {
+		return o.byLoose[lk][0], true
 	}
+	return Account{}, false
+}
 
+// indexCounterparties добавляет в индекс контрагентов операций: имя (или контакт из описания) → counter_iban и, если он наш, весь счёт.
+func (s *Storage) indexCounterparties(idx *cacheIndex, own ownAccounts) {
 	rows, err := s.cacheDB.Query(`
 		SELECT DISTINCT counter_iban,
 		       CASE WHEN COALESCE(counter_name,'') != '' THEN counter_name ELSE '' END,
 		       CASE WHEN COALESCE(counter_name,'')  = '' THEN COALESCE(description,'') ELSE '' END
 		FROM transactions WHERE COALESCE(counter_iban,'') != ''`)
 	if err != nil {
-		return idx, nil // без операций индекс всё равно полезен
+		return // без операций индекс всё равно полезен
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -133,23 +136,36 @@ func (s *Storage) loadCacheIndex() (*cacheIndex, error) {
 		}
 		if isPanLike(iban) {
 			// контрагент указан номером карты (парсер ПриватБанка): если карта наша — тянем весь счёт
-			if a, ok := ownByPAN(iban); ok && a.IBAN != "" {
-				add(key, cacheLink{a.IBAN, ""})
-				for _, p := range a.Pans {
-					add(key, cacheLink{p, a.IBAN})
-				}
+			if a, ok := own.byCard(iban); ok && a.IBAN != "" {
+				idx.addAccount(key, a)
 			} else {
-				add(key, cacheLink{iban, ""})
+				idx.add(key, cacheLink{iban, ""})
 			}
 			continue
 		}
-		add(key, cacheLink{iban, ""})
-		if a, ok := byIBAN[normID(iban)]; ok {
+		idx.add(key, cacheLink{iban, ""})
+		if a, ok := own.byIBAN[normID(iban)]; ok {
 			for _, p := range a.Pans {
-				add(key, cacheLink{p, a.IBAN})
+				idx.add(key, cacheLink{p, a.IBAN})
 			}
 		}
 	}
+}
+
+// loadCacheIndex строит индекс из кеша. Правила совпадают с фронтом (buildCacheIndex):
+//  1. имя аккаунта в банке (accounts.name без «(тип)») → его IBAN и все PAN
+//  2. контрагент операции (counter_name, а если пусто — контакт из description)
+//     → counter_iban (+ PAN этого счёта, если он нам известен)
+//
+// Сравнение — точное, без LIKE.
+func (s *Storage) loadCacheIndex() (*cacheIndex, error) {
+	accs, err := s.GetAccounts()
+	if err != nil {
+		return nil, err
+	}
+	idx := &cacheIndex{byAlias: map[string][]cacheLink{}, ibanByPAN: map[string]string{}, pansByIBAN: map[string][]string{}}
+	own := indexAccounts(idx, s.withBinanceProfile(accs))
+	s.indexCounterparties(idx, own)
 	return idx, nil
 }
 

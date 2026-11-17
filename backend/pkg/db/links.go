@@ -131,6 +131,119 @@ func deleteBansTx(tx *sql.Tx, k, identifier string) error {
 	return nil
 }
 
+// unlinkTarget — что убираем из структуры алиаса и чем это подтверждено вокруг (кеш, глобальные карты).
+type unlinkTarget struct {
+	identifier string
+	key        string              // idKey(identifier)
+	isIBAN     bool                // у IBAN уходят и его карты
+	idx        *cacheIndex         // кеш: подтверждает связи и воскресил бы удалённое
+	global     map[string][]string // IBAN → его карты, известные глобально
+}
+
+// hit — строка структуры (id с родителем) относится к убираемому: сам идентификатор или (для IBAN) его карта.
+func (t unlinkTarget) hit(id, parent string) bool {
+	return idKey(id) == t.key || (t.isIBAN && parent != "" && idKey(parent) == t.key)
+}
+
+// aliasKeysToUnlink — из каких алиасов убирать: из заданного, а при пустом alias — изо всех.
+func aliasKeysToUnlink(tx *sql.Tx, alias string) ([]string, error) {
+	if k := aliasKey(alias); k != "" {
+		return []string{k}, nil
+	}
+	rows, err := tx.Query(`SELECT alias_key FROM user_aliases UNION SELECT alias_key FROM alias_accounts`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var keys []string
+	for rows.Next() {
+		var k string
+		if rows.Scan(&k) == nil {
+			keys = append(keys, k)
+		}
+	}
+	return keys, nil
+}
+
+// linkRow — строка alias_accounts: счёт или карта с родительским IBAN.
+type linkRow struct{ id, parent string }
+
+// linksHit — строки алиаса k, которые относятся к убираемому.
+func linksHit(tx *sql.Tx, k string, t unlinkTarget) ([]linkRow, error) {
+	rows, err := tx.Query(`SELECT account_identifier, parent_identifier FROM alias_accounts WHERE alias_key=?`, k)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var kill []linkRow
+	for rows.Next() {
+		var r linkRow
+		if rows.Scan(&r.id, &r.parent) == nil && t.hit(r.id, r.parent) {
+			kill = append(kill, r)
+		}
+	}
+	return kill, nil
+}
+
+// viaOwnIBAN — алиас k получает убираемую карту через свой IBAN (по глобальной связи «IBAN → карта»), своей строки у неё нет.
+func viaOwnIBAN(tx *sql.Tx, k string, t unlinkTarget) bool {
+	for _, ex := range existingIDs(tx, k) {
+		if isIBANLike(ex) && globalHas(t.global, ex, t.identifier) {
+			return true
+		}
+	}
+	return false
+}
+
+// unlinkFromAlias убирает цель из структуры одного алиаса и ставит бан там, где иначе кеш воскресил бы связь.
+func unlinkFromAlias(tx *sql.Tx, k string, t unlinkTarget) error {
+	var tmp string
+	attached := tx.QueryRow(`SELECT 1 FROM user_aliases WHERE alias_key=?`, k).Scan(&tmp) == nil
+
+	kill, err := linksHit(tx, k, t)
+	if err != nil {
+		return err
+	}
+	banned := map[string]bool{}
+	ban := func(id string) error {
+		if banned[idKey(id)] {
+			return nil
+		}
+		banned[idKey(id)] = true
+		_, err := tx.Exec(`INSERT OR IGNORE INTO alias_bans(alias_key, account_identifier) VALUES(?,?)`, k, id)
+		return err
+	}
+
+	for _, r := range kill {
+		if _, err := tx.Exec(`DELETE FROM alias_accounts WHERE alias_key=? AND account_identifier=?`, k, r.id); err != nil {
+			return err
+		}
+		derived := !isIBANLike(r.id) && r.parent != "" && globalHas(t.global, r.parent, r.id)
+		if (attached && t.idx.confirms(k, r.id)) || derived {
+			if err := ban(r.id); err != nil {
+				return err
+			}
+		}
+	}
+	// карта, которую алиас получает глобально через свой IBAN (своей строки нет) — тоже под бан
+	if !t.isIBAN && viaOwnIBAN(tx, k, t) {
+		if err := ban(t.identifier); err != nil {
+			return err
+		}
+	}
+	// связи, которые есть только в кеше (в статику ещё не доехали) — тоже под бан
+	if attached && t.idx != nil {
+		for _, l := range t.idx.byAlias[k] {
+			if t.hit(l.ID, l.Parent) {
+				if err := ban(l.ID); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // UnlinkAccount — убрать счёт/карту из структуры алиаса.
 //
 //	IBAN  → уходит и сам IBAN, и все его PAN в этом алиасе
@@ -156,92 +269,14 @@ func (s *Storage) UnlinkAccount(alias, identifier string) error {
 	}
 	defer tx.Rollback()
 
-	var keys []string
-	if k := aliasKey(alias); k != "" {
-		keys = []string{k}
-	} else {
-		rows, err := tx.Query(`SELECT alias_key FROM user_aliases UNION SELECT alias_key FROM alias_accounts`)
-		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			var k string
-			if rows.Scan(&k) == nil {
-				keys = append(keys, k)
-			}
-		}
-		rows.Close()
+	keys, err := aliasKeysToUnlink(tx, alias)
+	if err != nil {
+		return err
 	}
-
-	global := s.globalPans(idx)
-	target := idKey(identifier)
-	isIBAN := isIBANLike(identifier)
-	hit := func(id, parent string) bool {
-		return idKey(id) == target || (isIBAN && parent != "" && idKey(parent) == target)
-	}
-
+	target := unlinkTarget{identifier: identifier, key: idKey(identifier), isIBAN: isIBANLike(identifier), idx: idx, global: s.globalPans(idx)}
 	for _, k := range keys {
-		var tmp string
-		attached := tx.QueryRow(`SELECT 1 FROM user_aliases WHERE alias_key=?`, k).Scan(&tmp) == nil
-
-		rows, err := tx.Query(`SELECT account_identifier, parent_identifier FROM alias_accounts WHERE alias_key=?`, k)
-		if err != nil {
+		if err := unlinkFromAlias(tx, k, target); err != nil {
 			return err
-		}
-		type row struct{ id, parent string }
-		var kill []row
-		for rows.Next() {
-			var r row
-			if rows.Scan(&r.id, &r.parent) == nil && hit(r.id, r.parent) {
-				kill = append(kill, r)
-			}
-		}
-		rows.Close()
-
-		banned := map[string]bool{}
-		ban := func(id string) error {
-			if banned[idKey(id)] {
-				return nil
-			}
-			banned[idKey(id)] = true
-			_, err := tx.Exec(`INSERT OR IGNORE INTO alias_bans(alias_key, account_identifier) VALUES(?,?)`, k, id)
-			return err
-		}
-
-		for _, r := range kill {
-			if _, err := tx.Exec(`DELETE FROM alias_accounts WHERE alias_key=? AND account_identifier=?`, k, r.id); err != nil {
-				return err
-			}
-			derived := !isIBANLike(r.id) && r.parent != "" && globalHas(global, r.parent, r.id)
-			if (attached && idx.confirms(k, r.id)) || derived {
-				if err := ban(r.id); err != nil {
-					return err
-				}
-			}
-		}
-		// карта, которую алиас получает глобально через свой IBAN (своей строки нет) — тоже под бан
-		if !isIBAN {
-			var ibans []string
-			for _, ex := range existingIDs(tx, k) {
-				if isIBANLike(ex) && globalHas(global, ex, identifier) {
-					ibans = append(ibans, ex)
-				}
-			}
-			if len(ibans) > 0 {
-				if err := ban(identifier); err != nil {
-					return err
-				}
-			}
-		}
-		// связи, которые есть только в кеше (в статику ещё не доехали) — тоже под бан
-		if attached && idx != nil {
-			for _, l := range idx.byAlias[k] {
-				if hit(l.ID, l.Parent) {
-					if err := ban(l.ID); err != nil {
-						return err
-					}
-				}
-			}
 		}
 	}
 	return tx.Commit()

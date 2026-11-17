@@ -118,11 +118,11 @@ func TestHTTPBondReference(t *testing.T) {
 	if c != 200 || len(list) != 1 || list[0].ISIN != "UA4000239081" || list[0].Nominal != 1000 {
 		t.Fatalf("get: %d %s", c, b)
 	}
-	// облигация с записями в журнале не удаляется
+	// облигация с записями в журнале удаляется: журнал цел, позиция остаётся без условий
 	if _, err := s.saveICUReport("ОВГЗ Тест.pdf", fixtureReport(t)); err != nil {
 		t.Fatal(err)
 	}
-	if c, _ := call(t, s.HandleICUBonds, "DELETE", "/api/icu/bonds?isin=ua4000239081", ""); c != 400 {
+	if c, _ := call(t, s.HandleICUBonds, "DELETE", "/api/icu/bonds?isin=ua4000239081", ""); c != 200 {
 		t.Fatalf("delete used bond: %d", c)
 	}
 	if c, _ := call(t, s.HandleICUBonds, "POST", "/api/icu/bonds", `{"isin":"UA0000000001","maturity":"2030-02-20","coupon_rate":1}`); c != 200 {

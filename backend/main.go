@@ -15,6 +15,7 @@ import (
 	"economic/pkg/api"
 	"economic/pkg/binance"
 	"economic/pkg/db"
+	"economic/pkg/market"
 	"economic/pkg/mono"
 	"economic/pkg/raif"
 )
@@ -51,6 +52,34 @@ func main() {
 	server := api.NewServer(storage, monoClients, raifClients)
 	// Binance: выписка (CSV) + публичные минутные цены, ключей нет
 	server.SetBinance(binance.NewClient())
+	// Облигации: ОВДП и US Treasury из публичных API, обновление только по запросу
+	server.SetMarket(market.NewClient())
+	// Кеш макро-рядов, если он пуст (первый запуск после «стереть кеш» или переезда), собирается из файлов группы «Экономика»
+	if n, err := server.RestoreEconomy(); err != nil {
+		log.Printf("WARNING: кеш рядов из файлов не собран: %v", err)
+	} else if n > 0 {
+		log.Printf("INFO: из файлов «Экономики» в кеш добавлено рядов: %d", n)
+	}
+	// Кеш акций (цены, сплиты, число акций из отчётности SEC) — тоже из файлов «Экономики», если его в кеше нет: заново это около 6 минут запросов
+	if t, f, err := server.RestoreStocks(); err != nil {
+		log.Printf("WARNING: кеш акций из файлов не собран: %v", err)
+	} else if t+f > 0 {
+		log.Printf("INFO: из файлов «Экономики» в кеш акций добавлено: тикеров %d, кадров отчётности %d", t, f)
+	}
+	// Снимки крипто-контура (P2P-цена, комиссии сетей, доминация) копятся сами раз в MARKET_EVERY (по умолчанию час; 0 — выключено)
+	every := market.TickEvery
+	if v := os.Getenv("MARKET_EVERY"); v != "" {
+		if v == "0" {
+			every = 0
+		} else if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			every = d
+		} else {
+			log.Printf("WARNING: MARKET_EVERY=%q не разобрать (пример: 1h, 30m, 0), используется %s", v, every)
+		}
+	}
+	scheduleCtx, stopSchedule := context.WithCancel(context.Background())
+	defer stopSchedule()
+	go server.RunMarketSchedule(scheduleCtx, every)
 	if o := os.Getenv("ALLOWED_ORIGINS"); o != "" {
 		server.SetAllowedOrigins(strings.Split(o, ","))
 	}

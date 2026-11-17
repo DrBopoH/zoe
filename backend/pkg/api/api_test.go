@@ -23,7 +23,7 @@ func TestHTTP(t *testing.T) {
 
 	// CORS
 	h := s.EnableCORS(s.HandleGetAccounts)
-	rq := httptest.NewRequest("GET", "/api/accounts", nil)
+	rq := httptest.NewRequest("GET", "http://127.0.0.1:8080/api/accounts", nil)
 	rq.Header.Set("Origin", "http://evil.example")
 	w := httptest.NewRecorder()
 	h(w, rq)

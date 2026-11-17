@@ -39,6 +39,19 @@ func parseSource(filename string, raw []byte) (*source.File, error) {
 		}
 		return f, nil
 
+	case binance.IsP2P(raw):
+		orders, err := binance.ParseP2P(bytes.NewReader(raw), binance.StatementZone(filename))
+		if err != nil {
+			return nil, &importError{http.StatusBadRequest, "Failed to parse Binance P2P history: " + err.Error()}
+		}
+		// без профиля: в истории ордеров нет идентификатора пользователя, это дополнение к выписке счёта «binance»
+		f := &source.File{Name: filename, Origin: source.OriginBinance, Kind: source.KindP2P, AccountID: db.BinanceAccountID, Card: "binance"}
+		for _, o := range orders {
+			f.Orders = append(f.Orders, source.P2PRow{ID: o.ID, Side: o.Side, Asset: o.Asset, Fiat: o.Fiat, Total: o.Total, Price: o.Price,
+				Qty: o.Qty, Rate: o.Rate, Fee: o.Fee, Counterparty: o.Counterparty, Status: o.Status, T: o.T})
+		}
+		return f, nil
+
 	case icu.IsReport(raw):
 		rep, err := icu.ParseReport(raw)
 		if err != nil {
@@ -128,6 +141,17 @@ func (s *Server) applySource(f *source.File) (*importResult, error) {
 			return fail("Failed to save Binance statement", err)
 		}
 		return &importResult{AccountID: db.BinanceAccountID, Card: "binance", Count: len(rows)}, nil
+
+	case source.KindP2P:
+		orders := make([]db.P2POrder, len(f.Orders))
+		for i, o := range f.Orders {
+			orders[i] = db.P2POrder{ID: o.ID, T: o.T, Side: o.Side, Asset: o.Asset, Fiat: o.Fiat, Total: o.Total, Price: o.Price,
+				Qty: o.Qty, Rate: o.Rate, Fee: o.Fee, Counterparty: o.Counterparty, Status: o.Status}
+		}
+		if err := s.storage.SaveBinanceP2P(orders); err != nil { // имя счёта и профиль не трогаем: их задаёт выписка
+			return fail("Failed to save Binance P2P orders", err)
+		}
+		return &importResult{AccountID: db.BinanceAccountID, Card: "binance", Count: len(orders)}, nil
 
 	case source.KindICU:
 		if f.Account == nil {
