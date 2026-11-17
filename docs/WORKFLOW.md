@@ -1,147 +1,153 @@
-# Регламент: ветки, коммиты, версии, `clc.sh`
+**English** · [Русский](WORKFLOW.ru.md) · [Українська](WORKFLOW.uk.md)
 
-Как ведётся работа над Ζωή. Регламент — авторская схема версионирования `R.sB.C+T.hash` («обратная фиксация инкремента») и git-поток, в котором локальная история свободная, а удалённая защищена.
+# Regulation: branches, commits, versions, `clc.sh`
 
-- [1. Версия](#1-версия)
-- [2. Две зоны: local и remote](#2-две-зоны-local-и-remote)
-- [3. Ветки и правила GitHub](#3-ветки-и-правила-github)
-- [4. Коммиты](#4-коммиты)
-- [5. Жизнь фичи](#5-жизнь-фичи)
-- [6. Билд](#6-билд)
-- [7. Хотфикс и релиз (план)](#7-хотфикс-и-релиз-план)
+How work on Ζωή is done. The regulation is a custom versioning scheme `R.sB.C+T.hash` ("reverse increment fixation") and a git flow where local history is free and remote history is protected.
+
+- [1. Version](#1-version)
+- [2. Two zones: local and remote](#2-two-zones-local-and-remote)
+- [3. Branches and GitHub rules](#3-branches-and-github-rules)
+- [4. Commits](#4-commits)
+- [5. Life of a feature](#5-life-of-a-feature)
+- [6. Build](#6-build)
+- [7. Hotfix and release (plan)](#7-hotfix-and-release-plan)
 - [8. clc.sh](#8-clcsh)
 - [9. CI](#9-ci)
-- [10. Что перед «готово»](#10-что-перед-готово)
+- [10. Before "done"](#10-before-done)
 
-## 1. Версия
+## 1. Version
 
 `R.sB.C+T.hash`
 
-| Часть | Значение |
+| Part | Meaning |
 |---|---|
-| `R` | Release: мажор, растёт только по решению команды (ломающие изменения), а не автоматически при слиянии в `main` |
-| `s` | состояние: `a` alpha, `b` beta, `s` stable, `m` milestone (версия, которая даёт реальную пользу: ввод → обработка → вывод) |
-| `B` | Build: номер билда (в нашем веб-проекте билд = макро-тема, а не компиляция) |
-| `C` | Commit: порядковый номер именованного коммита внутри билда |
-| `T` | Total: общее число именованных коммитов в мажорной версии |
-| `hash` | 7 символов хеша последнего атомарного коммита фичи (замораживаемого) |
+| `R` | Release: major, grows only by the team's decision (breaking changes), not automatically on a merge into `main` |
+| `s` | state: `a` alpha, `b` beta, `s` stable, `m` milestone (a version that gives real benefit: input → processing → output) |
+| `B` | Build: build number (in our web project a build = a macro theme, not a compilation) |
+| `C` | Commit: sequence number of a named commit within the build |
+| `T` | Total: total number of named commits in the major version |
+| `hash` | 7 characters of the hash of the feature's last atomic commit (the one being frozen) |
 
-**Обратная фиксация инкремента:** версия фиксируется *перед* сбросом разряда (в SemVer — после). Поэтому нет нулей: первая запись `1.1.1`. Билд закрыли на `1.1.29`, следующий билд начнётся с позиции `1.2.1`. Выход именованного билда: `B+1`, `C` сбрасывается; релиз: `R+1`, `B` и `T` сбрасываются.
+**Reverse increment fixation:** the version is fixed *before* the digit is reset (in SemVer — after). That is why there are no zeros: the first entry is `1.1.1`. Build 1 was closed at `1.1.29`, the next build starts from `1.2.1`; likewise build 2 is closed at `1.2.113+143`, build 3 starts from `1.3.1+144` (the freeze tag of build 2 is `v1.s2.113+143`) (`C` resets, `T` goes on). Release of a named build: `B+1`, `C` is reset; release: `R+1`, `B` and `T` are reset.
 
-Состояние растёт слева направо: `a → b → s → m`; `a` самое частое, с `s` не спешим. Букву билду присваивает команда. До пользователя обычно доходит `R.sB` или `R.sB.C`; `+T.hash` нужны разработчикам.
+State grows left to right: `a → b → s → m`; `a` is the most frequent, we do not hurry with `s`. The team assigns the letter to a build. Users usually see `R.sB` or `R.sB.C`; `+T.hash` is for developers.
 
-**Буква состояния есть только в ветках выше `dev`** (`build`, `main`, `fix`). На `dev` версия без буквы: `v1.1.29+29`.
+**The state letter exists only in branches above `dev`** (`build`, `main`, `fix`). On `dev` the version has no letter: `v1.1.29+29`.
 
-Примеры: `v1.1.29+29.3487fe9` (именованный коммит на `dev`), `v1.b1.29+29.8ac5080` (заморозка билда).
+Examples: `v1.1.29+29.3487fe9` (a named commit on `dev`), `v1.b1.29+29.8ac5080` (build freeze).
 
-## 2. Две зоны: local и remote
+## 2. Two zones: local and remote
 
-**Локально (trunk-based, модифицированный).** Одна анонимная ветка `wip/<дата>-<слово>` на одну фичу; атомарные коммиты, шум разрешён (удалить, вернуть, переписать — это личная история). Атомарные коммиты и wip-ветка остаются только на твоей машине (на `origin` пушится сама wip-ветка для PR, но в `dev` попадает один сжатый коммит).
+**Locally (trunk-based, modified).** One anonymous branch `wip/<date>-<word>` per feature; atomic commits, noise is allowed (delete, bring back, rewrite — it is personal history). The atomic commits and the wip branch stay only on your machine (the wip branch itself is pushed to `origin` for the PR, but a single squashed commit lands in `dev`).
 
-**Удалённо.** Защищённые ветки: нет авторских push, force-push и локальных merge-push; всё идёт через PR, проверки CI и ревью. В `dev` PR вливается **Squash**: все атомарные коммиты фичи превращаются в один **именованный (замороженный) коммит**.
+**Remotely.** Protected branches: no authors' pushes, no force-push, no local merge-push; everything goes through a PR, CI checks and review. A PR is merged into `dev` by **Squash**: all atomic commits of the feature turn into one **named (frozen) commit**.
 
-Именованный коммит: `сводка фичи | vR.B.C+T.<hash7>`, где `hash7` — короткий хеш последнего атомарного коммита ветки. Одна ветка = одна фича = один именованный коммит.
+Named commit: `feature summary | vR.B.C+T.<hash7>`, where `hash7` is the short hash of the branch's last atomic commit. One branch = one feature = one named commit.
 
-> Следствие Squash: на графе `dev` идёт одной линией именованных коммитов, а wip-ветки висят рядом (у squash-коммита нет родителя на вершине wip). Это не ошибка. Чистая линия версий: `git log --first-parent dev`.
+> Consequence of Squash: the `dev` graph is a single line of named commits, and the wip branches hang beside it (a squash commit has no parent at the wip tip). This is not an error. A clean line of versions: `git log --first-parent dev`.
 
-## 3. Ветки и правила GitHub
+## 3. Branches and GitHub rules
 
-| Ветка | Что это | Способ слияния |
+| Branch | What it is | Merge method |
 |---|---|---|
-| `wip/<дата>-<слово>` | рабочая ветка фичи | локальная |
-| `dev` (default) | поток именованных коммитов, без буквы | **Squash** only |
-| `build` | заморозки билдов | **Merge commit** only |
-| `main` | линия релиза (пока демонстрационная; опционально отдельная `release` для тегов) | **Merge commit** only |
-| `fix` | дубль `dev` для хотфиксов (план) | защищена от force-push |
+| `wip/<date>-<word>` | feature working branch | local |
+| `dev` (default) | stream of named commits, no letter | **Squash** only |
+| `build` | build freezes | **Merge commit** only |
+| `main` | release line (demonstration for now; optionally a separate `release` for tags) | **Merge commit** only |
+| `fix` | a duplicate of `dev` for hotfixes (plan) | protected from force-push |
 
-Ruleset на `dev`, `build`, `main`: запрет удаления, запрет force-push, обязателен PR (approvals: 0), обязательные проверки `backend`, `frontend`, `hygiene`. Не включать «Require branches to be up to date» и «Linear history» (мерж-коммиты билда нужны). Для PR включено автоудаление head-веток; default-ветка — `dev`.
+Ruleset on `dev`, `build`, `main`: deletion forbidden, force-push forbidden, a PR is required (approvals: 0), required checks `backend`, `frontend`, `hygiene`. Do not enable "Require branches to be up to date" and "Linear history" (the build's merge commits are needed). Auto-deletion of head branches is on for PRs; the default branch is `dev`.
 
-## 4. Коммиты
+## 4. Commits
 
-- **Атомарные:** Conventional Commits `тип: что сделано`, **по-английски**, повелительное наклонение, строчными, не длиннее 72 символов после `тип: `. Типы: `feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `style`, `chore`; ломающее изменение `feat!: …`. Версию в них не пишут.
-  Примеры: `feat: add render pipeline`, `fix: lift bans on cards when IBAN is relinked`.
-- **Именованные** (появляются при PR): `Сводка | vR.B.C+T.hash7`. Каждый такой коммит увеличивает `C` и `T`.
-- Один коммит = одна логическая правка, которая собирается и проходит тесты. Не смешивай бэкенд, фронт и рефакторинг в одном коммите.
-- В репозиторий не попадают `*.db`, `.env`, ключи, выписки, архивы (CI проверяет, `clc.sh` не даёт добавить в индекс).
+- **Atomic:** Conventional Commits `type: what was done`, **in English**, imperative mood, lowercase, no longer than 72 characters after `type: `. Types: `feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `style`, `chore`; a breaking change is `feat!: …`. The version is not written in them.
+  Examples: `feat: add render pipeline`, `fix: lift bans on cards when IBAN is relinked`.
+- **Named** (appear at a PR): `Summary | vR.B.C+T.hash7`. Each such commit increases `C` and `T`.
+- One commit = one logical change that builds and passes the tests. Do not mix backend, frontend and refactoring in one commit.
+- `*.db`, `.env`, keys, statements and archives never get into the repository (CI checks it, `clc.sh` does not let them into the index).
 
-## 5. Жизнь фичи
-
-```bash
-git fetch -q && ./clc.sh next <слово>      # новая wip-ветка от свежего origin/dev
-# ...правки...
-./clc.sh ship all "feat: add thing" -z "Thing: что получилось" -f
-```
-
-`ship` сам делает: применяет патчи из `~/Downloads/patch*.zip`, гонит проверки (`go test`, сборка фронта), коммитит; `-z "сводка"` дальше открывает PR в `dev` с заголовком-именованным коммитом, ждёт проверки и вливает Squash. После этого `./clc.sh next <слово>` начинает следующую фичу от свежего `dev`, а не от вершины прошлой wip-ветки.
-
-Нужно только дополнить уже закоммиченное: `./clc.sh amend <scope>` (пока коммит не на remote).
-
-## 6. Билд
-
-Билд = слепок последнего именованного коммита `dev`, **без правок исходников**, пока не собран устойчивый продукт. У нас нет компиляции, поэтому «сборка» = `go test` + `bun run build` + ручная проверка в UI.
+## 5. Life of a feature
 
 ```bash
-./clc.sh build            # бета (b): PR dev → build, Merge commit, тег
-./clc.sh build a          # другая буква (a|b|s|m)
-./clc.sh build b "Build 1: сбор данных"   # своё название
+git fetch -q && ./clc.sh next <word>      # a new wip branch from a fresh origin/dev
+# ...edits...
+./clc.sh ship all "feat: add thing" -z "Thing: what came out" -f
 ```
 
-Что делает `build`:
-1. Берёт вершину `origin/dev` (она должна быть именованным коммитом) и считает версию: `C` и `T` не двигаются, добавляется буква (`v1.1.29+29` → `v1.b1.29+29`).
-2. Ждёт, пока CI на этом коммите завершится, и режет билд, только если всё зелёное.
-3. Открывает (или находит) PR `dev → build` и ждёт проверки именно этого PR.
-4. Вливает его **Merge commit** с заголовком `Build 1 beta | v1.b1.29+29.<hash7 вершины dev>`: на `build` появляется именованный коммит заморозки с буквой, вторым родителем у него вершина `dev`.
-5. Ставит аннотированный тег `v1.b1.29+29` на этот коммит.
+`ship` does it all itself: applies patches from `~/Downloads/patch*.zip`, runs the checks (`go test`, frontend build), commits; `-z "summary"` then opens a PR into `dev` with the named-commit title, waits for the checks and merges by Squash. After that `./clc.sh next <word>` starts the next feature from a fresh `dev`, not from the tip of the previous wip branch.
 
-Если в `dev` нет ничего нового относительно `build`, замораживать нечего. Новых веток команда не создаёт.
+The first feature of a new build is opened with `-v R.B`, for example `./clc.sh ship all "feat: …" -z "Summary" -v 1.3`: `C` resets, `T` goes on (`next_version`). Inside a build `-v` is not needed.
 
-## 7. Хотфикс и релиз (план)
+To merely add to what is already committed: `./clc.sh amend <scope>` (while the commit is not on the remote).
 
-Команда `hotfix` пока не реализована; схема такова:
+## 6. Build
 
-- **Хотфикс билда:** баг, найденный при тестировании, правится в `build` (допинкремент) через ветку `fix` (дубль `dev`) или прямо в `build`. Версия `R.sB-F.C+T.hash`, например `1.a1-3.29`: число после «−» (номер пересборки билда) растёт; `C` **не** двигается; `T` растёт. Хотфикс не открывает новый билд. После хотфиксов `fix` вливается в `dev` именованным коммитом через PR: исправление возвращается в основной поток.
-- **Релиз:** удачные билды, которые команда решила опубликовать, вливаются в именованный коммит релиза в `main`. `R` растёт только по решению команды.
+A build = a snapshot of the last named commit of `dev`, **without source edits**, until a stable product is assembled. We have no compilation, so "assembly" = `go test` + `bun run build` + manual check in the UI.
+
+```bash
+./clc.sh build            # beta (b): PR dev → build, Merge commit, tag
+./clc.sh build a          # another letter (a|b|s|m)
+./clc.sh build s "Build 2: macro and market"   # custom name; the tag is computed from the dev tip
+```
+
+What `build` does:
+1. Takes the tip of `origin/dev` (it must be a named commit) and computes the version: `C` and `T` do not move, a letter is added (`v1.1.29+29` → `v1.b1.29+29`).
+2. Waits until CI on this commit finishes and cuts the build only if everything is green.
+3. Opens (or finds) the PR `dev → build` and waits for the checks of exactly this PR.
+4. Merges it by **Merge commit** with the title `Build 1 beta | v1.b1.29+29.<hash7 of the dev tip>`: a named freeze commit with the letter appears on `build`, and the `dev` tip is its second parent.
+5. Puts an annotated tag `v1.b1.29+29` on this commit.
+
+If `dev` has nothing new compared to `build`, there is nothing to freeze. The command creates no new branches.
+
+## 7. Hotfix and release (plan)
+
+The `hotfix` command is not implemented yet; the scheme is:
+
+- **Build hotfix:** a bug found during testing is fixed in `build` (an extra increment) through the `fix` branch (a duplicate of `dev`) or directly in `build`. Version `R.sB-F.C+T.hash`, for example `1.a1-3.29`: the number after "−" (the build rebuild number) grows; `C` does **not** move; `T` grows. A hotfix does not open a new build. After hotfixes `fix` is merged into `dev` by a named commit through a PR: the fix returns to the main stream.
+- **Release:** successful builds the team decided to publish are merged into a release named commit in `main`. `R` grows only by the team's decision.
 
 ## 8. clc.sh
 
-Помощник в корне репозитория (нужен `7z`, для PR — `gh`). Подробная справка: `./clc.sh help`.
+A helper in the repository root (needs `7z`, and `gh` for PRs). Detailed help: `./clc.sh help`.
 
-| Команда | Что делает |
+| Command | What it does |
 |---|---|
-| `ship <be\|fe\|docs\|all> "тип: что" [-b слово] [-p] [-f] [-n] [-z "сводка"] [-v R.B]` | ветка → `apply` → проверки → коммит → (`-z`) PR и слияние |
-| `commit <scope> "тип: что" [-n] [-b слово]` | проверки → коммит (без `apply`) |
-| `apply [--force]` | все `patch*.zip` из `~/Downloads` по очереди, у каждого снимок «до» в `.commits/applied/` |
-| `rollback [list\|N]` | вернуть `backend/` и `frontend/` до применения N-го патча |
-| `branch <слово>` / `next <слово>` | wip-ветка от свежего dev (`next` ещё делает `fetch`) |
-| `pr "сводка" [-v R.B]` | push + PR в `dev` с заголовком-именованным коммитом |
-| `merge` | дождаться проверок PR → Squash and merge → локальный `dev` ← `origin/dev` |
-| `done "сводка"` | `pr` + `merge` |
-| `build [a\|b\|s\|m] ["сводка"]` | заморозка билда (см. §6) |
-| `publish` | `git push -u origin <wip-ветка>` |
-| `amend`, `undo` | дополнить последний коммит; снять его (правки остаются в индексе) |
-| `park`, `unpark` | спрятать и вернуть незакоммиченное |
-| `good`, `restore` | метка рабочей версии после проверок и возврат к ней |
-| `look`, `run`, `push` | снимок репозитория в `.claude`, запуск команды с записью вывода, пакет файлов для чата |
-| `sw <ветка>`, `drop <ветка> [-f]` | перейти / удалить локальную ветку |
+| `ship <be\|fe\|docs\|all> "type: what" [-b word] [-p] [-f] [-n] [-z "summary"] [-v R.B]` | branch → `apply` → checks → commit → (`-z`) PR and merge |
+| `commit <scope> "type: what" [-n] [-b word]` | checks → commit (without `apply`) |
+| `apply [--force]` | all `patch*.zip` from `~/Downloads` one by one, each has a "before" snapshot in `.commits/applied/` |
+| `rollback [list\|N]` | return `backend/` and `frontend/` to before the N-th patch was applied |
+| `init` | set up `.commits/`, `.claude` and the lines in `.gitignore` |
+| `land "summary" [-v R.B]` | pour the wip branch into `dev` as one named commit; if there is a remote, does the same as `done` |
+| `branch <word>` / `next <word>` | a wip branch from a fresh dev (`next` also does `fetch`) |
+| `pr "summary" [-v R.B]` | push + PR into `dev` with the named-commit title |
+| `merge` | wait for the PR checks → Squash and merge → local `dev` ← `origin/dev` |
+| `done "summary"` | `pr` + `merge` |
+| `build [a\|b\|s\|m] ["summary"]` | build freeze (see §6) |
+| `publish` | `git push -u origin <wip branch>` |
+| `amend`, `undo` | add to the last commit; take it off (the edits stay in the index) |
+| `park`, `unpark` | stash and bring back the uncommitted |
+| `good`, `restore` | a mark of a working version after the checks, and return to it |
+| `look`, `run`, `push` | a repository snapshot into `.claude`, running a command with the output recorded, a file package for the chat |
+| `sw <branch>`, `drop <branch> [-f]` | switch to / delete a local branch |
 
-Scope у `ship`/`commit`: `be` (только `backend/`), `fe` (`frontend/`), `docs` (только `*.md` и `.github`), `all` (всё, кроме ненужного). Флаги: `-p` запушить пакет, `-f` применять патчи при нечистом дереве, `-n` без проверок.
+Scope for `ship`/`commit`: `be` (only `backend/`), `fe` (`frontend/`), `docs` (only `*.md` and `.github`), `all` (everything except the unneeded). Flags: `-p` push the package, `-f` apply patches on a dirty tree, `-n` no checks.
 
-Скрипт защищает репозиторий: базы, ключи и `.env` снимаются со стейджа, коммитить напрямую в `dev`/`build`/`fix`/`release` нельзя.
+The script protects the repository: databases, keys and `.env` are taken off the stage, committing directly to `dev`/`build`/`fix`/`release` is not possible.
 
 ## 9. CI
 
-`.github/workflows/ci.yml` запускается на каждый PR и push в `dev`, `build`, `main` (новая отправка отменяет устаревший прогон):
+`.github/workflows/ci.yml` runs on every PR and push to `dev`, `build`, `main` (a new push cancels the stale run):
 
-- **backend:** `gofmt -l` (дерево обязано быть отформатировано), `go vet`, `go test ./... -count=1`, `go build`;
-- **frontend:** `bun install --frozen-lockfile`, `bun run test`, `bun run build`;
-- **hygiene:** нет баз, ключей, архивов, `.env`, `.commits/`, `.claude`; нет секретов (`AKIA…`, `ghp_…`, приватные ключи); нет 16-значных чисел, похожих на номер карты.
+- **backend:** `gofmt -l` (the tree must be formatted), `go vet`, `golangci-lint` (version pinned, v2.15.0; config `backend/.golangci.yml`), `go test ./... -count=1`, `go build`;
+- **frontend:** `bun install --frozen-lockfile`, `bun run test` (`node --test` for logic and vitest for components), `bun run build`;
+- **hygiene:** no databases, keys, archives (`.db`, `.sqlite`, `.pem`, `.key`, `.p12`, `.zip`), `.env`, `.commits/`, `.claude`; no secrets (`AKIA…`, `ghp_…`, private keys); no 16-digit numbers that look like a card number in `backend` and `frontend/src` (test stubs are put into an allowlist inside `ci.yml`).
 
-Эти три job'а — обязательные проверки в ruleset.
+These three jobs are the required checks in the ruleset.
 
-## 10. Что перед «готово»
+## 10. Before "done"
 
-1. `cd backend && go test ./...` и `gofmt -l .` без вывода.
+1. `cd backend && go test ./...`, `gofmt -l .` with no output and `golangci-lint run` with no remarks.
 2. `cd frontend && bun run test && bun run build`.
-3. Новые парсеры и правила — тесты на анонимных данных, включая повторный импорт (без дублей).
-4. Никаких персональных данных в фикстурах и документации: вымышленные имена, номера со звёздочками.
-5. Правишь пару «Go ↔ JS» (`idKey`, `looseKey`, `isPanLike`, индекс кеша) — правь обе стороны.
+3. New parsers and rules — tests on anonymous data, including a repeated import (no duplicates).
+4. No personal data in fixtures and documentation: fictional names, numbers with asterisks.
+5. If you edit a "Go ↔ JS" pair (`idKey`, `looseKey`, `isPanLike`, the cache index) — edit both sides.
