@@ -172,17 +172,23 @@ func TestStockFrameParsesFacts(t *testing.T) {
 	}
 }
 
-func TestStockFactsSavesEachFrameAndToleratesMissing(t *testing.T) {
+func TestStockFactsSavesEachFrameAndTreats404AsEmpty(t *testing.T) {
 	c, _ := framesClient(t, "CY2020Q2I")
 	todo := []FrameRequest{{Tag: TagSharesBalance, Unit: "shares", Period: "CY2020Q1I"}, {Tag: TagSharesBalance, Unit: "shares", Period: "CY2020Q2I"}, {Tag: TagSharesCover, Unit: "shares", Period: "CY2020Q3I"}}
 	saved := map[string]int{}
 	res := c.StockFacts(context.Background(), nil, todo, func(r FrameRequest, f []FrameFact) error { saved[r.Key()] = len(f); return nil })
-	if res.Source != SourceStockFacts || res.Fetched != 4 || res.Skipped != 1 || res.Error != "" || len(saved) != 2 {
-		t.Fatalf("один кадр из трёх без значений — не ошибка источника: %+v %v", res, saved)
+	// 404 у SEC — «такого кадра нет» (тег ещё не существовал): кадр сохраняется пустым, чтобы не запрашиваться заново при каждом «Обновить»
+	if res.Source != SourceStockFacts || res.Fetched != 4 || res.Skipped != 0 || res.Error != "" || len(saved) != 3 || saved[todo[1].Key()] != 0 {
+		t.Fatalf("404 — не сбой: %+v %v", res, saved)
 	}
-	res = c.StockFacts(context.Background(), nil, todo[1:2], func(FrameRequest, []FrameFact) error { return nil })
-	if !strings.HasPrefix(res.Error, "без значений 1 из 1 кадров") {
-		t.Fatalf("половина кадров и больше без значений — ошибка: %+v", res)
+	// настоящий сбой (500) кадр не сохраняет, а половина таких кадров — ошибка источника
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "boom", http.StatusInternalServerError) }))
+	defer srv.Close()
+	c.EDGARBase = srv.URL
+	saved = map[string]int{}
+	res = c.StockFacts(context.Background(), nil, todo[1:2], func(r FrameRequest, f []FrameFact) error { saved[r.Key()] = len(f); return nil })
+	if !strings.HasPrefix(res.Error, "без значений 1 из 1 кадров") || res.Skipped != 1 || len(saved) != 0 {
+		t.Fatalf("500 — ошибка источника, кадр не сохраняется: %+v %v", res, saved)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

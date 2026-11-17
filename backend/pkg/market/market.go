@@ -198,10 +198,15 @@ func (c *Client) once(ctx context.Context, method, url string, payload []byte, h
 	}
 	if resp.StatusCode != http.StatusOK {
 		code := resp.StatusCode
-		return nil, code == http.StatusTooManyRequests || code == http.StatusBadGateway || code == http.StatusServiceUnavailable || code == http.StatusGatewayTimeout, fmt.Errorf("HTTP %d", code)
+		return nil, code == http.StatusTooManyRequests || code == http.StatusBadGateway || code == http.StatusServiceUnavailable || code == http.StatusGatewayTimeout, &HTTPError{Code: code}
 	}
 	return body, false, nil
 }
+
+// HTTPError — источник ответил не 200. Текст прежний («HTTP 404»); код нужен тем, для кого 404 — не сбой, а «данных нет» (кадры SEC).
+type HTTPError struct{ Code int }
+
+func (e *HTTPError) Error() string { return fmt.Sprintf("HTTP %d", e.Code) }
 
 // ───────────────────────── разбор полей ─────────────────────────
 
