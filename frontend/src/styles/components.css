@@ -42,9 +42,6 @@
   .ui-btn--amber {
     @apply bg-amber-600 text-slate-950 hover:bg-amber-500 disabled:bg-slate-800 disabled:text-slate-600 disabled:shadow-none;
   }
-  .ui-btn--amber-outline {
-    @apply bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20;
-  }
   .ui-btn--subtle {
     @apply bg-slate-800 text-emerald-400 border border-slate-700 hover:bg-slate-700;
   }
