@@ -66,10 +66,13 @@ const inspect = async () => {
   }
 }
 
+// Выписку Binance и другие отдают архивом: zip, gz, tar, tgz, bz2 бэкенд распаковывает сам (7z и rar — тоже принимаем, чтобы он объяснил отказ).
+const FILE_EXT = ['.csv', '.pdf', '.zip', '.gz', '.tgz', '.tar', '.bz2', '.tbz2', '.7z', '.rar']
+const ACCEPT = FILE_EXT.join(',')
 const take = (f) => {
   const name = f.name.toLowerCase()
-  if (!(name.endsWith('.csv') || name.endsWith('.pdf'))) {
-    statusMsg.value = { type: 'error', text: 'Выбери файл в формате .csv или .pdf' }
+  if (!FILE_EXT.some(ext => name.endsWith(ext))) {
+    statusMsg.value = { type: 'error', text: 'Выбери выписку (.csv, .pdf) или архив с ней (.zip, .gz, .tar, .tgz, .bz2)' }
     return
   }
   file.value = f
@@ -102,7 +105,8 @@ const submitImport = async () => {
 
   try {
     const data = await (await apiUpload('/sync/import-csv', fd)).json()
-    statusMsg.value = { type: 'success', text: `Загружено операций: ${data.imported_count || 0}` }
+    const parts = data.files ? ` (файлов: ${data.files}${data.skipped ? `, уже были: ${data.skipped}` : ''})` : ''
+    statusMsg.value = { type: 'success', text: `Загружено операций: ${data.imported_count || 0}${parts}` }
     setTimeout(() => { emit('success'); emit('close') }, 900)
   } catch (err) {
     statusMsg.value = { type: 'error', text: errText(err) }
@@ -130,7 +134,7 @@ const submitLabel = computed(() => {
     </div>
 
     <p class="text-[10px] text-slate-500 leading-relaxed">
-      Алиас владельца берётся из имени файла (например «Петро Іваненко.csv»).
+      Алиас владельца берётся из имени файла (например «Петро Іваненко.csv»). Архив с выписками (.zip, .gz, .tar, .tgz, .bz2) читается сам: если все файлы внутри относятся к одному источнику, они загрузятся пачкой.
       {{ mode === 'update' ? 'Файл должен относиться к этому же счёту.' : 'Так создаётся новый счёт; выписку уже имеющегося счёта можно добавить кнопкой «Обновить» в его строке.' }}
     </p>
 
@@ -142,14 +146,14 @@ const submitLabel = computed(() => {
       class="border-2 border-dashed rounded-lg p-5 text-center cursor-pointer transition-all bg-slate-950/50"
       :class="file ? 'border-emerald-500/60 bg-emerald-950/10' : 'border-slate-800 hover:border-slate-600'"
     >
-      <input ref="fileInputRef" type="file" accept=".csv,.pdf" class="hidden" @change="handleFileSelect" />
+      <input ref="fileInputRef" type="file" :accept="ACCEPT" class="hidden" @change="handleFileSelect" />
 
       <div v-if="file" class="space-y-1">
         <p class="font-bold text-emerald-400 truncate">{{ file.name }}</p>
         <p class="text-[10px] text-slate-500">{{ fixedText(file.size / 1024, 1) }} KB · нажми, чтобы выбрать другой</p>
       </div>
       <div v-else class="space-y-2">
-        <p class="text-slate-300 font-bold">Перетащи `.csv` или `.pdf` файл сюда</p>
+        <p class="text-slate-300 font-bold">Перетащи выписку (`.csv`, `.pdf`) или архив с ней сюда</p>
         <p class="text-[10px] text-slate-500">или кликни для выбора</p>
       </div>
     </div>
@@ -161,6 +165,10 @@ const submitLabel = computed(() => {
       <div class="flex justify-between gap-3"><span class="text-slate-500">Счёт</span><span class="text-slate-200 text-right break-all">{{ info.label || info.account_id }}</span></div>
       <div class="flex justify-between gap-3"><span class="text-slate-500">Алиас</span><span class="text-slate-200 text-right break-all">{{ info.alias }}</span></div>
       <div class="flex justify-between gap-3"><span class="text-slate-500">Период файла</span><span class="text-slate-200">{{ period(info.from, info.to) }}</span></div>
+      <div v-if="info.files" class="flex justify-between gap-3">
+        <span class="text-slate-500">Файлов в архиве</span>
+        <span class="text-slate-200">{{ fmtN(info.files) }}<template v-if="info.skipped"> · уже загружено {{ fmtN(info.skipped) }}</template></span>
+      </div>
       <div class="flex justify-between gap-3"><span class="text-slate-500">Записей</span><span class="text-slate-200">{{ fmtN(info.count) }}</span></div>
       <template v-if="info.exists">
         <div class="border-t border-slate-800 pt-1.5 flex justify-between gap-3"><span class="text-slate-500">Уже есть</span><span class="text-slate-300">{{ period(info.existing_from, info.existing_to) }}</span></div>
