@@ -8,6 +8,7 @@ Versions: `R.sB.C+T.hash`. On `dev` there is no state letter (`v1.1.C+T`), the l
 
 Polishing the user-friendly design and finishing QoL, builder and reference features.
 
+- **v1.3.4** — Toasts: new ones appear on top, the oldest one at the bottom leaves first (one queue in order of arrival, 0.5 s apart); the "Рыночные данные" (Market data) window: a finished source is one line "Name ✓" without a bar, finished ones on top, running ones at the bottom; in the sync window only a finished Binance collapses this way, banks keep their bar
 - **v1.3.3** — Branches by modules (`<module>/<date>-<word>` instead of `wip/`, `clc.sh next` and `-b` take a module, new `clc.sh modules` command, workflow updated); toasts: the stack scrolls when it does not fit (before, the top ones were cut off), expired toasts leave one by one with a 0.5 s pause, each keeping its own lifetime
 - **v1.3.2** — Statement import accepts archives (zip, gz, tar, tgz, bz2): statement files are taken from inside and loaded as one batch only if they all point to one source
 - **v1.3.1** — Capital candles: a transfer between own accounts (two records from different banks) is applied as one step, so the day's peak and low no longer show a false wick from a double count
