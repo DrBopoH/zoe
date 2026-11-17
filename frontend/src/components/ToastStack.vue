@@ -1,8 +1,9 @@
 <script setup>
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { toasts, dismissToast } from '../composables/useToasts.js'
 import SyncPanel from './SyncPanel.vue'
 import MarketPanel from './MarketPanel.vue'
+import { scrollMode, scrollTarget } from '../utils/stackScroll.js'
 import UiIcon from './ui/UiIcon.vue'
 
 // Стек уведомлений справа внизу. У всех — крестик.
@@ -25,7 +26,36 @@ watch(() => props.lostSince, (v) => {
   clearInterval(timer)
   if (v) { now.value = Date.now(); timer = setInterval(() => { now.value = Date.now() }, 1000) }
 }, { immediate: true })
-onBeforeUnmount(() => clearInterval(timer))
+
+// Стопка прокручивается, когда не помещается. Режим (у начала / у конца / посередине) запоминается по scroll и
+// восстанавливается после каждого изменения размера (появление, уход, анимации): ползунок не «плывёт».
+const stack = ref(null)
+let mode = 'top'
+let ro = null
+let mo = null
+const onScroll = () => { const el = stack.value; if (el) mode = scrollMode(el.scrollTop, el.scrollHeight, el.clientHeight) }
+const restore = () => {
+  const el = stack.value
+  if (!el) return
+  const to = scrollTarget(mode, el.scrollHeight, el.clientHeight)
+  if (to !== null && el.scrollTop !== to) el.scrollTop = to
+}
+const watchChildren = () => {
+  const el = stack.value
+  if (!el || !ro) return
+  ro.disconnect()
+  ro.observe(el)
+  for (const c of el.children) ro.observe(c)
+}
+onMounted(() => {
+  const el = stack.value
+  if (!el || typeof ResizeObserver === 'undefined') return
+  ro = new ResizeObserver(restore)
+  mo = new MutationObserver(() => { watchChildren(); restore() })
+  mo.observe(el, { childList: true })
+  watchChildren()
+})
+onBeforeUnmount(() => { clearInterval(timer); ro?.disconnect(); mo?.disconnect() })
 
 const dismissedLost = ref(null) // какой разрыв связи закрыт крестиком
 const showLost = computed(() => !!props.lostSince && dismissedLost.value !== props.lostSince)
@@ -39,7 +69,7 @@ const toastsView = computed(() => [...toasts.value].reverse())
 </script>
 
 <template>
-  <div class="ui-push-stack">
+  <div ref="stack" class="ui-push-stack" @scroll.passive="onScroll">
     <TransitionGroup name="push">
       <SyncPanel
         v-if="progress && panelState"
