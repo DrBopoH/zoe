@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { apiSend } from '../utils/api.js'
 import { storageGet, storageSet } from '../utils/storage.js'
-import { TFS, dayStartOf, weekStartOf, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, candleBounds, candleWindow, candleSpans, candleYRanges, visibleSlots } from '../utils/candleMath.js'
+import { TFS, dayStartOf, weekStartOf, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, candleBounds, candleWindow, candleSpans, candleYRanges, visibleSlots, transferSteps } from '../utils/candleMath.js'
 import { clampWindow } from '../utils/chartView.js'
 import { useChartView } from '../composables/useChartView.js'
 import { toLocalDateStr, formatMoney, formatDateLong, formatShortDateName, formatMonthName } from '../utils/formatters.js'
@@ -164,16 +164,7 @@ onMounted(async () => { await loadBnInfo(); ensureBn() })
 // Операции (кроме Binance-счетов при готовом ряде), по времени. Типизированные массивы: пересчёт свечей без аллокаций.
 const txSorted = computed(() => {
   const skip = bnReady.value ? new Set(props.binanceIds) : null
-  const list = []
-  for (const t of props.transactions) {
-    if (!t.time || (skip && skip.has(t.account_id))) continue
-    list.push([new Date(t.time).getTime(), t.amount])
-  }
-  list.sort((a, b) => a[0] - b[0])
-  const ms = new Float64Array(list.length)
-  const amt = new Float64Array(list.length)
-  list.forEach((x, i) => { ms[i] = x[0]; amt[i] = x[1] })
-  return { ms, amt }
+  return transferSteps(skip ? props.transactions.filter(t => !skip.has(t.account_id)) : props.transactions)
 })
 
 // Все загруженные корзины в плоских массивах. Считается справа налево от итога капитала (как раньше), без объекта на свечу —
@@ -183,7 +174,7 @@ const series = computed(() => {
   const n = starts.length
   if (n === 0) return null
   void bnVer.value
-  const { ms, amt } = txSorted.value
+  const { ms, amt, end } = txSorted.value
   const lo = new Int32Array(n + 1)
   let p = 0
   while (p < ms.length && ms[p] < starts[0]) p++
@@ -212,6 +203,7 @@ const series = computed(() => {
       const a = amt[k]
       if (a > 0) inflow += a; else outflow -= a
       run += a
+      if (!end[k]) continue // середина перевода между своими счетами: капитал ещё не сошёлся, экстремум не фиксируем
       if (run > h1) h1 = run
       if (run < l1) l1 = run
     }

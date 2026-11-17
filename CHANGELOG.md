@@ -8,6 +8,8 @@ Versions: `R.sB.C+T.hash`. On `dev` there is no state letter (`v1.1.C+T`), the l
 
 Polishing the user-friendly design and finishing QoL, builder and reference features.
 
+- **v1.3.1** — Capital candles: a transfer between own accounts (two records from different banks) is applied as one step, so the day's peak and low no longer show a false wick from a double count
+
 ## Build 2 — Stable: macro and market data (`v1.s2.113+143`), 2026-11-17
 
 Collecting public data from outside and showing it: OVDP and US bonds, rates, inflation and exchange rates, US macro, cards of countries and the eurozone (22 registry entries), exchanges, company stocks, the crypto loop, purchasing power and the health of sources. At the end of the build: a security audit (Host check, gzip limit), speeding up the "Курсы" (Rates) page, unified number and date formats.
