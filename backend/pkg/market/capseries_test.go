@@ -40,6 +40,34 @@ func TestCapSeriesAdjustsSharesForLaterSplits(t *testing.T) {
 	}
 }
 
+func TestCapSeriesFixesSharesRestatedAfterSplit(t *testing.T) {
+	// кадр SEC хранит значение из самого свежего отчёта: баланс Apple на конец сентября 2019 после сплита 4:1 показан в новой базе (18,5 млрд вместо 4,6)
+	bars := []PriceBar{{Date: "2019-10-01", Close: 50}, {Date: "2020-07-01", Close: 90}, {Date: "2020-10-01", Close: 110}}
+	splits := []Split{{Date: "2020-08-31", Ratio: 4}}
+	shares := []Fact{
+		{Tag: TagSharesBalance, Period: "CY2019Q3I", End: "2019-09-28", Val: 18_500_000_000}, // уже в новой базе
+		{Tag: TagSharesBalance, Period: "CY2020Q2I", End: "2020-06-27", Val: 4_300_000_000},  // как отчитались: до сплита
+		{Tag: TagSharesBalance, Period: "CY2020Q3I", End: "2020-09-26", Val: 17_000_000_000}, // после сплита
+	}
+	got := CapSeries(bars, splits, shares)
+	if len(got) != 3 {
+		t.Fatalf("три месяца: %+v", got)
+	}
+	if want := 50 * 18_500_000_000.0; got[0].Cap != want { // не ×4 повторно
+		t.Fatalf("2019 уже в новой базе, второй раз на сплит не умножаем: %v, ждали %v", got[0].Cap, want)
+	}
+	if want := 90 * 4_300_000_000.0 * 4; got[1].Cap != want { // до сплита: умножаем как обычно
+		t.Fatalf("2020 до сплита: %v, ждали %v", got[1].Cap, want)
+	}
+	if want := 110 * 17_000_000_000.0; got[2].Cap != want {
+		t.Fatalf("после сплита: %v, ждали %v", got[2].Cap, want)
+	}
+	// без опорного отчёта после сплита сравнивать не с чем: считаем, как отчитались
+	if got := CapSeries(bars[:1], splits, shares[:1]); len(got) != 1 || got[0].Cap != 50*18_500_000_000.0*4 {
+		t.Fatalf("без опоры: %+v", got)
+	}
+}
+
 func TestCapSeriesSkipsMonthsWithoutFreshShares(t *testing.T) {
 	bars := []PriceBar{{Date: "2015-01-01", Close: 10}, {Date: "2020-01-01", Close: 10}, {Date: "2021-12-01", Close: 10}, {Date: "кривая", Close: 10}}
 	shares := []Fact{{Tag: TagSharesBalance, Period: "CY2019Q4I", End: "2019-12-31", Val: 100}}
