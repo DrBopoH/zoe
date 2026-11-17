@@ -318,6 +318,9 @@ func (s Store) Put(f *File) (string, bool, error) {
 	return dst, true, nil
 }
 
+// maxUnpacked — предел размера файла после распаковки gzip (переменная — чтобы тест не распаковывал сотни мегабайт).
+var maxUnpacked = 256 << 20
+
 // Read читает один файл.
 func Read(path string) (*File, error) {
 	b, err := os.ReadFile(path)
@@ -329,8 +332,12 @@ func Read(path string) (*File, error) {
 		if err != nil {
 			return nil, err
 		}
-		if b, err = io.ReadAll(zr); err != nil {
+		// Предел распаковки: файл-«бомба» не должен съесть память; настоящие .zoe — единицы мегабайт
+		if b, err = io.ReadAll(io.LimitReader(zr, int64(maxUnpacked)+1)); err != nil {
 			return nil, err
+		}
+		if len(b) > maxUnpacked {
+			return nil, fmt.Errorf("распакованный файл больше %d МБ", maxUnpacked>>20)
 		}
 	}
 	var f File

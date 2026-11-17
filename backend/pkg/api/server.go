@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -61,8 +63,32 @@ func (s *Server) SetAllowedOrigins(origins []string) {
 	}
 }
 
+// hostAllowed — защита от DNS-rebinding: чужое имя, привязанное к 127.0.0.1, не проходит, даже если браузер не шлёт Origin (GET той же «страницы»).
+// Своими считаются loopback-имена и хосты из списка Origin фронта (для доступа с другого устройства: HOST=0.0.0.0 + его Origin).
+func (s *Server) hostAllowed(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.ToLower(strings.Trim(host, "[]"))
+	switch host {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	for o := range s.allowedOrigins {
+		if u, err := url.Parse(o); err == nil && strings.EqualFold(u.Hostname(), host) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) EnableCORS(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.hostAllowed(r.Host) {
+			http.Error(w, "Host not allowed", http.StatusForbidden)
+			return
+		}
 		// Раньше было "*": любая открытая вкладка браузера могла читать финансы и стирать кеш.
 		// Запросы без Origin (curl, сам фронт через прокси) пропускаем — бэкенд слушает только localhost.
 		if origin := r.Header.Get("Origin"); origin != "" {
