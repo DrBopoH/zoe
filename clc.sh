@@ -285,7 +285,7 @@ cmd_apply() {
   echo; echo "Дальше:"
   local br; br=$(cur_branch)
   if [[ $br == main || $br =~ ^(dev|build|release)$ ]]; then
-    echo "  ./${SELF} branch <слово>      # ты на $br — перейди в wip-ветку, правки перенесутся"
+    echo "  ./${SELF} branch <модуль> <слово>   # ты на $br — перейди в ветку модуля, правки перенесутся"
   fi
   local s
   for s in be fe docs; do
@@ -332,6 +332,26 @@ cmd_rollback() {
 }
 
 # ------------------------------------------------ branch
+# Рабочая ветка = <модуль>/<дата>-<слово>. Модуль — контекст, к которому относится набор фич (ui, candles, binance, sources …).
+# Списка модулей нет: подходит любое слово из латиницы, кроме служебных имён веток. Старые wip/<дата>-<слово> — тот же вид (модуль «wip»).
+WORK_RE='^[a-z0-9-]+/[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9-]+$'
+is_work_branch() { local m=${1%%/*}; [[ $1 =~ $WORK_RE ]] && ! is_protected "$m" && [[ $m != main ]]; }
+# модули, по которым уже есть ветки (локальные и на origin)
+work_branches() { git for-each-ref --format='%(refname)' refs/heads refs/remotes/origin 2>/dev/null | sed -E 's#^refs/(heads|remotes/origin)/##' | grep -E "$WORK_RE" | sort -u || true; }
+known_modules() { work_branches | cut -d/ -f1 | sort -u; }
+# note_module <модуль> — подсказка опечаток: новый модуль печатается вместе со списком существующих
+note_module() {
+  if known_modules | grep -qx "$1"; then return 0; fi
+  local list; list=$(known_modules | paste -sd' ' -)
+  echo "● новый модуль «$1»${list:+ (уже есть: $list)}"
+}
+split_module() { # "модуль слово" или "модуль/слово" → глобальные BR_M, BR_W; код 1, если вид неверный
+  local a="${1:-}" b="${2:-}"
+  if [[ $a == */* && -z $b ]]; then b=${a#*/}; a=${a%%/*}; fi
+  [[ $a =~ ^[a-z0-9-]+$ && $b =~ ^[a-z0-9-]+$ ]] || return 1
+  if is_protected "$a" || [[ $a == main ]]; then die "«$a» — служебное имя ветки, а не модуль"; fi
+  BR_M=$a; BR_W=$b
+}
 # ---- именованные коммиты (заморозка фичи): «сводка | vR.B.C+T.<полный хэш замороженного коммита>»
 NAMED_RE='\| v[0-9A-Za-z.]+\.[0-9]+\+[0-9]+\.[0-9a-f]{7,40}$'
 VER_RE='v([0-9A-Za-z.]+)\.([0-9]+)\+([0-9]+)\.[0-9a-f]{7,40}$'
@@ -349,21 +369,21 @@ base_ref() {
 }
 
 cmd_branch() {
-  local w="${1:-}"
-  [[ $w =~ ^[a-z0-9-]+$ ]] || die "слово: латиница строчными, цифры, дефис. Пример: ./${SELF} branch icu-ledger"
+  split_module "${1:-}" "${2:-}" || die "формат: ./${SELF} branch <модуль> <слово> (латиница строчными, цифры, дефис). Пример: ./${SELF} branch candles transfer-pairs"
   local b; b=$(base_ref)
-  git switch -c "wip/$(date +%F)-$w" "$b"
+  note_module "$BR_M"
+  git switch -c "$BR_M/$(date +%F)-$BR_W" "$b"
   echo "● ветка $(cur_branch) ← $b"
 }
 
-# ./clc.sh next <слово> — новая тема после PR: git fetch, ветка от свежего dev (или последнего именованного коммита)
+# ./clc.sh next <модуль> <слово> — новая тема после PR: git fetch, ветка модуля от свежего dev (или последнего именованного коммита)
 cmd_next() {
   [[ -z $(git status --porcelain --untracked-files=no) ]] || die "есть незакоммиченные правки: закоммить или ./${SELF} park"
   git fetch -q origin 2>/dev/null || echo "(fetch не удался — беру локальное состояние)"
   if git rev-parse -q --verify refs/heads/dev >/dev/null && git rev-parse -q --verify refs/remotes/origin/dev >/dev/null; then
     git branch -f dev origin/dev 2>/dev/null || true
   fi
-  cmd_branch "${1:-}"
+  cmd_branch "$@"
 }
 
 # ------------------------------------------------ git-инструменты
@@ -371,19 +391,20 @@ is_protected() { [[ $1 =~ ^(dev|build|fix|release)$ ]]; }
 pushed_head() { git branch -r --contains HEAD 2>/dev/null | grep -q .; }
 has_patches() { compgen -G "$DL/patch*.zip" >/dev/null || [[ -f $DL/backend.zip || -f $DL/frontend.zip ]]; }
 
-# ensure_wip [слово] — гарантирует рабочую ветку: wip/* остаётся, иначе создаётся wip/<дата>-<слово>
+# ensure_wip [модуль/слово] — гарантирует рабочую ветку модуля: <модуль>/… остаётся, иначе создаётся <модуль>/<дата>-<слово>
 ensure_wip() {
   local w=${1:-} br; br=$(cur_branch)
-  if [[ $br == wip/* ]]; then return 0; fi
+  if is_work_branch "$br"; then return 0; fi
   if [[ -n $w ]]; then
-    [[ $w =~ ^[a-z0-9-]+$ ]] || die "слово ветки: латиница строчными, цифры, дефис"
+    split_module "$w" || die "-b <модуль>/<слово>: латиница строчными, цифры, дефис. Пример: -b candles/transfer-pairs"
     local b; b=$(base_ref)
-    git switch -qc "wip/$(date +%F)-$w" "$b"
+    note_module "$BR_M"
+    git switch -qc "$BR_M/$(date +%F)-$BR_W" "$b"
     echo "● ветка $(cur_branch) ← $b"
     return 0
   fi
-  if is_protected "$br"; then die "в $br коммитит только автоматика. Добавь -b <слово>"; fi
-  if [[ $br == main ]]; then echo "⚠ ты на main. Лучше добавить -b <слово>"; fi
+  if is_protected "$br"; then die "в $br коммитит только автоматика. Добавь -b <модуль>/<слово>"; fi
+  if [[ $br == main ]]; then echo "⚠ ты на main. Лучше добавить -b <модуль>/<слово>"; fi
 }
 
 # после коммита напомнить, если в других папках остались незакоммиченные правки
@@ -421,8 +442,8 @@ run_checks() {
 
 check_msg() { [[ $1 =~ $CONV ]] || die "сообщение вида 'feat: add x' (feat|fix|refactor|perf|test|docs|style|chore), до 72 символов после типа"; }
 
-# ./clc.sh commit <be|fe|docs|all> "тип: что сделано" [-n] [-b слово]
-#   проверки (go test / сборка) → индекс → коммит; -n без проверок; -b создаёт wip-ветку, если ты не в ней
+# ./clc.sh commit <be|fe|docs|all> "тип: что сделано" [-n] [-b модуль/слово]
+#   проверки (go test / сборка) → индекс → коммит; -n без проверок; -b <модуль>/<слово> создаёт ветку модуля, если ты не в ней
 cmd_commit() {
   local nocheck=0 bword="" args=()
   while (( $# )); do
@@ -430,7 +451,7 @@ cmd_commit() {
     shift
   done
   local scope="${args[0]:-}" msg="${args[1]:-}"
-  [[ -n $scope && -n $msg ]] || die "формат: ./${SELF} commit <be|fe|docs|all> \"тип: что сделано\" [-n] [-b слово]"
+  [[ -n $scope && -n $msg ]] || die "формат: ./${SELF} commit <be|fe|docs|all> \"тип: что сделано\" [-n] [-b модуль/слово]"
   check_msg "$msg"
   case "$scope" in be|fe|docs|all) ;; *) die "scope: be | fe | docs | all" ;; esac
   ensure_wip "$bword"
@@ -442,7 +463,7 @@ cmd_commit() {
   warn_leftover
 }
 
-# ./clc.sh ship <be|fe|docs|all> "тип: что сделано" [-b слово] [-p] [-f] [-n] [-z "сводка фичи" [-v R.B]]
+# ./clc.sh ship <be|fe|docs|all> "тип: что сделано" [-b модуль/слово] [-p] [-f] [-n] [-z "сводка фичи" [-v R.B]]
 #   -z: этим коммитом фича закончена — сразу влить ветку в dev одним именованным коммитом (см. land)
 #   всё одной строкой: (ветка) → apply всех патчей из Downloads → проверки → коммит → (-p) push пакета в буфер
 #   -f apply --force, -n без проверок
@@ -453,7 +474,7 @@ cmd_ship() {
     shift
   done
   local scope="${args[0]:-}" msg="${args[1]:-}"
-  [[ -n $scope && -n $msg ]] || die "формат: ./${SELF} ship <be|fe|docs|all> \"тип: что сделано\" [-b слово] [-p] [-f] [-n]"
+  [[ -n $scope && -n $msg ]] || die "формат: ./${SELF} ship <be|fe|docs|all> \"тип: что сделано\" [-b модуль/слово] [-p] [-f] [-n]"
   check_msg "$msg"
   case "$scope" in be|fe|docs|all) ;; *) die "scope: be | fe | docs | all" ;; esac
   ensure_wip "$bword"
@@ -498,9 +519,9 @@ land_one() {
   git commit-tree "$feat^{tree}" -p "$parent" -m "$sum | $v.$(git rev-parse --short=7 "$feat")"
 }
 
-# ./clc.sh land "сводка фичи" [-v R.B]            — вливание текущей wip-ветки в dev ОДНИМ именованным коммитом (аналог PR → Squash and merge)
+# ./clc.sh land "сводка фичи" [-v R.B]            — вливание текущей ветки модуля в dev ОДНИМ именованным коммитом (аналог PR → Squash and merge)
 # ./clc.sh land --plan <файл> [-v R.B]            — то же для готовой истории: по строке «<хэш> сводка» на фичу (строки «f …» и «#» пропускаются)
-#   Атомарные коммиты и wip-ветка остаются локально как есть; dev получает только именованные коммиты. Файлы в рабочем дереве не трогаются.
+#   Атомарные коммиты и ветка модуля остаются локально как есть; dev получает только именованные коммиты. Файлы в рабочем дереве не трогаются.
 #   Когда у проекта есть remote, dev меняется только через PR: land тогда делает то же, что done (PR → проверки → squash).
 cmd_land() {
   local ver="" plan="" args=()
@@ -509,7 +530,7 @@ cmd_land() {
     [[ -z $plan ]] || die "есть remote: --plan не работает, dev меняется только через PR"
     if [[ -n $ver ]]; then cmd_done "${args[@]}" -v "$ver"; else cmd_done "${args[@]}"; fi; return
   fi
-  [[ $(cur_branch) == wip/* ]] || die "только из wip-ветки"
+  is_work_branch "$(cur_branch)" || die "только из рабочей ветки модуля (<модуль>/<дата>-<слово>)"
   # план может лежать в Downloads как patch.zip (.commits/regroup.txt) — забираем его тем же apply, что и ship
   if [[ -n $plan ]] && has_patches; then QUIET=1; cmd_apply --force; QUIET=0; fi
   local tip="" base
@@ -614,7 +635,7 @@ cmd_pr() {
   while (( $# )); do case "$1" in -v) shift; ver=${1:-} ;; *) args+=("$1") ;; esac; shift; done
   sum="${args[0]:-}"; [[ -n $sum ]] || die "формат: ./${SELF} pr \"сводка фичи\" [-v R.B]"
   local br; br=$(cur_branch)
-  [[ $br == wip/* ]] || die "только из wip-ветки"
+  is_work_branch "$br" || die "только из рабочей ветки модуля (<модуль>/<дата>-<слово>)"
   [[ -z $(git status --porcelain --untracked-files=no) ]] || die "есть незакоммиченные правки: ./${SELF} commit … или park"
   git fetch -q origin
   (( $(git rev-list --count origin/dev..HEAD) > 0 )) || die "в ветке нет коммитов относительно origin/dev"
@@ -676,11 +697,11 @@ wait_pr() {
 }
 
 # ./clc.sh merge — дождаться проверок PR текущей ветки → Squash and merge с заголовком PR → локальный dev ← origin/dev
-#   wip-ветка с атомарными коммитами остаётся локально. Ожидание не обрывается само: пишет, чего ждёт (конфликты, CI…); выход — Ctrl+C, PR остаётся открытым
+#   ветка модуля с атомарными коммитами остаётся локально. Ожидание не обрывается само: пишет, чего ждёт (конфликты, CI…); выход — Ctrl+C, PR остаётся открытым
 cmd_merge() {
   need_gh
   local br; br=$(cur_branch)
-  [[ $br == wip/* ]] || die "только из wip-ветки"
+  is_work_branch "$br" || die "только из рабочей ветки модуля (<модуль>/<дата>-<слово>)"
   [[ $(gh pr view "$br" --json state -q .state 2>/dev/null || true) == OPEN ]] || die "нет открытого PR: ./${SELF} pr \"сводка\""
   local title; title=$(gh pr view "$br" --json title -q .title)
   trap 'echo; echo "■ прервано. PR остался открытым, продолжить: ./'"${SELF}"' merge"; exit 130' INT
@@ -773,12 +794,27 @@ cmd_build() {
   echo "  build @ ${m:0:7}, тег $tag"
 }
 
-# ./clc.sh publish — запушить текущую wip-ветку на origin (дальше: pr / done)
+# ./clc.sh publish — запушить текущую ветку модуля на origin (дальше: pr / done)
 cmd_publish() {
   local br; br=$(cur_branch)
-  if is_protected "$br" || [[ $br == main ]]; then die "из $br не публикуем: только wip-ветки"; fi
+  if is_protected "$br" || [[ $br == main ]]; then die "из $br не публикуем: только рабочие ветки модулей"; fi
   git push -u origin "$br"
   echo "→ дальше: ./${SELF} pr \"сводка\" или ./${SELF} done \"сводка\""
+}
+
+# ./clc.sh modules [модуль] — модули, по которым есть ветки (локальные и origin): сколько веток и когда последняя; с именем — ветки модуля
+cmd_modules() {
+  local m n last
+  if [[ -n ${1:-} ]]; then
+    work_branches | grep -E "^$1/" || die "по модулю «$1» веток нет (./${SELF} modules — список модулей)"
+    return 0
+  fi
+  [[ -n $(known_modules) ]] || { echo "(веток модулей пока нет: ./${SELF} next <модуль> <слово>)"; return 0; }
+  for m in $(known_modules); do
+    n=$(work_branches | grep -cE "^$m/" || true)
+    last=$(git for-each-ref --sort=-committerdate --count=1 --format='%(committerdate:short)' "refs/heads/$m/" "refs/remotes/origin/$m/")
+    printf '  %-16s веток: %-3s последняя: %s\n' "$m" "$n" "$last"
+  done
 }
 
 # ./clc.sh sw <ветка> — перейти на ветку; ./clc.sh drop <ветка> [-f] — удалить локальную (без -f только слитую)
@@ -801,12 +837,13 @@ cmd_help() {
   ./${SELF} apply [--force]              все patch*.zip из Downloads по очереди (снимок «до» в .commits/applied/)
   ./${SELF} rollback [list|N]            вернуть backend/ и frontend/ до применения N
 Git
-  ./${SELF} ship <be|fe|docs|all> "тип: что" [-b слово] [-p] [-f] [-n]
+  ./${SELF} ship <be|fe|docs|all> "тип: что" [-b модуль/слово] [-p] [-f] [-n]
                                          ветка → apply → проверки → коммит → (-p) push пакета
-  ./${SELF} commit <be|fe|docs|all> "тип: что" [-b слово] [-n]   проверки → коммит
-  ./${SELF} branch <слово>               wip/<дата>-<слово> от свежего dev / последнего именованного коммита
-  ./${SELF} next <слово>                 после PR: fetch + новая ветка от dev (не от старой wip!)
-  ./${SELF} land "сводка" [-v R.B]       фича готова: wip-ветка → dev одним именованным коммитом (как PR + Squash and merge)
+  ./${SELF} commit <be|fe|docs|all> "тип: что" [-b модуль/слово] [-n]   проверки → коммит
+  ./${SELF} branch <модуль> <слово>      <модуль>/<дата>-<слово> от свежего dev / последнего именованного коммита
+  ./${SELF} next <модуль> <слово>        после PR: fetch + новая ветка модуля от dev (не от старой!)
+  ./${SELF} modules [модуль]             модули с ветками (локальные и origin); с именем — ветки модуля
+  ./${SELF} land "сводка" [-v R.B]       фича готова: ветка модуля → dev одним именованным коммитом (как PR + Squash and merge)
   ./${SELF} land --plan <файл> [-v R.B]  то же для готовой истории: по строке «<хэш> сводка» на фичу
   (ship ... -z "сводка" [-v R.B])        коммит и сразу land
   ./${SELF} amend [scope] ["сообщение"]  дополнить последний коммит (пока не на remote)
@@ -814,7 +851,7 @@ Git
   ./${SELF} park [имя] | park list | unpark   спрятать / вернуть незакоммиченное
   ./${SELF} good [заметка] | good list   тесты+сборка → метка good/<время> на рабочей версии
   ./${SELF} restore [метка|коммит]       backend/ и frontend/ ← метка (по умолчанию последняя good)
-  ./${SELF} publish                      git push -u origin <wip-ветка>
+  ./${SELF} publish                      git push -u origin <ветка модуля>
   ./${SELF} pr "сводка" [-v R.B]         push + PR в dev, заголовок = «сводка | vR.B.C+T.хэш»
   ./${SELF} merge                        дождаться проверок → Squash and merge → dev ← origin/dev
   ./${SELF} done "сводка" [-v R.B]       pr + merge (с remote то же делает land и ship … -z)
@@ -847,6 +884,7 @@ case "${1:-help}" in
   merge)    cmd_merge ;;
   done)     shift; cmd_done "$@" ;;
   build)    shift; cmd_build "$@" ;;
+  modules)  shift; cmd_modules "$@" ;;
   sw)       shift; cmd_sw "$@" ;;
   drop)     shift; cmd_drop "$@" ;;
   help|-h|--help) cmd_help ;;
