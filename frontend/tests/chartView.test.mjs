@@ -83,4 +83,7 @@ test('logTicks: 1-3 / степени десяти по лимиту, 1-2-5 на 
   assert.deepEqual(logTicks(Math.log(8), Math.log(120), 7), [10, 20, 50, 100])
   assert.deepEqual(logTicks(Math.log(100), Math.log(101), 7), [])
   assert.deepEqual(logTicks(1, 1), [])
+  // огромный размах: степени десяти через шаг, а не откат на линейные деления с кучей подписей у нуля
+  assert.deepEqual(logTicks(Math.log(0.5), Math.log(3e12), 7), [1, 100, 10000, 1e6, 1e8, 1e10, 1e12])
+  assert.deepEqual(logTicks(Math.log(1e-3), Math.log(1e15), 7), [1e-3, 1, 1e3, 1e6, 1e9, 1e12, 1e15])
 })
