@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { toasts, pushToast, dismissToast, pushRequestError } from '../src/composables/useToasts.js'
+import { toasts, pushToast, dismissToast, pushRequestError, toastTiming } from '../src/composables/useToasts.js'
 import { apiSend } from '../src/utils/api.js'
 
 const clear = () => toasts.value.slice().forEach((t) => dismissToast(t.id))
@@ -38,4 +38,24 @@ test('ошибка запроса: 409 — янтарное и короткое,
   pushRequestError('Не удалось обновить', new Error('Failed to fetch'))
   assert.deepEqual(toasts.value.map((t) => [t.kind, t.title, t.lines[0]]), [['err', 'Не удалось обновить', 'Failed to fetch']])
   clear()
+})
+
+test('истёкшие тосты уходят по очереди: между уходами не меньше gap, свои времена жизни сохраняются', async () => {
+  clear()
+  toastTiming.gap = 60
+  const left = []
+  const watchLeave = setInterval(() => {
+    for (const t of ['a', 'b', 'c']) if (!left.some((x) => x[0] === t) && !toasts.value.some((x) => x.title === t)) left.push([t, Date.now()])
+  }, 2)
+  pushToast({ kind: 'ok', title: 'a', ttl: 20 })
+  pushToast({ kind: 'ok', title: 'b', ttl: 20 }) // истекает вместе с a
+  pushToast({ kind: 'ok', title: 'c', ttl: 300 }) // своё, более долгое время жизни
+  await new Promise((r) => setTimeout(r, 450))
+  clearInterval(watchLeave)
+  toastTiming.gap = 500
+  assert.deepEqual(left.map((x) => x[0]).sort(), ['a', 'b', 'c'])
+  const at = Object.fromEntries(left)
+  const first = Math.min(at.a, at.b), second = Math.max(at.a, at.b)
+  assert.ok(second - first >= 50, `a и b ушли с разницей ${second - first} мс`)
+  assert.ok(at.c - first >= 250, 'c живёт дольше: его время не сжато очередью')
 })

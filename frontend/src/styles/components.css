@@ -148,8 +148,13 @@
   }
   /* ── Пуш-уведомления (справа сверху, под шапкой) ── */
   .ui-push-stack {
-    @apply fixed bottom-4 right-4 z-40 w-[420px] max-w-[calc(100vw-2rem)] max-h-[calc(100vh-6rem)] overflow-y-auto flex flex-col justify-end gap-2 pointer-events-none;
+    /* justify-end-safe: при переполнении стопка прижимается к началу и прокручивается (обычный justify-end прячет верх за краем).
+       Тосты не сжимаются (shrink-0), а прокручиваются. */
+    @apply fixed bottom-4 right-4 z-40 w-[420px] max-w-[calc(100vw-2rem)] max-h-[calc(100vh-6rem)] overflow-y-auto overscroll-contain flex flex-col justify-end-safe gap-2 pointer-events-none;
+    scrollbar-width: thin;
+    scrollbar-color: rgb(71 85 105 / 0.8) transparent;
   }
+  .ui-push-stack > * { @apply shrink-0; }
   .ui-push {
     @apply pointer-events-auto rounded-md border p-3 shadow-2xl backdrop-blur bg-slate-900/95 border-slate-700;
   }

@@ -38,19 +38,19 @@ Examples: `v1.1.29+29.3487fe9` (a named commit on `dev`), `v1.b1.29+29.8ac5080` 
 
 ## 2. Two zones: local and remote
 
-**Locally (trunk-based, modified).** One anonymous branch `wip/<date>-<word>` per feature; atomic commits, noise is allowed (delete, bring back, rewrite — it is personal history). The atomic commits and the wip branch stay only on your machine (the wip branch itself is pushed to `origin` for the PR, but a single squashed commit lands in `dev`).
+**Locally (trunk-based, modified).** One branch `<module>/<date>-<word>` per feature (a module is a set of features of one context: `ui`, `candles`, `binance`, `sources`, `macro`, `docs`, `tooling`…; there is no list, any latin word except service branch names such as `dev` or `build` works, `./clc.sh modules` shows what already exists); atomic commits, noise is allowed (delete, bring back, rewrite — it is personal history). The atomic commits and the module branch stay only on your machine (the module branch itself is pushed to `origin` for the PR, but a single squashed commit lands in `dev`).
 
 **Remotely.** Protected branches: no authors' pushes, no force-push, no local merge-push; everything goes through a PR, CI checks and review. A PR is merged into `dev` by **Squash**: all atomic commits of the feature turn into one **named (frozen) commit**.
 
 Named commit: `feature summary | vR.B.C+T.<hash7>`, where `hash7` is the short hash of the branch's last atomic commit. One branch = one feature = one named commit.
 
-> Consequence of Squash: the `dev` graph is a single line of named commits, and the wip branches hang beside it (a squash commit has no parent at the wip tip). This is not an error. A clean line of versions: `git log --first-parent dev`.
+> Consequence of Squash: the `dev` graph is a single line of named commits, and the module branches hang beside it (a squash commit has no parent at the branch tip). This is not an error. A clean line of versions: `git log --first-parent dev`.
 
 ## 3. Branches and GitHub rules
 
 | Branch | What it is | Merge method |
 |---|---|---|
-| `wip/<date>-<word>` | feature working branch | local |
+| `<module>/<date>-<word>` | feature working branch of a module (old `wip/…` are the same kind) | local |
 | `dev` (default) | stream of named commits, no letter | **Squash** only |
 | `build` | build freezes | **Merge commit** only |
 | `main` | release line (demonstration for now; optionally a separate `release` for tags) | **Merge commit** only |
@@ -69,12 +69,12 @@ Ruleset on `dev`, `build`, `main`: deletion forbidden, force-push forbidden, a P
 ## 5. Life of a feature
 
 ```bash
-git fetch -q && ./clc.sh next <word>      # a new wip branch from a fresh origin/dev
+git fetch -q && ./clc.sh next <module> <word>      # a new module branch from a fresh origin/dev
 # ...edits...
 ./clc.sh ship all "feat: add thing" -z "Thing: what came out" -f
 ```
 
-`ship` does it all itself: applies patches from `~/Downloads/patch*.zip`, runs the checks (`go test`, frontend build), commits; `-z "summary"` then opens a PR into `dev` with the named-commit title, waits for the checks and merges by Squash. After that `./clc.sh next <word>` starts the next feature from a fresh `dev`, not from the tip of the previous wip branch.
+`ship` does it all itself: applies patches from `~/Downloads/patch*.zip`, runs the checks (`go test`, frontend build), commits; `-z "summary"` then opens a PR into `dev` with the named-commit title, waits for the checks and merges by Squash. After that `./clc.sh next <module> <word>` starts the next feature from a fresh `dev`, not from the tip of the previous branch.
 
 The first feature of a new build is opened with `-v R.B`, for example `./clc.sh ship all "feat: …" -z "Summary" -v 1.3`: `C` resets, `T` goes on (`next_version`). Inside a build `-v` is not needed.
 
@@ -112,18 +112,19 @@ A helper in the repository root (needs `7z`, and `gh` for PRs). Detailed help: `
 
 | Command | What it does |
 |---|---|
-| `ship <be\|fe\|docs\|all> "type: what" [-b word] [-p] [-f] [-n] [-z "summary"] [-v R.B]` | branch → `apply` → checks → commit → (`-z`) PR and merge |
-| `commit <scope> "type: what" [-n] [-b word]` | checks → commit (without `apply`) |
+| `ship <be\|fe\|docs\|all> "type: what" [-b module/word] [-p] [-f] [-n] [-z "summary"] [-v R.B]` | branch → `apply` → checks → commit → (`-z`) PR and merge |
+| `commit <scope> "type: what" [-n] [-b module/word]` | checks → commit (without `apply`) |
 | `apply [--force]` | all `patch*.zip` from `~/Downloads` one by one, each has a "before" snapshot in `.commits/applied/` |
 | `rollback [list\|N]` | return `backend/` and `frontend/` to before the N-th patch was applied |
 | `init` | set up `.commits/`, `.claude` and the lines in `.gitignore` |
-| `land "summary" [-v R.B]` | pour the wip branch into `dev` as one named commit; if there is a remote, does the same as `done` |
-| `branch <word>` / `next <word>` | a wip branch from a fresh dev (`next` also does `fetch`) |
+| `land "summary" [-v R.B]` | pour the module branch into `dev` as one named commit; if there is a remote, does the same as `done` |
+| `branch <module> <word>` / `next <module> <word>` | a module branch from a fresh dev (`next` also does `fetch`); a new module name is announced together with the existing ones, so typos are visible |
+| `modules [module]` | modules that have branches (local and `origin`): how many and when the last one is; with a name — the branches of the module |
 | `pr "summary" [-v R.B]` | push + PR into `dev` with the named-commit title |
 | `merge` | wait for the PR checks → Squash and merge → local `dev` ← `origin/dev` |
 | `done "summary"` | `pr` + `merge` |
 | `build [a\|b\|s\|m] ["summary"]` | build freeze (see §6) |
-| `publish` | `git push -u origin <wip branch>` |
+| `publish` | `git push -u origin <module branch>` |
 | `amend`, `undo` | add to the last commit; take it off (the edits stay in the index) |
 | `park`, `unpark` | stash and bring back the uncommitted |
 | `good`, `restore` | a mark of a working version after the checks, and return to it |
