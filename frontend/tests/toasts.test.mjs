@@ -52,7 +52,7 @@ test('истёкшие тосты уходят по очереди: между �
   pushToast({ kind: 'ok', title: 'c', ttl: 300 }) // своё, более долгое время жизни
   await new Promise((r) => setTimeout(r, 450))
   clearInterval(watchLeave)
-  toastTiming.gap = 500
+  toastTiming.gap = 200
   assert.deepEqual(left.map((x) => x[0]).sort(), ['a', 'b', 'c'])
   const at = Object.fromEntries(left)
   const first = Math.min(at.a, at.b), second = Math.max(at.a, at.b)
@@ -71,6 +71,6 @@ test('в очереди на уход раньше пришедший идёт �
   pushToast({ kind: 'ok', title: 'c', ttl: 10 }) // ждёт очереди; a истекает позже, но появился раньше c
   await new Promise((r) => setTimeout(r, 450))
   clearInterval(w)
-  toastTiming.gap = 500
+  toastTiming.gap = 200
   assert.deepEqual(order, ['b', 'a', 'c'])
 })

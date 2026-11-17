@@ -149,8 +149,9 @@
   /* ── Пуш-уведомления (справа сверху, под шапкой) ── */
   .ui-push-stack {
     /* justify-end-safe: при переполнении стопка прижимается к началу и прокручивается (обычный justify-end прячет верх за краем).
-       Тосты не сжимаются (shrink-0), а прокручиваются. */
-    @apply fixed bottom-4 right-4 z-40 w-[420px] max-w-[calc(100vw-2rem)] max-h-[calc(100vh-6rem)] overflow-y-auto overscroll-contain flex flex-col justify-end-safe gap-2 pointer-events-none;
+       Тосты не сжимаются (shrink-0), а прокручиваются. overflow-x-hidden: выезд справа (translateX) иначе рисует горизонтальный ползунок
+       и сдвигает вертикальный. Положение прокрутки держит ToastStack (utils/stackScroll.js). */
+    @apply fixed bottom-4 right-4 z-40 w-[420px] max-w-[calc(100vw-2rem)] max-h-[calc(100vh-6rem)] overflow-y-auto overflow-x-hidden overscroll-contain flex flex-col justify-end-safe gap-2 pointer-events-none;
     scrollbar-width: thin;
     scrollbar-color: rgb(71 85 105 / 0.8) transparent;
   }
