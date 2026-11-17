@@ -21,6 +21,7 @@ const (
 	TagSharesCover   = "dei/EntityCommonStockSharesOutstanding" // обложка отчёта: запасной вариант, если баланс акции не раскрывает
 	framesFirstYear  = 2009                                     // XBRL у крупных компаний с 2009, у остальных с 2011: раньше кадры почти пустые
 	framesFilingLag  = 45 * 24 * time.Hour                      // отчёты за квартал приходят до 45 дней после его конца
+	framesAnnualLag  = 90 * 24 * time.Hour                      // годовой отчёт приходит до 60–90 дней после конца года
 	framesRecent     = 2                                        // последние кварталы перекачиваются, пока в них дописываются поздние отчёты
 )
 
@@ -42,8 +43,8 @@ type FrameFact struct {
 	Val float64 `json:"val"`
 }
 
-// StockFrameRequests — все кадры, которые нужны сейчас: акции по закончившимся кварталам с 2009 года. Отчётность F3 добавляется сюда же.
-func StockFrameRequests(now time.Time) []FrameRequest {
+// quarterPeriods — кадры «на конец квартала» с 2009Q4, по которым отчёты уже должны были прийти.
+func quarterPeriods(now time.Time) []string {
 	var periods []string
 	for y := framesFirstYear; y <= now.Year(); y++ {
 		for q := 1; q <= 4; q++ {
@@ -54,13 +55,36 @@ func StockFrameRequests(now time.Time) []FrameRequest {
 			periods = append(periods, fmt.Sprintf("CY%dQ%dI", y, q))
 		}
 	}
+	return periods
+}
+
+// annualPeriods — годовые кадры CY2023 с 2009 года, закончившиеся и успевшие получить годовые отчёты.
+func annualPeriods(now time.Time) []string {
+	var periods []string
+	for y := framesFirstYear; y <= now.Year(); y++ {
+		if time.Date(y, 12, 31, 0, 0, 0, 0, time.UTC).Add(framesAnnualLag).After(now) {
+			continue
+		}
+		periods = append(periods, fmt.Sprintf("CY%d", y))
+	}
+	return periods
+}
+
+// StockFrameRequests — все кадры, которые нужны сейчас: акции, капитал и активы по закончившимся кварталам с 2009 года, выручка и прибыль по годам.
+func StockFrameRequests(now time.Time) []FrameRequest {
 	var out []FrameRequest
-	for i, p := range periods {
-		recent := i >= len(periods)-framesRecent
-		for _, tag := range []string{TagSharesBalance, TagSharesCover} {
-			out = append(out, FrameRequest{Tag: tag, Unit: "shares", Period: p, Recent: recent})
+	add := func(periods []string, unit string, tags ...string) {
+		for i, p := range periods {
+			recent := i >= len(periods)-framesRecent
+			for _, tag := range tags {
+				out = append(out, FrameRequest{Tag: tag, Unit: unit, Period: p, Recent: recent})
+			}
 		}
 	}
+	quarters := quarterPeriods(now)
+	add(quarters, "shares", TagSharesBalance, TagSharesCover)
+	add(quarters, "USD", TagEquity, TagAssets)
+	add(annualPeriods(now), "USD", append(append([]string{}, RevenueChain...), TagNetIncome)...)
 	return out
 }
 
@@ -86,7 +110,7 @@ func (c *Client) StockFrame(ctx context.Context, req FrameRequest) ([]FrameFact,
 	}
 	out := make([]FrameFact, 0, len(r.Data))
 	for _, d := range r.Data {
-		if d.CIK > 0 && d.End != "" && d.Val > 0 {
+		if d.CIK > 0 && d.End != "" && d.Val != 0 {
 			out = append(out, FrameFact{CIK: d.CIK, End: d.End, Val: d.Val})
 		}
 	}
