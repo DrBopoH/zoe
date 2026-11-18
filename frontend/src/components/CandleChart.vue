@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { apiSend } from '../utils/api.js'
 import { storageGet, storageSet } from '../utils/storage.js'
-import { TFS, dayStartOf, weekStartOf, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, candleBounds, candleWindow, candleSpans, candleYRanges, visibleSlots, transferSteps } from '../utils/candleMath.js'
+import { movingAverage, MA_LINES, TFS, dayStartOf, weekStartOf, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, candleBounds, candleWindow, candleSpans, candleYRanges, visibleSlots, transferSteps } from '../utils/candleMath.js'
 import { clampWindow } from '../utils/chartView.js'
 import { useChartView } from '../composables/useChartView.js'
 import { toLocalDateStr, formatMoney, formatDateLong, formatShortDateName, formatMonthName } from '../utils/formatters.js'
@@ -335,6 +335,25 @@ const lastPrice = computed(() => {
   return { val, up, y: Math.min(SVG_H - PAD.b, Math.max(PAD.t / 2, yOf(val))) }
 })
 
+// Скользящие средние как на Binance (utils/candleMath.js: movingAverage, MA_LINES): ломаные через центры видимых свечей по закрытию
+const maAll = computed(() => (series.value && series.value.n ? MA_LINES.map(l => ({ ...l, v: movingAverage(series.value.C, l.n) })) : []))
+const maPaths = computed(() => {
+  const S = series.value
+  if (!S) return []
+  const { a, b } = visible.value
+  const out = []
+  for (const l of maAll.value) {
+    let d = '', pen = false
+    for (let i = Math.max(0, a); i < Math.min(b, S.n); i++) {
+      if (!isFinite(l.v[i])) { pen = false; continue }
+      d += `${pen ? 'L' : 'M'}${slotX(i).toFixed(1)},${yOf(l.v[i]).toFixed(1)}`
+      pen = true
+    }
+    if (d) out.push({ n: l.n, color: l.color, d })
+  }
+  return out
+})
+
 const candleAt = (i) => {
   const S = series.value
   const getY = yOf
@@ -527,6 +546,7 @@ watch([() => kv.view.value.x0, nSlots, () => spanNow.value], ([x0, n, span]) => 
           >{{ t.id }}</button>
         </div>
         <span class="text-[10px] text-slate-500">Свечей: {{ series ? series.n : 0 }}<template v-if="loadingMore"> · грузим…</template></span>
+        <span class="text-[10px] text-slate-500" title="Скользящие средние по закрытию, как на Binance"><template v-for="l in MA_LINES" :key="l.n"><span :style="{ color: l.color }">MA({{ l.n }})</span> </template></span>
         <button v-if="zoomed" type="button" class="text-[10px] text-slate-400 hover:text-emerald-400 underline transition-colors" @click="resetView">Сброс масштаба</button>
       </div>
 
@@ -657,6 +677,9 @@ watch([() => kv.view.value.x0, nSlots, () => spanNow.value], ([x0, n, span]) => 
             :class="hoveredCandle && hoveredCandle.key === c.key ? 'opacity-100' : 'opacity-90'"
           />
         </g>
+
+        <!-- скользящие средние MA(7/25/99) по закрытию, как на Binance -->
+        <path v-for="p in maPaths" :key="'ma-' + p.n" :d="p.d" fill="none" :stroke="p.color" stroke-width="1.3" stroke-opacity="0.95" stroke-linejoin="round" stroke-linecap="round" pointer-events="none" />
 
         <!-- выплаты: купон — листочек с треугольником на грани, погашение — «бумага»; серые — уже получены -->
         <g

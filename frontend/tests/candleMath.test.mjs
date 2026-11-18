@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { TFS, dayStartOf, weekStartOf, alignDown, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, transferSteps } from '../src/utils/candleMath.js'
+import { TFS, dayStartOf, weekStartOf, alignDown, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, transferSteps, movingAverage, MA_LINES } from '../src/utils/candleMath.js'
 
 test('dayStartOf / weekStartOf: полночь и понедельник', () => {
   const d = new Date(2026, 10, 12, 15, 30) // чт
@@ -155,4 +155,18 @@ test('transferSteps: без пары, вне окна или с другой с�
   ])
   assert.deepEqual(Array.from(r.end), [1, 1, 1, 1])
   assert.equal(r.amt.length, 4)
+})
+
+test('MA: простое среднее закрытий за N свечей, линия начинается с N-й свечи', () => {
+  const m = movingAverage([2, 4, 6, 8, 10], 3)
+  assert.ok(Number.isNaN(m[0]) && Number.isNaN(m[1]))
+  assert.deepEqual([m[2], m[3], m[4]], [4, 6, 8])
+  assert.equal(movingAverage([], 7).length, 0)
+  assert.ok(movingAverage([1, 2, 3], 7).every(Number.isNaN)) // истории меньше окна — линии нет
+  assert.deepEqual([...movingAverage([5, 7], 1)], [5, 7])
+})
+
+test('MA: как на Binance — 7, 25 и 99, жёлтая, розовая, фиолетовая', () => {
+  assert.deepEqual(MA_LINES.map((l) => l.n), [7, 25, 99])
+  assert.equal(MA_LINES.length, 3)
 })

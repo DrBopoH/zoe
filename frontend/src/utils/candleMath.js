@@ -118,6 +118,24 @@ export function transferSteps(list) {
   return { ms, amt, end }
 }
 
+// Скользящие средние как на Binance: MA(7), MA(25), MA(99) — простое среднее цены закрытия за N последних свечей, включая текущую.
+// Линия начинается с N-й свечи (раньше окно неполное — Binance там линию не рисует), до неё значение NaN.
+export const MA_LINES = [
+  { n: 7, color: '#f0b90b' }, // жёлтая
+  { n: 25, color: '#eb40b5' }, // розовая
+  { n: 99, color: '#9b7dff' } // фиолетовая
+]
+export function movingAverage(close, n) {
+  const out = new Float64Array(close.length).fill(NaN)
+  let sum = 0
+  for (let i = 0; i < close.length; i++) {
+    sum += close[i]
+    if (i >= n) sum -= close[i - n]
+    if (i >= n - 1) out[i] = sum / n
+  }
+  return out
+}
+
 // Ход выбранной свечи для шапки истории: изменение капитала за период (закрытие − открытие) и размах внутри него
 // (максимум − минимум, это волатильность «внутри дня», которую не видно в истории операций). Нет данных свечи → null.
 // Процент считается от открытия; при нулевом открытии он не определён (null).

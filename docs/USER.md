@@ -198,6 +198,7 @@ Links are stored in the permanent database and **survive a cache reset**.
 - **A click on a candle** selects it; the history below shows only the operations of this interval.
 - On the 1D timeframe the chart continues forward to the last bond payout (markers of coupons and maturity, without candles).
 - The selected timeframe is remembered in the browser.
+- **Moving averages (as on Binance):** three lines over the closing price — **MA(7)** yellow, **MA(25)** pink, **MA(99)** purple: the simple average of the last 7, 25 and 99 candles. A line starts from its Nth candle, the same as on Binance. They show the trend of the capital on the chosen timeframe; the legend is in the chart header.
 
 ## Operation badges
 
