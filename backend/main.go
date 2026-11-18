@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -53,7 +54,16 @@ func main() {
 	// Binance: выписка (CSV) + публичные минутные цены, ключей нет
 	server.SetBinance(binance.NewClient())
 	// Облигации: ОВДП и US Treasury из публичных API, обновление только по запросу
-	server.SetMarket(market.NewClient())
+	marketClient := market.NewClient()
+	// Размер сделки P2P: объявления, по которым нельзя провести сделку хотя бы на эту сумму, цену P2P не задают (по умолчанию 1000 ₴)
+	if v := os.Getenv("P2P_MIN_DEAL_UAH"); v != "" {
+		if n, err := strconv.ParseFloat(strings.ReplaceAll(v, ",", "."), 64); err == nil && n > 0 {
+			marketClient.P2PMinDeal = n
+		} else {
+			log.Printf("WARNING: P2P_MIN_DEAL_UAH=%q не разобрать (пример: 1000, 5000), используется 1000", v)
+		}
+	}
+	server.SetMarket(marketClient)
 	// Кеш макро-рядов, если он пуст (первый запуск после «стереть кеш» или переезда), собирается из файлов группы «Экономика»
 	if n, err := server.RestoreEconomy(); err != nil {
 		log.Printf("WARNING: кеш рядов из файлов не собран: %v", err)

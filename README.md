@@ -48,6 +48,7 @@ RAIF_TOKENS=token             # or RAIF_TOKEN=single_token
 | `CACHE_DB_PATH` | `cache.db` | disposable statement cache |
 | `CORE_DB_PATH` | `core.db` | permanent data: persons, aliases, links |
 | `MARKET_EVERY` | `1h` | how often the backend itself takes crypto-loop snapshots (P2P price, network fees, dominance); `30m`, `2h`, etc., `0` turns it off |
+| `P2P_MIN_DEAL_UAH` | `1000` | minimal deal size in ₴ for a P2P advert to count as working (smaller ones do not set the USDT price) |
 | `ECONOMIC_SOURCES_DIR` | `$XDG_DATA_HOME/economic/sources`, otherwise `~/.local/share/economic/sources` | folder of `.zoe` source files |
 
 Frontend: `VITE_API_BASE` (default `http://127.0.0.1:8080/api`).

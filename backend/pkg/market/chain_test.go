@@ -212,3 +212,35 @@ func TestP2PPriceFromFixedAmountAds(t *testing.T) {
 		t.Fatalf("медиана пяти первых рабочих: %v %v", got, err)
 	}
 }
+
+// Свой порог сделки: при 5 000 ₴ рабочими остаются только объявления с достаточным остатком и лимитом, и цена считается по ним
+func TestP2PCustomMinDeal(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ad := func(p, q, lo, hi string) string {
+			return `{"adv":{"price":"` + p + `","tradableQuantity":"` + q + `","minSingleTransAmount":"` + lo + `","maxSingleTransAmount":"` + hi + `"}}`
+		}
+		w.Write([]byte(`{"data":[` + strings.Join([]string{
+			ad("46.30", "30", "500", "1400"),    // сделка ~1 390 ₴
+			ad("46.40", "200", "500", "9000"),   // 9 000 ₴
+			ad("46.50", "300", "500", "20000"),  // 13 950 ₴
+			ad("46.60", "1000", "500", "50000"), // 46 600 ₴
+		}, ",") + `]}`))
+	}))
+	defer srv.Close()
+	c := chainClient(srv)
+	if got, err := c.p2pPrice(context.Background(), "BUY"); err != nil || got != 46.50 { // 4 рабочих: медиана [i/2=2] = 46.50
+		t.Fatalf("по умолчанию (1000): %v %v", got, err)
+	}
+	c.P2PMinDeal = 5000
+	if got, err := c.p2pPrice(context.Background(), "BUY"); err != nil || got != 46.50 { // 3 рабочих: 46.40, 46.50, 46.60 → 46.50
+		t.Fatalf("порог 5000: %v %v", got, err)
+	}
+	c.P2PMinDeal = 40000
+	if got, err := c.p2pPrice(context.Background(), "BUY"); err != nil || got != 46.60 {
+		t.Fatalf("порог 40000: %v %v", got, err)
+	}
+	c.P2PMinDeal = 100000
+	if _, err := c.p2pPrice(context.Background(), "BUY"); err == nil {
+		t.Fatal("ни одного рабочего — ошибка, а не цена")
+	}
+}

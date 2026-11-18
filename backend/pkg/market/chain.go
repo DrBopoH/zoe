@@ -145,7 +145,15 @@ type p2pAdv struct {
 	} `json:"adv"`
 }
 
-// p2pPrice — типичная лучшая цена стороны: медиана первых p2pTopN рабочих объявлений. Объявление рабочее, если по нему можно провести сделку хотя бы на p2pMinDealUAH
+// minDeal — порог «рабочего» объявления, ₴: свой (Client.P2PMinDeal, из P2P_MIN_DEAL_UAH) или p2pMinDealUAH
+func (c *Client) minDeal() float64 {
+	if c.P2PMinDeal > 0 {
+		return c.P2PMinDeal
+	}
+	return p2pMinDealUAH
+}
+
+// p2pPrice — типичная лучшая цена стороны: медиана первых p2pTopN рабочих объявлений. Объявление рабочее, если по нему можно провести сделку хотя бы на minDeal()
 // (остаток и лимиты): единичное объявление с крошечным остатком не должно задавать «рынок». side — BUY (покупаем USDT, платим гривной) или SELL.
 func (c *Client) p2pPrice(ctx context.Context, side string) (float64, error) {
 	payload := fmt.Sprintf(`{"fiat":"UAH","page":1,"rows":20,"tradeType":%q,"asset":"USDT","countries":[],"proMerchantAds":false,"shieldMerchantAds":false,"publisherType":null,"payTypes":[],"classifies":["mass","profession"]}`, side)
@@ -164,6 +172,7 @@ func (c *Client) p2pPrice(ctx context.Context, side string) (float64, error) {
 	if len(r.Data) == 0 { // пустой список — это отказ или пустая выдача, а не «нет подходящих»: показываем, что ответил Binance
 		return 0, fmt.Errorf("P2P %s: Binance вернул пустой список (code %v %s)", side, r.Code, strings.TrimSpace(r.Message))
 	}
+	minDeal := c.minDeal()
 	var prices []float64
 	for _, a := range r.Data {
 		price, qty := f64(a.Adv.Price), f64(a.Adv.Tradable)
@@ -174,7 +183,7 @@ func (c *Client) p2pPrice(ctx context.Context, side string) (float64, error) {
 		if hi > 0 && hi < deal {
 			deal = hi
 		}
-		if price <= 0 || deal < p2pMinDealUAH || lo > deal {
+		if price <= 0 || deal < minDeal || lo > deal {
 			continue
 		}
 		prices = append(prices, price)
@@ -183,7 +192,7 @@ func (c *Client) p2pPrice(ctx context.Context, side string) (float64, error) {
 		}
 	}
 	if len(prices) == 0 {
-		return 0, fmt.Errorf("P2P %s: из %d объявлений ни по одному нельзя провести сделку хотя бы на %d ₴ (остаток или лимиты)", side, len(r.Data), int(p2pMinDealUAH))
+		return 0, fmt.Errorf("P2P %s: из %d объявлений ни по одному нельзя провести сделку хотя бы на %d ₴ (остаток или лимиты)", side, len(r.Data), int(minDeal))
 	}
 	sort.Float64s(prices)
 	return prices[len(prices)/2], nil
