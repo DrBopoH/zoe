@@ -198,7 +198,7 @@ Links are stored in the permanent database and **survive a cache reset**.
 - **A click on a candle** selects it; the history below shows only the operations of this interval.
 - On the 1D timeframe the chart continues forward to the last bond payout (markers of coupons and maturity, without candles).
 - The selected timeframe is remembered in the browser.
-- **Moving support:** the amber line is a trend line through the candle-body bottoms (the lower of open and close): for every candle a straight line is fitted to the last 14 bodies and its value on that candle is drawn. It is smooth, follows the chart one value per candle and shows where the lower edge of the capital "body" is heading; wicks are not counted.
+- **Moving support:** the amber line runs through the real troughs of the capital "body" (a trough is a candle whose body bottom — the lower of open and close — is not higher than its 3 neighbours on each side), straight between neighbouring troughs and level after the last one: a support stands until it is broken, a new lower trough pulls it down. One value per candle, wicks are not counted.
 
 ## Operation badges
 
