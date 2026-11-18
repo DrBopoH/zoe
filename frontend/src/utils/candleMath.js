@@ -118,6 +118,25 @@ export function transferSteps(list) {
   return { ms, amt, end }
 }
 
+// Скользящая поддержка: по одному значению на свечу — самый низкий «низ тела» (min(открытие, закрытие)) за последние `period`
+// свечей, включая текущую. Идёт за графиком с шагом таймфрейма и показывает, куда движется нижняя граница «тела» капитала
+// (тренд); фитили не в счёт — это разовые провалы внутри свечи. У первых свечей окно неполное (берутся все, что есть).
+export const SUPPORT_PERIOD = 20
+export function movingSupport(open, close, period = SUPPORT_PERIOD) {
+  const n = Math.min(open.length, close.length)
+  const out = new Float64Array(n)
+  const low = (i) => Math.min(open[i], close[i])
+  const dq = [] // индексы, низ тела растёт от головы к хвосту (монотонная очередь): минимум окна — всегда голова
+  let head = 0
+  for (let i = 0; i < n; i++) {
+    while (dq.length > head && low(dq[dq.length - 1]) >= low(i)) dq.pop()
+    dq.push(i)
+    while (dq[head] <= i - period) head++
+    out[i] = low(dq[head])
+  }
+  return out
+}
+
 // Ход выбранной свечи для шапки истории: изменение капитала за период (закрытие − открытие) и размах внутри него
 // (максимум − минимум, это волатильность «внутри дня», которую не видно в истории операций). Нет данных свечи → null.
 // Процент считается от открытия; при нулевом открытии он не определён (null).

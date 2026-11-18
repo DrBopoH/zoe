@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { TFS, dayStartOf, weekStartOf, alignDown, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, transferSteps } from '../src/utils/candleMath.js'
+import { TFS, dayStartOf, weekStartOf, alignDown, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, transferSteps, movingSupport } from '../src/utils/candleMath.js'
 
 test('dayStartOf / weekStartOf: полночь и понедельник', () => {
   const d = new Date(2026, 10, 12, 15, 30) // чт
@@ -155,4 +155,20 @@ test('transferSteps: без пары, вне окна или с другой с�
   ])
   assert.deepEqual(Array.from(r.end), [1, 1, 1, 1])
   assert.equal(r.amt.length, 4)
+})
+
+test('скользящая поддержка: низ тела за окно, фитили не в счёт, у начала окно неполное', () => {
+  const O = [10, 12, 11, 13, 15, 14, 16]
+  const C = [12, 11, 13, 15, 14, 16, 18]
+  // низы тел: 10, 11, 11, 13, 14, 14, 16
+  assert.deepEqual([...movingSupport(O, C, 3)], [10, 10, 10, 11, 11, 13, 14])
+  assert.deepEqual([...movingSupport(O, C, 1)], [10, 11, 11, 13, 14, 14, 16])
+  assert.deepEqual([...movingSupport(O, C, 100)], [10, 10, 10, 10, 10, 10, 10])
+  assert.equal(movingSupport([], []).length, 0)
+})
+
+test('скользящая поддержка: падение капитала тянет линию вниз сразу, рост — только когда старый минимум выходит из окна', () => {
+  const O = [100, 100, 100, 100, 100, 100]
+  const C = [100, 100, 50, 100, 100, 100]
+  assert.deepEqual([...movingSupport(O, C, 3)], [100, 100, 50, 50, 50, 100])
 })

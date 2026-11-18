@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { apiSend } from '../utils/api.js'
 import { storageGet, storageSet } from '../utils/storage.js'
-import { TFS, dayStartOf, weekStartOf, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, candleBounds, candleWindow, candleSpans, candleYRanges, visibleSlots, transferSteps } from '../utils/candleMath.js'
+import { movingSupport, TFS, dayStartOf, weekStartOf, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, candleBounds, candleWindow, candleSpans, candleYRanges, visibleSlots, transferSteps } from '../utils/candleMath.js'
 import { clampWindow } from '../utils/chartView.js'
 import { useChartView } from '../composables/useChartView.js'
 import { toLocalDateStr, formatMoney, formatDateLong, formatShortDateName, formatMonthName } from '../utils/formatters.js'
@@ -335,6 +335,17 @@ const lastPrice = computed(() => {
   return { val, up, y: Math.min(SVG_H - PAD.b, Math.max(PAD.t / 2, yOf(val))) }
 })
 
+// Скользящая поддержка (utils/candleMath.js: movingSupport): ломаная через центры видимых свечей, по значению на свечу
+const supportAll = computed(() => (series.value && series.value.n ? movingSupport(series.value.O, series.value.C) : null))
+const supportPath = computed(() => {
+  const S = series.value, sup = supportAll.value
+  if (!S || !sup) return ''
+  const { a, b } = visible.value
+  const pts = []
+  for (let i = Math.max(0, a); i < Math.min(b, S.n); i++) pts.push(`${slotX(i).toFixed(1)},${yOf(sup[i]).toFixed(1)}`)
+  return pts.length > 1 ? 'M' + pts.join('L') : ''
+})
+
 const candleAt = (i) => {
   const S = series.value
   const getY = yOf
@@ -657,6 +668,9 @@ watch([() => kv.view.value.x0, nSlots, () => spanNow.value], ([x0, n, span]) => 
             :class="hoveredCandle && hoveredCandle.key === c.key ? 'opacity-100' : 'opacity-90'"
           />
         </g>
+
+        <!-- скользящая поддержка: низ «тела» капитала за SUPPORT_PERIOD свечей -->
+        <path v-if="supportPath" :d="supportPath" fill="none" stroke="#fbbf24" stroke-width="1.5" stroke-opacity="0.85" stroke-linejoin="round" stroke-linecap="round" pointer-events="none" />
 
         <!-- выплаты: купон — листочек с треугольником на грани, погашение — «бумага»; серые — уже получены -->
         <g
