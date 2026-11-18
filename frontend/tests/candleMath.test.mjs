@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { TFS, dayStartOf, weekStartOf, alignDown, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, transferSteps, movingSupport, SUPPORT_LINES } from '../src/utils/candleMath.js'
+import { TFS, dayStartOf, weekStartOf, alignDown, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, transferSteps, movingAverage, MA_LINES } from '../src/utils/candleMath.js'
 
 test('dayStartOf / weekStartOf: полночь и понедельник', () => {
   const d = new Date(2026, 10, 12, 15, 30) // чт
@@ -157,38 +157,16 @@ test('transferSteps: без пары, вне окна или с другой с�
   assert.equal(r.amt.length, 4)
 })
 
-test('скользящая поддержка: идёт по впадинам тела, между ними прямо, после последней держится ровно', () => {
-  const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} ≠ ${b}`)
-  //            0   1   2  3   4   5   6   7   8   9  10
-  const lows = [50, 40, 45, 60, 70, 55, 52, 58, 65, 80, 90]
-  const s = movingSupport(lows, lows, 1) // впадины: 1 (40) и 6 (52); край 0 тоже не выше соседа (50 > 40 — нет)
-  near(s[0], 40) // до первой впадины — на её уровне
-  near(s[1], 40)
-  near(s[6], 52)
-  near(s[3], 40 + ((52 - 40) * 2) / 5) // прямая между впадинами
-  near(s[10], 52) // после последней — её уровень
+test('MA: простое среднее закрытий за N свечей, линия начинается с N-й свечи', () => {
+  const m = movingAverage([2, 4, 6, 8, 10], 3)
+  assert.ok(Number.isNaN(m[0]) && Number.isNaN(m[1]))
+  assert.deepEqual([m[2], m[3], m[4]], [4, 6, 8])
+  assert.equal(movingAverage([], 7).length, 0)
+  assert.ok(movingAverage([1, 2, 3], 7).every(Number.isNaN)) // истории меньше окна — линии нет
+  assert.deepEqual([...movingAverage([5, 7], 1)], [5, 7])
 })
 
-test('скользящая поддержка: фитили не в счёт, плоский участок даёт плоскую линию, пустой ряд — пусто', () => {
-  assert.deepEqual([...movingSupport([5, 5, 5, 5], [5, 5, 5, 5])], [5, 5, 5, 5])
-  assert.equal(movingSupport([], []).length, 0)
-  // тело считается по min(открытие, закрытие): рост и падение дают один и тот же низ
-  assert.deepEqual([...movingSupport([10, 20], [20, 10])], [10, 10])
-})
-
-test('скользящая поддержка: пробой — новая впадина ниже опускает линию, она не отстаёт ступенями', () => {
-  const lows = [100, 90, 100, 110, 100, 70, 100, 110, 120]
-  const s = movingSupport(lows, lows, 1)
-  assert.ok(s[1] === 90 && s[5] === 70 && s[8] === 70)
-  assert.ok(Math.abs(s[3] - 80) < 1e-9, 'между впадинами 90 и 70 линия снижается прямо')
-})
-
-test('три линии поддержки: чем больше k, тем реже впадины и тем крупнее каркас', () => {
-  assert.equal(SUPPORT_LINES.length, 3)
-  assert.deepEqual(SUPPORT_LINES.map((l) => l.k), [...SUPPORT_LINES.map((l) => l.k)].sort((a, b) => a - b))
-  // шумный ряд: короткая линия ломается на каждой мелкой впадине, длинная — только на крупных
-  const lows = Array.from({ length: 200 }, (_, i) => 100 + ((i * 37) % 23) + (i > 100 ? 40 : 0))
-  const bends = (arr) => { let c = 0; for (let i = 2; i < arr.length; i++) if (Math.abs(arr[i] - 2 * arr[i - 1] + arr[i - 2]) > 1e-9) c++; return c }
-  const [s3, , s21] = SUPPORT_LINES.map((l) => movingSupport(lows, lows, l.k))
-  assert.ok(bends(s21) < bends(s3), `изломов у длинной ${bends(s21)} должно быть меньше, чем у короткой ${bends(s3)}`)
+test('MA: как на Binance — 7, 25 и 99, жёлтая, розовая, фиолетовая', () => {
+  assert.deepEqual(MA_LINES.map((l) => l.n), [7, 25, 99])
+  assert.equal(MA_LINES.length, 3)
 })

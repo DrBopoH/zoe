@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { apiSend } from '../utils/api.js'
 import { storageGet, storageSet } from '../utils/storage.js'
-import { movingSupport, SUPPORT_LINES, TFS, dayStartOf, weekStartOf, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, candleBounds, candleWindow, candleSpans, candleYRanges, visibleSlots, transferSteps } from '../utils/candleMath.js'
+import { movingAverage, MA_LINES, TFS, dayStartOf, weekStartOf, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, candleBounds, candleWindow, candleSpans, candleYRanges, visibleSlots, transferSteps } from '../utils/candleMath.js'
 import { clampWindow } from '../utils/chartView.js'
 import { useChartView } from '../composables/useChartView.js'
 import { toLocalDateStr, formatMoney, formatDateLong, formatShortDateName, formatMonthName } from '../utils/formatters.js'
@@ -335,17 +335,21 @@ const lastPrice = computed(() => {
   return { val, up, y: Math.min(SVG_H - PAD.b, Math.max(PAD.t / 2, yOf(val))) }
 })
 
-// Три скользящие поддержки (utils/candleMath.js: movingSupport, SUPPORT_LINES): ломаные через центры видимых свечей, по значению на свечу
-const supportAll = computed(() => (series.value && series.value.n ? SUPPORT_LINES.map(l => ({ ...l, v: movingSupport(series.value.O, series.value.C, l.k) })) : []))
-const supportPaths = computed(() => {
+// Скользящие средние как на Binance (utils/candleMath.js: movingAverage, MA_LINES): ломаные через центры видимых свечей по закрытию
+const maAll = computed(() => (series.value && series.value.n ? MA_LINES.map(l => ({ ...l, v: movingAverage(series.value.C, l.n) })) : []))
+const maPaths = computed(() => {
   const S = series.value
   if (!S) return []
   const { a, b } = visible.value
   const out = []
-  for (const l of supportAll.value) {
-    const pts = []
-    for (let i = Math.max(0, a); i < Math.min(b, S.n); i++) pts.push(`${slotX(i).toFixed(1)},${yOf(l.v[i]).toFixed(1)}`)
-    if (pts.length > 1) out.push({ k: l.k, color: l.color, d: 'M' + pts.join('L') })
+  for (const l of maAll.value) {
+    let d = '', pen = false
+    for (let i = Math.max(0, a); i < Math.min(b, S.n); i++) {
+      if (!isFinite(l.v[i])) { pen = false; continue }
+      d += `${pen ? 'L' : 'M'}${slotX(i).toFixed(1)},${yOf(l.v[i]).toFixed(1)}`
+      pen = true
+    }
+    if (d) out.push({ n: l.n, color: l.color, d })
   }
   return out
 })
@@ -542,7 +546,7 @@ watch([() => kv.view.value.x0, nSlots, () => spanNow.value], ([x0, n, span]) => 
           >{{ t.id }}</button>
         </div>
         <span class="text-[10px] text-slate-500">Свечей: {{ series ? series.n : 0 }}<template v-if="loadingMore"> · грузим…</template></span>
-        <span class="text-[10px] text-slate-500" title="Скользящая поддержка по впадинам тела: короткая, средняя, длинная">Поддержка<template v-for="l in SUPPORT_LINES" :key="l.k"> <span :style="{ color: l.color }">S{{ l.k }}</span></template></span>
+        <span class="text-[10px] text-slate-500" title="Скользящие средние по закрытию, как на Binance"><template v-for="l in MA_LINES" :key="l.n"><span :style="{ color: l.color }">MA({{ l.n }})</span> </template></span>
         <button v-if="zoomed" type="button" class="text-[10px] text-slate-400 hover:text-emerald-400 underline transition-colors" @click="resetView">Сброс масштаба</button>
       </div>
 
@@ -674,8 +678,8 @@ watch([() => kv.view.value.x0, nSlots, () => spanNow.value], ([x0, n, span]) => 
           />
         </g>
 
-        <!-- три скользящие поддержки по впадинам «тела» капитала: короткая, средняя, длинная -->
-        <path v-for="p in supportPaths" :key="'sup-' + p.k" :d="p.d" fill="none" :stroke="p.color" stroke-width="1.5" stroke-opacity="0.9" stroke-linejoin="round" stroke-linecap="round" pointer-events="none" />
+        <!-- скользящие средние MA(7/25/99) по закрытию, как на Binance -->
+        <path v-for="p in maPaths" :key="'ma-' + p.n" :d="p.d" fill="none" :stroke="p.color" stroke-width="1.3" stroke-opacity="0.95" stroke-linejoin="round" stroke-linecap="round" pointer-events="none" />
 
         <!-- выплаты: купон — листочек с треугольником на грани, погашение — «бумага»; серые — уже получены -->
         <g
