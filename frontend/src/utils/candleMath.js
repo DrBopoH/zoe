@@ -118,21 +118,26 @@ export function transferSteps(list) {
   return { ms, amt, end }
 }
 
-// Скользящая поддержка: по одному значению на свечу — самый низкий «низ тела» (min(открытие, закрытие)) за последние `period`
-// свечей, включая текущую. Идёт за графиком с шагом таймфрейма и показывает, куда движется нижняя граница «тела» капитала
-// (тренд); фитили не в счёт — это разовые провалы внутри свечи. У первых свечей окно неполное (берутся все, что есть).
-export const SUPPORT_PERIOD = 20
+// Скользящая поддержка — линия тренда по низам тел: для каждой свечи берём «низ тела» (min(открытие, закрытие)) последних
+// `period` свечей, проводим по ним прямую методом наименьших квадратов и берём её значение на текущей свече. Линия идёт
+// за графиком с шагом таймфрейма, плавная (без ступеней), и показывает направление нижней границы «тела» капитала.
+// Фитили не в счёт. У первых свечей окно неполное; у первой — просто её низ.
+export const SUPPORT_PERIOD = 14
 export function movingSupport(open, close, period = SUPPORT_PERIOD) {
   const n = Math.min(open.length, close.length)
   const out = new Float64Array(n)
   const low = (i) => Math.min(open[i], close[i])
-  const dq = [] // индексы, низ тела растёт от головы к хвосту (монотонная очередь): минимум окна — всегда голова
-  let head = 0
   for (let i = 0; i < n; i++) {
-    while (dq.length > head && low(dq[dq.length - 1]) >= low(i)) dq.pop()
-    dq.push(i)
-    while (dq[head] <= i - period) head++
-    out[i] = low(dq[head])
+    const from = Math.max(0, i - period + 1)
+    const m = i - from + 1
+    if (m < 2) { out[i] = low(i); continue }
+    let sy = 0, sxy = 0
+    for (let j = from; j <= i; j++) { sy += low(j); sxy += (j - from) * low(j) }
+    const sx = (m * (m - 1)) / 2, sxx = ((m - 1) * m * (2 * m - 1)) / 6
+    const den = m * sxx - sx * sx
+    const slope = (m * sxy - sx * sy) / den
+    const icpt = (sy - slope * sx) / m
+    out[i] = icpt + slope * (m - 1)
   }
   return out
 }
