@@ -76,6 +76,8 @@ type Client struct {
 	HTTP    *http.Client
 	NBUBase string
 	USTBase string
+	// P2PMinDeal — минимальная сумма сделки по объявлению P2P, ₴, чтобы оно считалось рабочим; 0 — 1 000 ₴
+	P2PMinDeal float64
 	// FREDBase — адрес FRED (ставка ФРС, инфляция США, доходность Treasury); публичный CSV без ключа
 	FREDBase string
 	// BinanceBase — публичные свечи Binance (без ключа, без подписи); FNGBase — индекс страха и жадности крипторынка
