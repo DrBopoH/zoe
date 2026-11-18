@@ -198,6 +198,7 @@ Links are stored in the permanent database and **survive a cache reset**.
 - **A click on a candle** selects it; the history below shows only the operations of this interval.
 - On the 1D timeframe the chart continues forward to the last bond payout (markers of coupons and maturity, without candles).
 - The selected timeframe is remembered in the browser.
+- **Moving support:** the amber line follows the chart one value per candle — the lowest bottom of a candle body (the lower of open and close) over the last 20 candles. It shows where the lower edge of the capital "body" is heading; wicks are not counted.
 
 ## Operation badges
 
