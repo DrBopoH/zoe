@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { TFS, dayStartOf, weekStartOf, alignDown, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, transferSteps, movingAverage, MA_LINES } from '../src/utils/candleMath.js'
+import { TFS, dayStartOf, weekStartOf, alignDown, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, transferSteps, movingAverage, MA_LINES, candleVolume } from '../src/utils/candleMath.js'
 
 test('dayStartOf / weekStartOf: полночь и понедельник', () => {
   const d = new Date(2026, 10, 12, 15, 30) // чт
@@ -169,4 +169,23 @@ test('MA: простое среднее закрытий за N свечей, л
 test('MA: как на Binance — 7, 25 и 99, жёлтая, розовая, фиолетовая', () => {
   assert.deepEqual(MA_LINES.map((l) => l.n), [7, 25, 99])
   assert.equal(MA_LINES.length, 3)
+})
+
+test('Volume: приход и расход по модулю складываются, цвет по перевесу, ноль — зелёный', () => {
+  assert.deepEqual(candleVolume(300, 100), { total: 400, up: true })
+  assert.deepEqual(candleVolume(100, 300), { total: 400, up: false })
+  assert.deepEqual(candleVolume(-50, -70), { total: 120, up: false }) // знаки не важны
+  assert.deepEqual(candleVolume(100, 100), { total: 200, up: true }) // поровну — капитал не изменился, зелёный
+  assert.deepEqual(candleVolume(0, 0), { total: 0, up: true })
+  assert.deepEqual(candleVolume(undefined, NaN), { total: 0, up: true })
+})
+
+test('Volume: перевод между своими счетами считается один раз и на цвет не влияет', () => {
+  // только перевод на 500: приход 500 + расход 500, но движение одно
+  assert.deepEqual(candleVolume(500, 500, 500), { total: 500, up: true })
+  // перевод 500 и трата 200: объём 700, перевес расхода → красный
+  assert.deepEqual(candleVolume(500, 700, 500), { total: 700, up: false })
+  // перевод 500 и зарплата 1000: объём 1500, зелёный
+  assert.deepEqual(candleVolume(1500, 500, 500), { total: 1500, up: true })
+  assert.deepEqual(candleVolume(100, 100, 999), { total: 999, up: true }) // не уходит в минус
 })
