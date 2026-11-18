@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { TFS, dayStartOf, weekStartOf, alignDown, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, transferSteps, movingSupport } from '../src/utils/candleMath.js'
+import { TFS, dayStartOf, weekStartOf, alignDown, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, transferSteps, movingSupport, SUPPORT_LINES } from '../src/utils/candleMath.js'
 
 test('dayStartOf / weekStartOf: полночь и понедельник', () => {
   const d = new Date(2026, 10, 12, 15, 30) // чт
@@ -181,4 +181,14 @@ test('скользящая поддержка: пробой — новая вп�
   const s = movingSupport(lows, lows, 1)
   assert.ok(s[1] === 90 && s[5] === 70 && s[8] === 70)
   assert.ok(Math.abs(s[3] - 80) < 1e-9, 'между впадинами 90 и 70 линия снижается прямо')
+})
+
+test('три линии поддержки: чем больше k, тем реже впадины и тем крупнее каркас', () => {
+  assert.equal(SUPPORT_LINES.length, 3)
+  assert.deepEqual(SUPPORT_LINES.map((l) => l.k), [...SUPPORT_LINES.map((l) => l.k)].sort((a, b) => a - b))
+  // шумный ряд: короткая линия ломается на каждой мелкой впадине, длинная — только на крупных
+  const lows = Array.from({ length: 200 }, (_, i) => 100 + ((i * 37) % 23) + (i > 100 ? 40 : 0))
+  const bends = (arr) => { let c = 0; for (let i = 2; i < arr.length; i++) if (Math.abs(arr[i] - 2 * arr[i - 1] + arr[i - 2]) > 1e-9) c++; return c }
+  const [s3, , s21] = SUPPORT_LINES.map((l) => movingSupport(lows, lows, l.k))
+  assert.ok(bends(s21) < bends(s3), `изломов у длинной ${bends(s21)} должно быть меньше, чем у короткой ${bends(s3)}`)
 })

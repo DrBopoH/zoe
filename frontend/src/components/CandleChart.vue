@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { apiSend } from '../utils/api.js'
 import { storageGet, storageSet } from '../utils/storage.js'
-import { movingSupport, TFS, dayStartOf, weekStartOf, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, candleBounds, candleWindow, candleSpans, candleYRanges, visibleSlots, transferSteps } from '../utils/candleMath.js'
+import { movingSupport, SUPPORT_LINES, TFS, dayStartOf, weekStartOf, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, candleBounds, candleWindow, candleSpans, candleYRanges, visibleSlots, transferSteps } from '../utils/candleMath.js'
 import { clampWindow } from '../utils/chartView.js'
 import { useChartView } from '../composables/useChartView.js'
 import { toLocalDateStr, formatMoney, formatDateLong, formatShortDateName, formatMonthName } from '../utils/formatters.js'
@@ -335,15 +335,19 @@ const lastPrice = computed(() => {
   return { val, up, y: Math.min(SVG_H - PAD.b, Math.max(PAD.t / 2, yOf(val))) }
 })
 
-// Скользящая поддержка (utils/candleMath.js: movingSupport): ломаная через центры видимых свечей, по значению на свечу
-const supportAll = computed(() => (series.value && series.value.n ? movingSupport(series.value.O, series.value.C) : null))
-const supportPath = computed(() => {
-  const S = series.value, sup = supportAll.value
-  if (!S || !sup) return ''
+// Три скользящие поддержки (utils/candleMath.js: movingSupport, SUPPORT_LINES): ломаные через центры видимых свечей, по значению на свечу
+const supportAll = computed(() => (series.value && series.value.n ? SUPPORT_LINES.map(l => ({ ...l, v: movingSupport(series.value.O, series.value.C, l.k) })) : []))
+const supportPaths = computed(() => {
+  const S = series.value
+  if (!S) return []
   const { a, b } = visible.value
-  const pts = []
-  for (let i = Math.max(0, a); i < Math.min(b, S.n); i++) pts.push(`${slotX(i).toFixed(1)},${yOf(sup[i]).toFixed(1)}`)
-  return pts.length > 1 ? 'M' + pts.join('L') : ''
+  const out = []
+  for (const l of supportAll.value) {
+    const pts = []
+    for (let i = Math.max(0, a); i < Math.min(b, S.n); i++) pts.push(`${slotX(i).toFixed(1)},${yOf(l.v[i]).toFixed(1)}`)
+    if (pts.length > 1) out.push({ k: l.k, color: l.color, d: 'M' + pts.join('L') })
+  }
+  return out
 })
 
 const candleAt = (i) => {
@@ -538,6 +542,7 @@ watch([() => kv.view.value.x0, nSlots, () => spanNow.value], ([x0, n, span]) => 
           >{{ t.id }}</button>
         </div>
         <span class="text-[10px] text-slate-500">Свечей: {{ series ? series.n : 0 }}<template v-if="loadingMore"> · грузим…</template></span>
+        <span class="text-[10px] text-slate-500" title="Скользящая поддержка по впадинам тела: короткая, средняя, длинная">Поддержка<template v-for="l in SUPPORT_LINES" :key="l.k"> <span :style="{ color: l.color }">S{{ l.k }}</span></template></span>
         <button v-if="zoomed" type="button" class="text-[10px] text-slate-400 hover:text-emerald-400 underline transition-colors" @click="resetView">Сброс масштаба</button>
       </div>
 
@@ -669,8 +674,8 @@ watch([() => kv.view.value.x0, nSlots, () => spanNow.value], ([x0, n, span]) => 
           />
         </g>
 
-        <!-- скользящая поддержка: низ «тела» капитала за SUPPORT_PERIOD свечей -->
-        <path v-if="supportPath" :d="supportPath" fill="none" stroke="#fbbf24" stroke-width="1.5" stroke-opacity="0.85" stroke-linejoin="round" stroke-linecap="round" pointer-events="none" />
+        <!-- три скользящие поддержки по впадинам «тела» капитала: короткая, средняя, длинная -->
+        <path v-for="p in supportPaths" :key="'sup-' + p.k" :d="p.d" fill="none" :stroke="p.color" stroke-width="1.5" stroke-opacity="0.9" stroke-linejoin="round" stroke-linecap="round" pointer-events="none" />
 
         <!-- выплаты: купон — листочек с треугольником на грани, погашение — «бумага»; серые — уже получены -->
         <g

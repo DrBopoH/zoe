@@ -123,6 +123,13 @@ export function transferSteps(list) {
 // прямо, после последней держится на её уровне (поддержка стоит, пока её не пробили: новая впадина ниже — линия опустится),
 // до первой — на уровне первой. Значение — по одному на свечу, фитили не в счёт. Нет ни одной впадины — минимум низов тел.
 export const SUPPORT_K = 3
+// Три линии поддержки, как три скользящие на Binance: короткая (мелкие впадины), средняя и длинная (общий каркас из крупных отскоков).
+// k — сколько соседей с каждой стороны должна «пережить» впадина; цвета — как у MA(7/25/99) на Binance.
+export const SUPPORT_LINES = [
+  { k: 3, color: '#f0b90b' },
+  { k: 8, color: '#ec4899' },
+  { k: 21, color: '#a855f7' }
+]
 export function movingSupport(open, close, k = SUPPORT_K) {
   const n = Math.min(open.length, close.length)
   const out = new Float64Array(n)
