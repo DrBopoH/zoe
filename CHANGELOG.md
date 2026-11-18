@@ -8,7 +8,7 @@ Versions: `R.sB.C+T.hash`. On `dev` there is no state letter (`v1.1.C+T`), the l
 
 Polishing the user-friendly design and finishing QoL, builder and reference features.
 
-- **v1.3.11** — Candle chart: moving support — one amber line, a value per candle: the lowest body bottom (min of open and close) over the last 20 candles; it shows the trend of the capital "body" lower edge
+- **v1.3.11** — Candle chart: moving support — an amber trend line through the candle-body bottoms (min of open and close): a straight line fitted to the last 14 bodies, its value on each candle; smooth, one value per candle, shows the direction of the capital "body" lower edge
 - **v1.3.10** — P2P deal size is now a setting: `P2P_MIN_DEAL_UAH` (default 1000 ₴) — adverts that cannot take a deal of at least that amount do not set the P2P price
 - **v1.3.9** — Backend test of a cold start: a fresh install (both databases empty, no tokens or source files) answers every screen's read endpoint with 200 and valid JSON, never 5xx
 - **v1.3.8** — Market charts: while series are loading, an empty panel says "Идёт загрузка…" (Loading…) instead of "Нет данных" (No data)
