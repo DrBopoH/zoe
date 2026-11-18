@@ -8,6 +8,7 @@ Versions: `R.sB.C+T.hash`. On `dev` there is no state letter (`v1.1.C+T`), the l
 
 Polishing the user-friendly design and finishing QoL, builder and reference features.
 
+- **v1.3.8** — Backend test of a cold start: a fresh install (both databases empty, no tokens or source files) answers every screen's read endpoint with 200 and valid JSON, never 5xx
 - **v1.3.7** — Small QoL: the "Company stocks" screen remembers the chosen company (after a reload it opens it, not the first one); while series are loading, an empty market chart says "Идёт загрузка…" (Loading…) instead of "Нет данных" (No data)
 - **v1.3.6** — `clc.sh build` repeats the merge while GitHub still counts the PR checks as queued (up to 30 tries, 10 s apart)
 - **v1.3.5** — Toasts: pause between leaves cut from 0.5 to 0.2 s; the stack keeps its scroll place when toasts appear and leave (at the top it stays at the newest, at the bottom at the oldest, in the middle it does not move), the slide-in no longer draws a horizontal scrollbar
