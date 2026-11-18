@@ -198,7 +198,7 @@ Links are stored in the permanent database and **survive a cache reset**.
 - **A click on a candle** selects it; the history below shows only the operations of this interval.
 - On the 1D timeframe the chart continues forward to the last bond payout (markers of coupons and maturity, without candles).
 - The selected timeframe is remembered in the browser.
-- **Moving support:** three lines through the real troughs of the capital "body" (a trough is a candle whose body bottom — the lower of open and close — is not higher than its neighbours on each side), like three moving averages on Binance: short **S3** (yellow, 3 neighbours — small troughs), medium **S8** (pink) and long **S21** (purple, only the big rebounds — the frame of the chart). Each runs straight between neighbouring troughs and level after the last one: a support stands until it is broken, a new lower trough pulls it down. One value per candle, wicks are not counted.
+- **Moving averages (as on Binance):** three lines over the closing price — **MA(7)** yellow, **MA(25)** pink, **MA(99)** purple: the simple average of the last 7, 25 and 99 candles. A line starts from its Nth candle, the same as on Binance. They show the trend of the capital on the chosen timeframe; the legend is in the chart header.
 
 ## Operation badges
 
