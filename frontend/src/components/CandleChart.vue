@@ -26,8 +26,9 @@ const BLUE = '#93c5fd' // голубой как у бейджа покупки �
 const CLAIMED = '#64748b' // выплата уже получена — серым
 const chartContainerRef = ref(null)
 
-const SVG_H = 260
-const PAD = { l: 8, r: 8, t: 30, b: 30 } // поля графика (px): по ним мышь переводится в слоты и значения
+const VOL_H = 56 // полоса Volume под ценовой частью (px): ценовая часть остаётся прежней высоты, график просто стал выше
+const SVG_H = 260 + VOL_H
+const PAD = { l: 8, r: 8, t: 30, b: 30 + VOL_H } // поля графика (px): по ним мышь переводится в слоты и значения
 
 // ── Таймфреймы. Внутридневные окна ограничены (минутных свечей за годы — сотни тысяч), 1D и 1W — вся история.
 const readTf = () => {
@@ -355,8 +356,10 @@ const maPaths = computed(() => {
   return out
 })
 
-// Гистограмма Volume — внизу области графика, под свечами, полупрозрачная: высота по самому большому объёму видимых свечей
-const VOL_FRAC = 0.2
+// Гистограмма Volume — отдельная полоса под ценовой частью: столбики растут вниз от её верхней линии (зеркально свечам), без прозрачности.
+// Высота — по самому большому объёму видимых свечей.
+const volTop = SVG_H - PAD.b + 6
+const volFull = VOL_H - 10
 const volBars = computed(() => {
   const S = series.value
   if (!S) return []
@@ -369,12 +372,11 @@ const volBars = computed(() => {
     rows.push({ i, ...v, inflow: S.IN[i], outflow: S.OUT[i] })
   }
   if (!(max > 0)) return []
-  const base = SVG_H - PAD.b, full = (SVG_H - PAD.t - PAD.b) * VOL_FRAC
   const w = Math.max(1, Math.min(24, stepPx.value * 0.65))
-  return rows.filter(r => r.total > 0).map(r => {
-    const h = Math.max(1, (r.total / max) * full)
-    return { key: String(S.starts[r.i]), x: slotX(r.i) - w / 2, y: base - h, w, h, up: r.up, inflow: r.inflow, outflow: r.outflow }
-  })
+  return rows.filter(r => r.total > 0).map(r => ({
+    key: String(S.starts[r.i]), x: slotX(r.i) - w / 2, y: volTop, w, h: Math.max(1, (r.total / max) * volFull),
+    up: r.up, inflow: r.inflow, outflow: r.outflow
+  }))
 })
 
 const candleAt = (i) => {
@@ -408,7 +410,7 @@ const candleScales = computed(() => {
   for (let i = a; i < Math.min(b, nCandles); i++) candles.push(candleAt(i))
 
   // маркеры выплат лежат на «полу» таймлайна, прямо над датами; в один день сыплются столбиком вверх (только на 1D)
-  const floorY = SVG_H - 38
+  const floorY = SVG_H - PAD.b - 8
   const slotOfDate = new Map()
   const slots = []
   for (let i = a; i < b; i++) {
@@ -678,8 +680,9 @@ watch([() => kv.view.value.x0, nSlots, () => spanNow.value], ([x0, n, span]) => 
           stroke-dasharray="2 2"
         />
 
-        <!-- Volume: приход + расход по модулю; зелёный — приход больше или поровну (в т.ч. 0), красный — расход больше; перевод между своими счетами — один раз -->
-        <rect v-for="v in volBars" :key="'vol-' + v.key" :x="v.x" :y="v.y" :width="v.w" :height="v.h" :fill="v.up ? '#10b981' : '#f43f5e'" fill-opacity="0.28" pointer-events="none">
+        <!-- Volume: отдельная полоса под ценой, столбики вниз от линии; приход + расход по модулю; зелёный — приход больше или поровну (в т.ч. 0), красный — расход больше; перевод между своими счетами — один раз -->
+        <line x1="0" :y1="volTop" :x2="svgW" :y2="volTop" stroke="#334155" stroke-width="1" />
+        <rect v-for="v in volBars" :key="'vol-' + v.key" :x="v.x" :y="v.y" :width="v.w" :height="v.h" :fill="v.up ? '#10b981' : '#f43f5e'" fill-opacity="0.9">
           <title>Приход {{ UK_INT.format(v.inflow) }} · Расход {{ UK_INT.format(v.outflow) }}</title>
         </rect>
 
