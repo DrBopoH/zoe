@@ -48,6 +48,7 @@ RAIF_TOKENS=токен             # або RAIF_TOKEN=один_токен
 | `CACHE_DB_PATH` | `cache.db` | одноразовий кеш виписок |
 | `CORE_DB_PATH` | `core.db` | постійні дані: особи, аліаси, зв'язки |
 | `MARKET_EVERY` | `1h` | як часто бекенд сам знімає знімки крипто-контуру (P2P-ціна, комісії мереж, домінація); `30m`, `2h` тощо, `0` вимикає |
+| `P2P_MIN_DEAL_UAH` | `1000` | мінімальна сума угоди, ₴, щоб оголошення P2P вважалося робочим (менші ціну USDT не задають) |
 | `ECONOMIC_SOURCES_DIR` | `$XDG_DATA_HOME/economic/sources`, інакше `~/.local/share/economic/sources` | тека файлів-джерел `.zoe` |
 
 Фронтенд: `VITE_API_BASE` (за замовчуванням `http://127.0.0.1:8080/api`).
