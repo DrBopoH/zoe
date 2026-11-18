@@ -199,7 +199,7 @@ Links are stored in the permanent database and **survive a cache reset**.
 - On the 1D timeframe the chart continues forward to the last bond payout (markers of coupons and maturity, without candles).
 - The selected timeframe is remembered in the browser.
 - **Moving averages (as on Binance):** three lines over the closing price — **MA(7)** yellow, **MA(25)** pink, **MA(99)** purple: the simple average of the last 7, 25 and 99 candles. A line starts from its Nth candle, the same as on Binance. They show the trend of the capital on the chosen timeframe; the legend is in the chart header.
-- **Volume histogram:** the bars at the bottom of the chart, under the candles. For each candle the inflow and the outflow are summed by absolute value; the colour shows which side prevails — green when the inflow is bigger or equal (also when nothing happened: nothing changed outside the capital), red when the outflow is bigger. A transfer between your own accounts is one movement and counts once, it does not change the colour. The tallest bar is the biggest turnover in the visible part; hover a bar to see the inflow and the outflow.
+- **Volume histogram:** a separate strip under the candles: the bars hang down from its top line, mirroring the candles. For each candle the inflow and the outflow are summed by absolute value; the colour shows which side prevails — green when the inflow is bigger or equal (also when nothing happened: nothing changed outside the capital), red when the outflow is bigger. A transfer between your own accounts is one movement and counts once, it does not change the colour. The tallest bar is the biggest turnover in the visible part; hover a bar to see the inflow and the outflow.
 
 ## Operation badges
 
