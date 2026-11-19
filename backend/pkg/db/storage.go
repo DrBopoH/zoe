@@ -254,7 +254,7 @@ CREATE TABLE IF NOT EXISTS iban_masks (
 	custom INTEGER NOT NULL DEFAULT 0
 );
 -- Дела (рабочие пространства): сфера жизни или проекта пользователя — Glovo, семейный бюджет, айти-проект. Ссылаются на остальные данные,
--- а своё (имя, обложка и дальше локальные пометки) хранят здесь. Обложка — цвет #rrggbb и/или маленькая картинка data:image.
+-- а своё (имя, обложка и дальше локальные пометки) хранят здесь. Обложка — цвет #rrggbb и/или ссылка на картинку http(s).
 CREATE TABLE IF NOT EXISTS workspaces (
 	id         TEXT PRIMARY KEY,
 	name       TEXT NOT NULL,

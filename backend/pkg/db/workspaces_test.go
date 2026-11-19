@@ -56,19 +56,18 @@ func TestWorkspacesCreateListUpdateDelete(t *testing.T) {
 }
 
 func TestWorkspaceValidation(t *testing.T) {
-	img := "data:image/png;base64,iVBORw0KGgo="
+	img := "https://example.com/cover.png"
 	bad := map[string]Workspace{
-		"пустое имя":       {Name: "   "},
-		"длинное имя":      {Name: strings.Repeat("я", maxWorkspaceName+1)},
-		"цвет не hex":      {Name: "x", Color: "red"},
-		"цвет короткий":    {Name: "x", Color: "#fff"},
-		"картинка не img":  {Name: "x", Image: "data:text/html;base64,PGI+"},
-		"картинка ftp":     {Name: "x", Image: "ftp://example.com/a.png"},
-		"url с кавычкой":   {Name: "x", Image: "https://e.com/a\".png"},
-		"url со скобкой":   {Name: "x", Image: "https://e.com/a).png"},
-		"url длинный":      {Name: "x", Image: "https://e.com/" + strings.Repeat("a", maxWorkspaceImageURL)},
-		"картинка svg":     {Name: "x", Image: "data:image/svg+xml;base64,PHN2Zz4="},
-		"картинка большая": {Name: "x", Image: "data:image/png;base64," + strings.Repeat("A", maxWorkspaceImage)},
+		"пустое имя":     {Name: "   "},
+		"длинное имя":    {Name: strings.Repeat("я", maxWorkspaceName+1)},
+		"цвет не hex":    {Name: "x", Color: "red"},
+		"цвет короткий":  {Name: "x", Color: "#fff"},
+		"картинка data":  {Name: "x", Image: "data:image/png;base64,iVBORw0KGgo="},
+		"картинка js":    {Name: "x", Image: "javascript:alert(1)"},
+		"картинка ftp":   {Name: "x", Image: "ftp://example.com/a.png"},
+		"url с кавычкой": {Name: "x", Image: "https://e.com/a\".png"},
+		"url со скобкой": {Name: "x", Image: "https://e.com/a).png"},
+		"url длинный":    {Name: "x", Image: "https://e.com/" + strings.Repeat("a", maxWorkspaceImageURL)},
 	}
 	for name, w := range bad {
 		if _, err := w.Clean(); !errors.Is(err, ErrWorkspace) {
