@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { apiSend } from '../utils/api.js'
 import { storageGet, storageSet } from '../utils/storage.js'
-import { movingAverage, MA_LINES, TFS, dayStartOf, weekStartOf, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, candleBounds, candleWindow, candleSpans, candleYRanges, visibleSlots, transferSteps } from '../utils/candleMath.js'
+import { movingAverage, MA_LINES, candleVolume, TFS, dayStartOf, weekStartOf, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, candleBounds, candleWindow, candleSpans, candleYRanges, visibleSlots, transferSteps } from '../utils/candleMath.js'
 import { clampWindow } from '../utils/chartView.js'
 import { useChartView } from '../composables/useChartView.js'
 import { toLocalDateStr, formatMoney, formatDateLong, formatShortDateName, formatMonthName } from '../utils/formatters.js'
@@ -26,8 +26,9 @@ const BLUE = '#93c5fd' // голубой как у бейджа покупки �
 const CLAIMED = '#64748b' // выплата уже получена — серым
 const chartContainerRef = ref(null)
 
-const SVG_H = 260
-const PAD = { l: 8, r: 8, t: 30, b: 30 } // поля графика (px): по ним мышь переводится в слоты и значения
+const VOL_H = 56 // полоса Volume под ценовой частью (px): ценовая часть остаётся прежней высоты, график просто стал выше
+const SVG_H = 260 + VOL_H
+const PAD = { l: 8, r: 8, t: 30, b: 30 + VOL_H } // поля графика (px): по ним мышь переводится в слоты и значения
 
 // ── Таймфреймы. Внутридневные окна ограничены (минутных свечей за годы — сотни тысяч), 1D и 1W — вся история.
 const readTf = () => {
@@ -187,7 +188,7 @@ const series = computed(() => {
 
   const bn = bnReady.value ? bnCache() : null
   const O = new Float64Array(n), H = new Float64Array(n), L = new Float64Array(n), C = new Float64Array(n)
-  const BO = new Float64Array(n), BC = new Float64Array(n), IN = new Float64Array(n), OUT = new Float64Array(n)
+  const BO = new Float64Array(n), BC = new Float64Array(n), IN = new Float64Array(n), OUT = new Float64Array(n), PAIR = new Float64Array(n)
   let cur = props.totalValueUAH - (bn ? bnLastValue : 0)
   let minVal = Infinity, maxVal = -Infinity
   for (let i = n - 1; i >= 0; i--) {
@@ -198,10 +199,11 @@ const series = computed(() => {
     let run = o1
     let h1 = Math.max(o1, c1)
     let l1 = Math.min(o1, c1)
-    let inflow = 0, outflow = 0
+    let inflow = 0, outflow = 0, pair = 0
     for (let k = lo[i]; k < lo[i + 1]; k++) {
       const a = amt[k]
       if (a > 0) inflow += a; else outflow -= a
+      if (!end[k]) pair += Math.abs(a) // первая запись перевода между своими счетами: одно движение, в объёме один раз
       run += a
       if (!end[k]) continue // середина перевода между своими счетами: капитал ещё не сошёлся, экстремум не фиксируем
       if (run > h1) h1 = run
@@ -216,11 +218,11 @@ const series = computed(() => {
     const high = Math.max(open, close, h1 + b[0], h1 + b[3], o1 + b[1], c1 + b[1])
     const low = Math.min(open, close, l1 + b[0], l1 + b[3], o1 + b[2], c1 + b[2])
     O[i] = open; H[i] = high; L[i] = low; C[i] = close
-    BO[i] = b[0]; BC[i] = b[3]; IN[i] = inflow; OUT[i] = outflow
+    BO[i] = b[0]; BC[i] = b[3]; IN[i] = inflow; OUT[i] = outflow; PAIR[i] = pair
     if (low < minVal) minVal = low
     if (high > maxVal) maxVal = high
   }
-  return { n, starts, O, H, L, C, BO, BC, IN, OUT, min: minVal, max: maxVal, bnSeries: !!bn }
+  return { n, starts, O, H, L, C, BO, BC, IN, OUT, PAIR, min: minVal, max: maxVal, bnSeries: !!bn }
 })
 
 // Таймлайн вперёд — до последней выплаты инвестиционного счёта (погашение). Свечей там нет, только маркеры. Только на 1D.
@@ -354,6 +356,29 @@ const maPaths = computed(() => {
   return out
 })
 
+// Гистограмма Volume — отдельная полоса под ценовой частью: столбики растут вниз от её верхней линии (зеркально свечам), без прозрачности.
+// Высота — по самому большому объёму видимых свечей.
+const volTop = SVG_H - PAD.b + 6
+const volFull = VOL_H - 10
+const volBars = computed(() => {
+  const S = series.value
+  if (!S) return []
+  const { a, b } = visible.value
+  const rows = []
+  let max = 0
+  for (let i = Math.max(0, a); i < Math.min(b, S.n); i++) {
+    const v = candleVolume(S.IN[i], S.OUT[i], S.PAIR[i])
+    if (v.total > max) max = v.total
+    rows.push({ i, ...v, inflow: S.IN[i], outflow: S.OUT[i] })
+  }
+  if (!(max > 0)) return []
+  const w = Math.max(1, Math.min(24, stepPx.value * 0.65))
+  return rows.filter(r => r.total > 0).map(r => ({
+    key: String(S.starts[r.i]), x: slotX(r.i) - w / 2, y: volTop, w, h: Math.max(1, (r.total / max) * volFull),
+    up: r.up, inflow: r.inflow, outflow: r.outflow
+  }))
+})
+
 const candleAt = (i) => {
   const S = series.value
   const getY = yOf
@@ -385,7 +410,7 @@ const candleScales = computed(() => {
   for (let i = a; i < Math.min(b, nCandles); i++) candles.push(candleAt(i))
 
   // маркеры выплат лежат на «полу» таймлайна, прямо над датами; в один день сыплются столбиком вверх (только на 1D)
-  const floorY = SVG_H - 38
+  const floorY = SVG_H - PAD.b - 8
   const slotOfDate = new Map()
   const slots = []
   for (let i = a; i < b; i++) {
@@ -546,7 +571,7 @@ watch([() => kv.view.value.x0, nSlots, () => spanNow.value], ([x0, n, span]) => 
           >{{ t.id }}</button>
         </div>
         <span class="text-[10px] text-slate-500">Свечей: {{ series ? series.n : 0 }}<template v-if="loadingMore"> · грузим…</template></span>
-        <span class="text-[10px] text-slate-500" title="Скользящие средние по закрытию, как на Binance"><template v-for="l in MA_LINES" :key="l.n"><span :style="{ color: l.color }">MA({{ l.n }})</span> </template></span>
+        <span class="text-[10px] text-slate-500" title="Скользящие средние по закрытию, как на Binance; внизу — объём: приход + расход, зелёный если приход не меньше расхода"><template v-for="l in MA_LINES" :key="l.n"><span :style="{ color: l.color }">MA({{ l.n }})</span> </template></span>
         <button v-if="zoomed" type="button" class="text-[10px] text-slate-400 hover:text-emerald-400 underline transition-colors" @click="resetView">Сброс масштаба</button>
       </div>
 
@@ -654,6 +679,12 @@ watch([() => kv.view.value.x0, nSlots, () => spanNow.value], ([x0, n, span]) => 
           stroke-width="1.5"
           stroke-dasharray="2 2"
         />
+
+        <!-- Volume: отдельная полоса под ценой, столбики вниз от линии; приход + расход по модулю; зелёный — приход больше или поровну (в т.ч. 0), красный — расход больше; перевод между своими счетами — один раз -->
+        <line x1="0" :y1="volTop" :x2="svgW" :y2="volTop" stroke="#334155" stroke-width="1" />
+        <rect v-for="v in volBars" :key="'vol-' + v.key" :x="v.x" :y="v.y" :width="v.w" :height="v.h" :fill="v.up ? '#10b981' : '#f43f5e'" fill-opacity="0.9">
+          <title>Приход {{ UK_INT.format(v.inflow) }} · Расход {{ UK_INT.format(v.outflow) }}</title>
+        </rect>
 
         <g v-for="c in candleScales.candles" :key="c.key">
           <line
