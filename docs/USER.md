@@ -75,7 +75,7 @@ The list, prices and curve are stored on the server (they survive a change of br
 
 ### Macro sections
 
-The "Макро" group in the left drawer. Each screen reads its own series and is updated by its own "Обновить" button (it polls only them), "Разведать" updates all sources at once. All data is public, no keys needed; the charts are controlled as described above (wheel, dragging, "Сброс масштаба"). Everywhere it is a picture, not a forecast and not advice. The "Ставка НБУ" (NBU rate) and "Инфляция" screens are described above.
+The "Макро" group in the left drawer. Each screen reads its own series and is updated by its own "Обновить" button (it polls only them), "Разведать" updates all sources at once. All data is public, no keys needed; the charts are controlled as described above (wheel, dragging, "Сброс масштаба"). Everywhere it is a picture, not a forecast and not advice. The "Ставка НБУ" (NBU rate) and "Инфляция" screens are described above. **A dashed line means no data:** if a series was silent for noticeably longer than its usual step (hourly P2P snapshots while the server was off, a skipped month, a company report that did not come out), the chart joins the neighbouring points with a dashed segment instead of a solid one, and the tooltip under the cursor writes "нет данных" there rather than the last known value. Rates are not affected: a rate holds until it changes, that is its meaning.
 
 ### Rates
 
@@ -200,6 +200,7 @@ Links are stored in the permanent database and **survive a cache reset**.
 - The selected timeframe is remembered in the browser.
 - **Moving averages (as on Binance):** three lines over the closing price — **MA(7)** yellow, **MA(25)** pink, **MA(99)** purple: the simple average of the last 7, 25 and 99 candles. A line starts from its Nth candle, the same as on Binance. They show the trend of the capital on the chosen timeframe; the legend is in the chart header.
 - **Volume histogram:** a separate strip under the candles: the bars hang down from its top line, mirroring the candles. For each candle the inflow and the outflow are summed by absolute value; the colour shows which side prevails — green when the inflow is bigger or equal (also when nothing happened: nothing changed outside the capital), red when the outflow is bigger. A transfer between your own accounts is one movement and counts once, it does not change the colour. The tallest bar is the biggest turnover in the visible part; hover a bar to see the inflow and the outflow.
+- **Hatched candle:** there was no Binance valuation at all in this period (the server was off), so the Binance part of the capital is taken at the last known price. The candle is drawn hatched with a dashed outline and the line above the chart says so; the bank part of such a candle is real.
 
 ## Operation badges
 
