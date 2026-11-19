@@ -253,6 +253,15 @@ CREATE TABLE IF NOT EXISTS iban_masks (
 	masked TEXT NOT NULL,
 	custom INTEGER NOT NULL DEFAULT 0
 );
+-- Дела (рабочие пространства): сфера жизни или проекта пользователя — Glovo, семейный бюджет, айти-проект. Ссылаются на остальные данные,
+-- а своё (имя, обложка и дальше локальные пометки) хранят здесь. Обложка — цвет #rrggbb и/или маленькая картинка data:image.
+CREATE TABLE IF NOT EXISTS workspaces (
+	id         TEXT PRIMARY KEY,
+	name       TEXT NOT NULL,
+	color      TEXT NOT NULL DEFAULT '',
+	image      TEXT NOT NULL DEFAULT '',
+	created_at INTEGER NOT NULL
+);
 -- Ручные правки счёта (лимит, IBAN, PAN) — это пользовательские данные, им не место в кеше.
 CREATE TABLE IF NOT EXISTS account_overrides (
 	account_id TEXT PRIMARY KEY,
