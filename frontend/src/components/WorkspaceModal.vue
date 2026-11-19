@@ -4,9 +4,9 @@ import UiModal from './ui/UiModal.vue'
 import UiButton from './ui/UiButton.vue'
 import UiIconButton from './ui/UiIconButton.vue'
 import WorkspaceCard from './WorkspaceCard.vue'
-import { PALETTE, NAME_MAX, cleanName, nameOk, validColor, readCoverImage, imageOk } from '../utils/workspaceCover.js'
+import { PALETTE, NAME_MAX, cleanName, nameOk, validColor, imageOk } from '../utils/workspaceCover.js'
 
-// Окно создания дела: название, цвет обложки (палитра или свой) и необязательная картинка. Сверху живой предпросмотр той же карточки, что будет в «Делах».
+// Окно создания дела: название, цвет обложки (палитра или свой) и необязательная ссылка на картинку. Сверху живой предпросмотр той же карточки, что будет в «Делах».
 const props = defineProps({
   isOpen: { type: Boolean, default: false },
   busy: { type: Boolean, default: false } // запрос на создание идёт
@@ -16,35 +16,21 @@ const emit = defineEmits(['close', 'create'])
 const name = ref('')
 const color = ref(PALETTE[0])
 const image = ref('')
-const imageError = ref('')
 const nameInput = ref(null)
-const fileInput = ref(null)
 
 watch(() => props.isOpen, (v) => {
   if (!v) return
   name.value = ''
   color.value = PALETTE[0]
   image.value = ''
-  imageError.value = ''
   nextTick(() => nameInput.value?.focus())
 })
 
 const linkBad = computed(() => !!image.value && !imageOk(image.value))
 const can = computed(() => nameOk(name.value) && !linkBad.value && !props.busy)
 const preview = computed(() => ({ name: cleanName(name.value) || 'Название дела', color: color.value, image: image.value }))
-const imageText = computed({ get: () => (image.value.startsWith('data:') ? '' : image.value), set: (v) => { image.value = v.trim() } })
+const imageText = computed({ get: () => image.value, set: (v) => { image.value = v.trim() } })
 
-const setImage = async (file) => {
-  imageError.value = ''
-  if (!file) return
-  try {
-    image.value = await readCoverImage(file)
-  } catch (e) {
-    imageError.value = e?.message || 'Не удалось прочитать картинку'
-  }
-}
-const onFile = (e) => { setImage(e.target.files?.[0]); e.target.value = '' }
-const onDrop = (e) => setImage(e.dataTransfer?.files?.[0])
 const onColor = (e) => { color.value = validColor(e.target.value) || color.value }
 
 const submit = () => {
@@ -70,13 +56,12 @@ const submit = () => {
         type="text"
         class="ui-input"
         :maxlength="NAME_MAX"
-        placeholder="Например: Glovo, Семейный бюджет"
+        placeholder="Например: Семейный бюджет"
         @keydown.enter.prevent="submit"
       />
     </label>
 
-    <div class="space-y-1.5">
-      <span class="ui-label">Цвет обложки</span>
+    <div>
       <div class="flex flex-wrap items-center gap-2">
         <button
           v-for="c in PALETTE"
@@ -94,17 +79,9 @@ const submit = () => {
       </div>
     </div>
 
-    <div class="space-y-1.5">
-      <span class="ui-label">Картинка (необязательно)</span>
-      <div class="flex items-center gap-2" @dragover.prevent @drop.prevent="onDrop">
-        <UiButton variant="outline" size="sm" @click="fileInput?.click()">{{ image ? 'Заменить' : 'Выбрать файл' }}</UiButton>
-        <UiButton v-if="image" variant="cancel" size="sm" @click="image = ''">Убрать</UiButton>
-        <span class="text-[10px] text-slate-500">или перетащи сюда; ляжет поверх цвета</span>
-        <input ref="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden" @change="onFile" />
-      </div>
-      <input v-model="imageText" type="text" class="ui-input" placeholder="или ссылка на картинку (https://…)" @keydown.enter.prevent="submit" />
-      <p v-if="imageError" class="text-[10px] text-rose-400">{{ imageError }}</p>
-      <p v-else-if="linkBad" class="text-[10px] text-rose-400">Нужна ссылка вида https://… без пробелов и скобок</p>
+    <div class="space-y-1">
+      <input v-model="imageText" type="text" class="ui-input" placeholder="Ссылка на картинку (https://…)" @keydown.enter.prevent="submit" />
+      <p v-if="linkBad" class="text-[10px] text-rose-400">Нужна ссылка вида https://… без пробелов и скобок</p>
     </div>
 
     <div class="flex justify-end gap-2 pt-1">

@@ -16,19 +16,17 @@ type Workspace struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Color     string `json:"color"` // обложка: #rrggbb или пусто
-	Image     string `json:"image"` // обложка: ссылка http(s) или маленькая data:image/…;base64, либо пусто; поверх цвета
+	Image     string `json:"image"` // обложка: ссылка http(s) или пусто; поверх цвета
 	CreatedAt int64  `json:"created_at"`
 }
 
 const (
 	maxWorkspaceName     = 60
-	maxWorkspaceImageURL = 2000    // символов в ссылке на обложку
-	maxWorkspaceImage    = 400_000 // символов в data-URL: фронт сжимает обложку до ~100 КБ, больше — не обложка
+	maxWorkspaceImageURL = 2000 // символов в ссылке на обложку
 )
 
 var (
 	workspaceColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
-	workspaceImage = regexp.MustCompile(`^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$`)
 	// ссылка на картинку: без пробелов, кавычек и скобок — её кладут в CSS url("…")
 	workspaceImageURL = regexp.MustCompile(`^https?://[^\s"'()\\]+$`)
 )
@@ -49,7 +47,7 @@ func (w Workspace) Clean() (Workspace, error) {
 	case w.Color != "" && !workspaceColor.MatchString(w.Color):
 		return w, fmt.Errorf("%w: color must be #rrggbb", ErrWorkspace)
 	case w.Image != "" && !validWorkspaceImage(w.Image):
-		return w, fmt.Errorf("%w: image must be an http(s) link up to %d chars or a png, jpeg or webp data URL up to %d chars", ErrWorkspace, maxWorkspaceImageURL, maxWorkspaceImage)
+		return w, fmt.Errorf("%w: image must be an http(s) link up to %d chars", ErrWorkspace, maxWorkspaceImageURL)
 	}
 	return w, nil
 }
@@ -119,8 +117,5 @@ func (s *Storage) GetWorkspaces() ([]Workspace, error) {
 }
 
 func validWorkspaceImage(img string) bool {
-	if strings.HasPrefix(img, "data:") {
-		return len(img) <= maxWorkspaceImage && workspaceImage.MatchString(img)
-	}
 	return len(img) <= maxWorkspaceImageURL && workspaceImageURL.MatchString(img)
 }
