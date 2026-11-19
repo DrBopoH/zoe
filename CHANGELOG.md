@@ -8,6 +8,7 @@ Versions: `R.sB.C+T.hash`. On `dev` there is no state letter (`v1.1.C+T`), the l
 
 Polishing the user-friendly design and finishing QoL, builder and reference features.
 
+- **v1.3.13** — Candle chart: a transfer from a bank to Binance (and back) no longer draws a phantom wick — the capital does not change, so the candle does not either (the Binance part is now corrected by the cumulative transfer); such transfers count once in Volume and do not change the colour
 - **v1.3.12** — Candle chart: Volume histogram in a separate strip under the candles, the bars hang down from its line — inflow and outflow summed by absolute value; green when the inflow is bigger or equal (also zero), red when the outflow is bigger; a transfer between own accounts counts once and does not change the colour
 - **v1.3.11** — Candle chart: moving averages as on Binance — MA(7) yellow, MA(25) pink, MA(99) purple (simple average of closes, a line starts from its Nth candle)
 - **v1.3.10** — P2P deal size is now a setting: `P2P_MIN_DEAL_UAH` (default 1000 ₴) — adverts that cannot take a deal of at least that amount do not set the P2P price
