@@ -270,7 +270,7 @@ func (s *Server) HandleBinance(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// POST /api/binance/candles {starts:[unix…], end:unix} → has/first/last/last_value и свечи оценки портфеля по корзинам [starts[i], starts[i+1]).
+// POST /api/binance/candles {starts:[unix…], end:unix} → has/first/last/last_value, свечи оценки портфеля по корзинам [starts[i], starts[i+1]) и filled — номера корзин без точек ряда.
 func (s *Server) HandleBinanceCandles(w http.ResponseWriter, r *http.Request) {
 	if !allow(w, r, http.MethodPost) {
 		return
@@ -291,18 +291,23 @@ func (s *Server) HandleBinanceCandles(w http.ResponseWriter, r *http.Request) {
 			if in.End <= in.Starts[len(in.Starts)-1] {
 				in.End = in.Starts[len(in.Starts)-1] + 1
 			}
-			c, has, err := s.storage.BinanceCandles(in.Starts, in.End)
+			c, has, filled, err := s.storage.BinanceBuckets(in.Starts, in.End)
 			if err != nil {
 				failErr(w, err)
 				return
 			}
 			list := make([]any, len(c))
+			var gaps []int // корзины без точек ряда (свеча плоская на последней цене): график рисует их штриховкой
 			for i := range c {
 				if has[i] {
 					list[i] = c[i]
 				}
+				if filled[i] {
+					gaps = append(gaps, i)
+				}
 			}
 			out["candles"] = list
+			out["filled"] = gaps
 		}
 	}
 	writeJSON(w, out)

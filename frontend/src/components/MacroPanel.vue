@@ -1,7 +1,7 @@
 <script setup>
 import { dmy } from '../utils/numfmt.js'
 import { computed } from 'vue'
-import { SERIES, MACRO_PAD, MACRO_MIN_SPAN, MACRO_MAX_SPAN, buildMacroChart, macroWindow, macroRanges, isoAt, stampAt, valueAt, unitText, axisText } from '../utils/macro.js'
+import { SERIES, MACRO_PAD, MACRO_MIN_SPAN, MACRO_MAX_SPAN, buildMacroChart, macroWindow, macroRanges, isoAt, stampAt, valueAt, gapAt, unitText, axisText } from '../utils/macro.js'
 import { BENNER, bennerPhase } from '../utils/benner.js'
 import BennerBands from './BennerBands.vue'
 import { macroLoading } from '../composables/useMacro.js'
@@ -78,7 +78,8 @@ const bennerNow = computed(() => {
 const hover = computed(() => {
   if (kv.hoverX.value === null || kv.hoverX.value > 0.05) return null
   const iso = stampAt(kv.hoverX.value, props.today)
-  const rows = IDS.value.map((id) => ({ id, label: SERIES[id].label, color: SERIES[id].color, v: valueAt(props.series[id], iso) })).filter((r) => r.v !== null)
+  // gap: курсор в пропуске ряда — последнее известное значение тут не данные, подсказка пишет «нет данных»
+  const rows = IDS.value.map((id) => ({ id, label: SERIES[id].label, color: SERIES[id].color, v: valueAt(props.series[id], iso), gap: gapAt(id, props.series[id], iso, props.today) })).filter((r) => r.v !== null)
   return rows.length ? { date: props.minSpan < 0.05 && kv.view.value.x1 - kv.view.value.x0 < 0.15 ? `${dmy(iso)} ${iso.slice(11)}` : dmy(iso), rows } : null
 })
 </script>
@@ -130,6 +131,8 @@ const hover = computed(() => {
         <line v-if="chart.zeroY !== null" :x1="chart.pad.l" :x2="WIDTH - chart.pad.r" :y1="chart.zeroY" :y2="chart.zeroY" stroke="#475569" />
         <line v-if="kv.hoverPx.value !== null && kv.hoverX.value <= 0.05" :x1="kv.hoverPx.value" :x2="kv.hoverPx.value" :y1="chart.pad.t" :y2="HEIGHT - chart.pad.b" stroke="#64748b" stroke-opacity="0.6" />
         <path v-for="l in chart.lines" :key="l.id" :d="l.d" fill="none" :stroke="strokeOf(l)" :stroke-width="SERIES[l.id].thin ? 1.2 : 2" :stroke-opacity="SERIES[l.id].thin ? 0.7 : 1" stroke-linejoin="round" />
+        <!-- пунктир: через пропуск в данных линия лишь соединяет соседние точки, и это видно -->
+        <path v-for="l in chart.lines.filter((x) => x.dg)" :key="'gap' + l.id" :d="l.dg" fill="none" :stroke="strokeOf(l)" :stroke-width="SERIES[l.id].thin ? 1.2 : 2" :stroke-opacity="SERIES[l.id].thin ? 0.7 : 1" stroke-dasharray="4 4" />
         <circle v-for="l in chart.lines.filter((x) => x.dot)" :key="'d' + l.id" :cx="l.dot.x" :cy="l.dot.y" r="4.5" :fill="l.color" stroke="#020617" stroke-width="1.5" />
         </g>
         <BennerBands v-if="benner" layer="strip" v-bind="bn" :left="MACRO_PAD.l" :right="WIDTH - MACRO_PAD.r" :strip-y="HEIGHT - MACRO_PAD.b + 5" />
@@ -138,11 +141,12 @@ const hover = computed(() => {
       <div class="flex flex-wrap items-center gap-x-5 gap-y-1 text-[11px] text-slate-400 min-h-[1.5rem]">
         <template v-if="hover">
           <span class="text-slate-200 font-bold">{{ hover.date }}</span>
-          <span v-for="r in hover.rows" :key="r.id" class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-0.5" :style="swatch(r.id)"></span>{{ r.label }} <b class="tabular-nums text-slate-200">{{ unitText(r.v, unit) }}</b></span>
+          <span v-for="r in hover.rows" :key="r.id" class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-0.5" :style="swatch(r.id)"></span>{{ r.label }} <b v-if="r.gap" class="text-slate-500" :title="`Ряд в этот момент молчал; последнее известное значение ${unitText(r.v, unit)}`">нет данных</b><b v-else class="tabular-nums text-slate-200">{{ unitText(r.v, unit) }}</b></span>
           <span v-if="bennerNow" class="inline-flex items-center gap-1.5" title="Цикл Беннера — курьёз, не сигнал"><span class="inline-block w-2 h-2 rounded-sm" :style="{ backgroundColor: bennerNow.color }"></span>Беннер {{ bennerNow.year }}: <b class="text-slate-200">{{ bennerNow.key ? bennerNow.kind + ' · ' + bennerNow.label : 'после: ' + bennerNow.label }}</b></span>
         </template>
         <template v-else>
         <span v-for="l in chart.lines" :key="l.id" class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-0.5" :style="swatch(l.id)"></span>{{ l.label }}</span>
+        <span v-if="chart.lines.some((l) => l.dg)" class="text-slate-600 inline-flex items-center gap-1.5"><svg width="16" height="4" class="inline-block" aria-hidden="true"><line x1="0" x2="16" y1="2" y2="2" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="3 3" /></svg>нет данных</span>
         <span class="text-slate-600">{{ hint }}</span>
         <span v-if="benner" class="text-slate-600" title="Цикл Беннера (1875). Исторический курьёз, предсказательной силы не доказано">цикл Беннера: A паника · B пик · C дно, плотный — сам год, бледный — период после (курьёз, не сигнал)</span>
         </template>

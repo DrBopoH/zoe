@@ -356,10 +356,18 @@ func (s *Storage) BinanceLastMinute() (ts int64, v float64, ok bool) {
 // Открытие корзины — закрытие предыдущей (ряд непрерывный), поэтому свечи сходятся встык.
 // nil — до начала ряда; корзина без точек после начала ряда — плоская свеча на последней цене.
 func (s *Storage) BinanceCandles(starts []int64, end int64) ([][4]float64, []bool, error) {
+	out, has, _, err := s.BinanceBuckets(starts, end)
+	return out, has, err
+}
+
+// BinanceBuckets — то же, что BinanceCandles, плюс filled: корзина заполнена подстановкой (в ней не было ни одной точки ряда, свеча плоская на последней цене).
+// График рисует такую свечу штриховкой: данных за этот промежуток нет, и это должно быть видно.
+func (s *Storage) BinanceBuckets(starts []int64, end int64) ([][4]float64, []bool, []bool, error) {
 	out := make([][4]float64, len(starts))
 	has := make([]bool, len(starts))
+	filled := make([]bool, len(starts))
 	if len(starts) == 0 {
-		return out, has, nil
+		return out, has, filled, nil
 	}
 	var prev float64
 	havePrev := false
@@ -370,7 +378,7 @@ func (s *Storage) BinanceCandles(starts []int64, end int64) ([][4]float64, []boo
 	}
 	rows, err := s.cacheDB.Query(`SELECT ts, v FROM binance_minutes WHERE ts >= ? AND ts < ? ORDER BY ts`, starts[0], end)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer rows.Close()
 
@@ -390,14 +398,14 @@ func (s *Storage) BinanceCandles(starts []int64, end int64) ([][4]float64, []boo
 			prev, havePrev = cand[3], true
 			started = false
 		} else if havePrev {
-			out[i], has[i] = [4]float64{prev, prev, prev, prev}, true
+			out[i], has[i], filled[i] = [4]float64{prev, prev, prev, prev}, true, true
 		}
 	}
 	for rows.Next() {
 		var ts int64
 		var v float64
 		if err := rows.Scan(&ts, &v); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		for i < len(starts) && ts >= bucketEnd(i) {
 			closeBucket()
@@ -422,7 +430,7 @@ func (s *Storage) BinanceCandles(starts []int64, end int64) ([][4]float64, []boo
 	for ; i < len(starts); i++ {
 		closeBucket()
 	}
-	return out, has, rows.Err()
+	return out, has, filled, rows.Err()
 }
 
 func maxf(a, b float64) float64 {

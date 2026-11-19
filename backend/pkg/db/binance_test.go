@@ -170,6 +170,31 @@ func TestBinanceExternalFlowsBecomeTransactions(t *testing.T) {
 	}
 }
 
+// Корзина без единой точки ряда (сервер молчал) после начала ряда — плоская свеча, и она помечена: график рисует её штриховкой, а не как настоящую.
+func TestBinanceBucketsFilled(t *testing.T) {
+	s, _, _ := newS(t)
+	t0 := int64(1_700_000_000) / 60 * 60
+	if err := s.SaveBinance(BinanceSave{Portfolio: 130, Start: t0, Vals: []float64{100, 110, 90, 95, 95}, Replace: true, Origin: 100}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveBinance(BinanceSave{Portfolio: 140, Start: t0 + 1800, Vals: []float64{140, 141}}); err != nil { // дальше ряд молчал полчаса
+		t.Fatal(err)
+	}
+	// корзины: до ряда | с точками | дыра (две корзины без точек) | с точками после дыры
+	starts := []int64{t0 - 600, t0, t0 + 600, t0 + 1200, t0 + 1800}
+	_, has, filled, err := s.BinanceBuckets(starts, t0+2100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantHas := []bool{false, true, true, true, true}
+	wantFilled := []bool{false, false, true, true, false}
+	for i := range starts {
+		if has[i] != wantHas[i] || filled[i] != wantFilled[i] {
+			t.Fatalf("корзина %d: has=%v filled=%v, ждали has=%v filled=%v", i, has[i], filled[i], wantHas[i], wantFilled[i])
+		}
+	}
+}
+
 func TestBinanceMinutesCandles(t *testing.T) {
 	s, _, _ := newS(t)
 	t0 := int64(1_700_000_000) / 60 * 60

@@ -41,6 +41,8 @@ const tenYears = (s) => s.points.find((p) => p.id === 'ust_10y')?.v ?? null
       </g>
       <text v-for="x in chart.xs" :key="x.label" :x="x.x" :y="chart.height - 14" text-anchor="middle" font-size="10" fill="#64748b">{{ x.label }}</text>
       <path v-for="l in [...chart.lines].reverse()" :key="l.key" :d="l.d" fill="none" :stroke="l.color" :stroke-width="l.key === 'now' ? 2.2 : 1.4" stroke-linejoin="round" :data-line="l.key" />
+      <!-- срок без данных между двумя известными: пунктир -->
+      <path v-for="l in [...chart.lines].reverse().filter((x) => x.dg)" :key="'gap-' + l.key" :d="l.dg" fill="none" :stroke="l.color" :stroke-width="l.key === 'now' ? 2.2 : 1.4" stroke-dasharray="4 4" :data-gap="l.key" />
     </svg>
     <p class="text-[11px] text-slate-600">Нормальная кривая идёт вверх: чем длиннее срок, тем выше доходность. Когда короткие ставки выше длинных, кривую называют инвертированной.</p>
   </UiCard>

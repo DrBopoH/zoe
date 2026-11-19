@@ -107,6 +107,8 @@ const fetchBnRun = async (starts, i0, i1, epoch, tf) => {
   bnLastValue = d.last_value || 0
   const cache = bnCaches[tf] ||= new Map()
   slice.forEach((s, k) => cache.set(s, (d.candles && d.candles[k]) || ZERO))
+  // корзины без точек ряда (бэкенд заполнил их плоской свечой на последней цене): помечаются на самой свече и живут вместе с ней в кеше
+  for (const k of d.filled || []) { const c = cache.get(slice[k]); if (c && c !== ZERO) c.filled = true }
   return true
 }
 let bnBusy = 0
@@ -190,6 +192,7 @@ const series = computed(() => {
   const bn = bnReady.value ? bnCache() : null
   const O = new Float64Array(n), H = new Float64Array(n), L = new Float64Array(n), C = new Float64Array(n)
   const BO = new Float64Array(n), BC = new Float64Array(n), IN = new Float64Array(n), OUT = new Float64Array(n), PAIR = new Float64Array(n)
+  const FILL = new Uint8Array(n) // 1 — часть оценки Binance в этой корзине подставлена, а не измерена (нет точек ряда)
   let cur = props.totalValueUAH - (bn ? bnLastValue : 0)
   let minVal = Infinity, maxVal = -Infinity
   for (let i = n - 1; i >= 0; i--) {
@@ -202,10 +205,11 @@ const series = computed(() => {
     const { open, high, low, close, inflow, outflow, pair } = r
     O[i] = open; H[i] = high; L[i] = low; C[i] = close
     BO[i] = b[0]; BC[i] = b[3]; IN[i] = inflow; OUT[i] = outflow; PAIR[i] = pair
+    FILL[i] = bnb && bnb.filled ? 1 : 0
     if (low < minVal) minVal = low
     if (high > maxVal) maxVal = high
   }
-  return { n, starts, O, H, L, C, BO, BC, IN, OUT, PAIR, min: minVal, max: maxVal, bnSeries: !!bn }
+  return { n, starts, O, H, L, C, BO, BC, IN, OUT, PAIR, FILL, min: minVal, max: maxVal, bnSeries: !!bn }
 })
 
 // Таймлайн вперёд — до последней выплаты инвестиционного счёта (погашение). Свечей там нет, только маркеры. Только на 1D.
@@ -373,6 +377,7 @@ const candleAt = (i) => {
     open: S.O[i], high: S.H[i], low: S.L[i], close: S.C[i],
     bnOpen: S.BO[i], bnClose: S.BC[i], bnSeries: S.bnSeries, // вклад Binance в открытие/закрытие (для разбора свечи)
     inflow: S.IN[i], outflow: S.OUT[i],
+    filled: S.FILL[i] === 1,
     isBullish: S.C[i] >= S.O[i],
     x: slotX(i), yHigh: getY(S.H[i]), yLow: getY(S.L[i]),
     bodyTop: Math.min(yOpen, yClose), bodyHeight: Math.max(2, Math.abs(yOpen - yClose)),
@@ -572,6 +577,7 @@ watch([() => kv.view.value.x0, nSlots, () => spanNow.value], ([x0, n, span]) => 
         <span class="text-slate-500">Пик: <strong class="text-emerald-400">{{ formatMoney(hoveredCandle.high) }}</strong></span>
         <span class="text-slate-500">Мин: <strong class="text-rose-400">{{ formatMoney(hoveredCandle.low) }}</strong></span>
         <span class="text-slate-500">Закр: <strong class="text-slate-200">{{ formatMoney(hoveredCandle.close) }}</strong></span>
+        <span v-if="hoveredCandle.filled" class="text-slate-500" title="В этой корзине нет ни одной точки оценки Binance: часть Binance взята по последней известной цене">штрих — нет данных Binance</span>
       </div>
       <div v-else class="text-[10px] text-slate-600 uppercase">Колесо — масштаб, Shift+колесо — шкала, перетаскивание — навигация</div>
     </div>
@@ -598,6 +604,11 @@ watch([() => kv.view.value.x0, nSlots, () => spanNow.value], ([x0, n, span]) => 
         @pointerleave="kv.onLeave"
         @dblclick="resetView"
       >
+        <defs>
+          <!-- штриховка: в этой корзине нет данных Binance (сервер молчал), оценка подставлена по последней цене -->
+          <pattern id="nodata-up" patternUnits="userSpaceOnUse" width="4" height="4" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="4" stroke="#10b981" stroke-width="1.4" /></pattern>
+          <pattern id="nodata-down" patternUnits="userSpaceOnUse" width="4" height="4" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="4" stroke="#f43f5e" stroke-width="1.4" /></pattern>
+        </defs>
         <line v-for="p in priceTicks" :key="'h-grid-' + p.val" x1="0" :y1="p.y" :x2="svgW" :y2="p.y" stroke="#1e293b" stroke-dasharray="3 3" />
         <line v-if="lastPrice" x1="0" :y1="lastPrice.y" :x2="svgW" :y2="lastPrice.y" :stroke="lastPrice.up ? '#10b981' : '#f43f5e'" stroke-opacity="0.55" stroke-dasharray="1 3" />
 
@@ -677,6 +688,7 @@ watch([() => kv.view.value.x0, nSlots, () => spanNow.value], ([x0, n, span]) => 
             :y2="c.yLow"
             :stroke="c.isBullish ? '#10b981' : '#f43f5e'"
             stroke-width="1.5"
+            :stroke-dasharray="c.filled ? '3 2' : null"
             class="transition-opacity"
             :class="hoveredCandle && hoveredCandle.key === c.key ? 'opacity-100 stroke-2' : 'opacity-90'"
           />
@@ -685,7 +697,9 @@ watch([() => kv.view.value.x0, nSlots, () => spanNow.value], ([x0, n, span]) => 
             :y="c.bodyTop"
             :width="c.width"
             :height="c.bodyHeight"
-            :fill="c.isBullish ? '#10b981' : '#f43f5e'"
+            :fill="c.filled ? (c.isBullish ? 'url(#nodata-up)' : 'url(#nodata-down)') : (c.isBullish ? '#10b981' : '#f43f5e')"
+            :stroke="c.filled ? (c.isBullish ? '#10b981' : '#f43f5e') : null"
+            :stroke-dasharray="c.filled ? '3 2' : null"
             rx="1"
             class="transition-opacity"
             :class="hoveredCandle && hoveredCandle.key === c.key ? 'opacity-100' : 'opacity-90'"
