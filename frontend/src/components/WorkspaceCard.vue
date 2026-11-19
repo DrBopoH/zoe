@@ -41,10 +41,10 @@ const cover = computed(() => coverStyle(props.workspace))
 }
 .ws-name {
   position: absolute;
-  left: 0.9rem;
-  right: 0.9rem;
-  bottom: 0.7rem;
-  font-size: 0.875rem;
+  left: 0.7rem;
+  right: 0.7rem;
+  bottom: 0.5rem;
+  font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   color: #fff;

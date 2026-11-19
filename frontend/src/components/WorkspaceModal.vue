@@ -4,7 +4,7 @@ import UiModal from './ui/UiModal.vue'
 import UiButton from './ui/UiButton.vue'
 import UiIconButton from './ui/UiIconButton.vue'
 import WorkspaceCard from './WorkspaceCard.vue'
-import { PALETTE, NAME_MAX, cleanName, nameOk, validColor, readCoverImage } from '../utils/workspaceCover.js'
+import { PALETTE, NAME_MAX, cleanName, nameOk, validColor, readCoverImage, imageOk } from '../utils/workspaceCover.js'
 
 // Окно создания дела: название, цвет обложки (палитра или свой) и необязательная картинка. Сверху живой предпросмотр той же карточки, что будет в «Делах».
 const props = defineProps({
@@ -29,8 +29,10 @@ watch(() => props.isOpen, (v) => {
   nextTick(() => nameInput.value?.focus())
 })
 
-const can = computed(() => nameOk(name.value) && !props.busy)
+const linkBad = computed(() => !!image.value && !imageOk(image.value))
+const can = computed(() => nameOk(name.value) && !linkBad.value && !props.busy)
 const preview = computed(() => ({ name: cleanName(name.value) || 'Название дела', color: color.value, image: image.value }))
+const imageText = computed({ get: () => (image.value.startsWith('data:') ? '' : image.value), set: (v) => { image.value = v.trim() } })
 
 const setImage = async (file) => {
   imageError.value = ''
@@ -100,7 +102,9 @@ const submit = () => {
         <span class="text-[10px] text-slate-500">или перетащи сюда; ляжет поверх цвета</span>
         <input ref="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" class="hidden" @change="onFile" />
       </div>
+      <input v-model="imageText" type="text" class="ui-input" placeholder="или ссылка на картинку (https://…)" @keydown.enter.prevent="submit" />
       <p v-if="imageError" class="text-[10px] text-rose-400">{{ imageError }}</p>
+      <p v-else-if="linkBad" class="text-[10px] text-rose-400">Нужна ссылка вида https://… без пробелов и скобок</p>
     </div>
 
     <div class="flex justify-end gap-2 pt-1">
