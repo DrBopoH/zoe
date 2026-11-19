@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"economic/pkg/db"
@@ -75,5 +76,55 @@ func TestHTTP(t *testing.T) {
 	s.HandleUsers(w, rq)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("empty name: %d", w.Code)
+	}
+}
+
+// Дела: создание, список, правка, удаление и отказ на неверных полях.
+func TestWorkspacesAPI(t *testing.T) {
+	h := newTestHandler(t)
+	do := func(method, path, body string) *httptest.ResponseRecorder {
+		rq := httptest.NewRequest(method, local+path, strings.NewReader(body))
+		rq.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, rq)
+		return w
+	}
+	if w := do("GET", "/api/workspaces", ""); w.Code != 200 || strings.TrimSpace(w.Body.String()) != "[]" {
+		t.Fatalf("пустой список: %d %q", w.Code, w.Body.String())
+	}
+	w := do("POST", "/api/workspaces", `{"id":"hack","name":"Glovo","color":"#10b981","created_at":1}`)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"name":"Glovo"`) || strings.Contains(w.Body.String(), `"id":"hack"`) {
+		t.Fatalf("создание (id ставит сервер): %d %s", w.Code, w.Body.String())
+	}
+	var created struct{ ID string }
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil || created.ID == "" {
+		t.Fatalf("id в ответе: %v %s", err, w.Body.String())
+	}
+	if w := do("POST", "/api/workspaces", `{"name":" "}`); w.Code != 400 {
+		t.Fatalf("пустое имя должно давать 400, а не %d", w.Code)
+	}
+	if w := do("POST", "/api/workspaces", `{"name":"x","color":"red"}`); w.Code != 400 {
+		t.Fatalf("неверный цвет — 400, а не %d", w.Code)
+	}
+	if w := do("PUT", "/api/workspaces", `{"id":"nope","name":"x"}`); w.Code != 404 {
+		t.Fatalf("правка чужого id — 404, а не %d", w.Code)
+	}
+	if w := do("PUT", "/api/workspaces", `{"id":"`+created.ID+`","name":"Glovo курьер"}`); w.Code != 200 {
+		t.Fatalf("правка: %d %s", w.Code, w.Body.String())
+	}
+	if w := do("GET", "/api/workspaces", ""); !strings.Contains(w.Body.String(), "Glovo курьер") {
+		t.Fatalf("список после правки: %s", w.Body.String())
+	}
+	if w := do("DELETE", "/api/workspaces", ""); w.Code != 400 {
+		t.Fatalf("удаление без id — 400, а не %d", w.Code)
+	}
+	if w := do("DELETE", "/api/workspaces?id="+created.ID, ""); w.Code != 200 {
+		t.Fatalf("удаление: %d", w.Code)
+	}
+	if w := do("GET", "/api/workspaces", ""); strings.TrimSpace(w.Body.String()) != "[]" {
+		t.Fatalf("после удаления: %s", w.Body.String())
+	}
+	if w := do("PATCH", "/api/workspaces", ""); w.Code != 405 {
+		t.Fatalf("PATCH — 405, а не %d", w.Code)
 	}
 }

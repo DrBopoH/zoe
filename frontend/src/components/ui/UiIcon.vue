@@ -3,7 +3,7 @@ import { computed } from 'vue'
 
 const props = defineProps({
   name: { type: String, required: true },
-  size: { type: String, default: 'md' } // sm | md | lg
+  size: { type: String, default: 'md' } // sm | md | lg | xl
 })
 
 // Все иконки проекта в одном месте (раньше SVG копировались по компонентам)
@@ -45,7 +45,7 @@ const SHAPES = {
   ]
 }
 
-const SIZES = { sm: 'w-3 h-3', md: 'w-3.5 h-3.5', lg: 'w-4 h-4' }
+const SIZES = { sm: 'w-3 h-3', md: 'w-3.5 h-3.5', lg: 'w-4 h-4', xl: 'w-6 h-6' }
 
 const shapes = computed(() => SHAPES[props.name] || [])
 const sizeClass = computed(() => SIZES[props.size] || SIZES.md)
