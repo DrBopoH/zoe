@@ -63,7 +63,10 @@ func TestWorkspaceValidation(t *testing.T) {
 		"цвет не hex":      {Name: "x", Color: "red"},
 		"цвет короткий":    {Name: "x", Color: "#fff"},
 		"картинка не img":  {Name: "x", Image: "data:text/html;base64,PGI+"},
-		"картинка url":     {Name: "x", Image: "https://example.com/a.png"},
+		"картинка ftp":     {Name: "x", Image: "ftp://example.com/a.png"},
+		"url с кавычкой":   {Name: "x", Image: "https://e.com/a\".png"},
+		"url со скобкой":   {Name: "x", Image: "https://e.com/a).png"},
+		"url длинный":      {Name: "x", Image: "https://e.com/" + strings.Repeat("a", maxWorkspaceImageURL)},
 		"картинка svg":     {Name: "x", Image: "data:image/svg+xml;base64,PHN2Zz4="},
 		"картинка большая": {Name: "x", Image: "data:image/png;base64," + strings.Repeat("A", maxWorkspaceImage)},
 	}
@@ -72,7 +75,7 @@ func TestWorkspaceValidation(t *testing.T) {
 			t.Errorf("%s: ждали ErrWorkspace, получили %v", name, err)
 		}
 	}
-	good := []Workspace{{Name: "я"}, {Name: strings.Repeat("я", maxWorkspaceName)}, {Name: "x", Color: "#00aaFF"}, {Name: "x", Image: img}, {Name: "x", Color: "#000000", Image: img}}
+	good := []Workspace{{Name: "я"}, {Name: strings.Repeat("я", maxWorkspaceName)}, {Name: "x", Color: "#00aaFF"}, {Name: "x", Image: img}, {Name: "x", Color: "#000000", Image: img}, {Name: "x", Image: "https://example.com/a.png?x=1&y=2"}}
 	for _, w := range good {
 		if _, err := w.Clean(); err != nil {
 			t.Errorf("%+v: %v", w, err)
