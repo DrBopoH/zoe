@@ -43,14 +43,17 @@ export function stockRatios(d, todayIso) {
 }
 
 /**
- * Сверка расчётной капитализации (цена × акции из отчёта SEC) с текущей по Nasdaq. У компаний с несколькими классами акций (GOOGL, BRK) в отчёте может быть
- * только часть акций, и расчёт уйдёт вниз. Расхождение больше 25 % — предупреждение; последняя точка старше трёх месяцев — сверять не с чем (null).
+ * Сверка расчётной капитализации (цена × акции из отчёта SEC) с текущей по Nasdaq. Расхождение больше 25 % — предупреждение; последняя точка старше трёх месяцев —
+ * сверять не с чем (null). Причин две, и они в разные стороны: у компаний с несколькими классами акций (GOOGL, BRK) в отчёте может быть только часть акций —
+ * расчёт уходит вниз (kind: 'under'); у ADR (TSM: одна расписка = 5 акций) в отчёте число обычных акций, а цена за расписку — расчёт уходит вверх (kind: 'over'),
+ * и ratio близок к целому коэффициенту расписки.
  */
 export function capCheck(marketCap, cap, todayIso) {
   const last = cap?.length ? cap[cap.length - 1] : null
   if (!last || !(marketCap > 0) || ms(todayIso) - ms(last.d) > 93 * DAY) return null
   const diff = last.v / marketCap - 1 // обе капитализации в долларах; в ответе — в млрд $ для подписи
-  return { diff: diff * 100, ok: Math.abs(diff) <= 0.25, nasdaq: marketCap / BLN, own: last.v / BLN }
+  const ok = Math.abs(diff) <= 0.25
+  return { diff: diff * 100, ok, kind: ok ? 'ok' : diff > 0 ? 'over' : 'under', ratio: last.v / marketCap, nasdaq: marketCap / BLN, own: last.v / BLN }
 }
 
 /** Доллары словами: 4,1e12 → «4,1 трлн $», убыток −5e9 → «−5 млрд $»; нет значения — «—». */

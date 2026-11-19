@@ -85,7 +85,11 @@ const tone = (v) => (v === null ? 'text-slate-500' : v >= 0 ? 'text-emerald-400'
       <UiEmpty v-else>{{ query ? 'Ничего не найдено' : EMPTY }}</UiEmpty>
     </UiCard>
 
-    <UiNotice v-if="check && !check.ok">
+    <UiNotice v-if="check && check.kind === 'over'">
+      Расчётная капитализация {{ billionsText(check.own) }} — это ≈ ×{{ ratioText(check.ratio) }} от Nasdaq ({{ billionsText(check.nasdaq) }}). Вероятно, это ADR: в отчёте SEC число обычных акций,
+      а на бирже торгуется расписка, равная нескольким из них (у TSMC одна расписка — 5 акций). График капитализации ниже завышен примерно во столько же раз; верить стоит цифре Nasdaq.
+    </UiNotice>
+    <UiNotice v-else-if="check && !check.ok">
       Расчётная капитализация {{ billionsText(check.own) }} расходится с Nasdaq ({{ billionsText(check.nasdaq) }}) на {{ numText(Math.abs(check.diff), 0) }} %. Обычно так бывает, когда у компании несколько классов акций
       (например GOOGL, BRK) и в отчёте SEC указан только один из них; верить стоит цифре Nasdaq.
     </UiNotice>
