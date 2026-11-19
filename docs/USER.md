@@ -57,7 +57,7 @@ The page the Ζωή brand leads to: a capital tile and a candlestick chart acros
 
 ## Cases (Дела)
 
-A separate button in the header: your own spheres of life and projects (a courier job, a family budget, an investment portfolio) as cards-canvases. The top of a card is a cover of your colour or picture, the bottom is a dark fade with the name on the left. The round **+** button at the bottom right opens the creation window: a name, a cover colour (a palette or your own) and an optional picture by a link, like a Person's avatar, with a live preview of the card. For now a canvas is only a cover and a name; its content is built in the next steps.
+A separate button in the header: your own spheres of life and projects (a courier job, a family budget, an investment portfolio) as cards-canvases. The top of a card is a cover of your colour or picture, the bottom is a dark fade with the name on the left. The round **+** button at the bottom right opens the creation window: a name, a cover colour (a palette or your own) and an optional picture by a link, like a Person's avatar, with a live preview of the card. On hovering a card two icons appear: the pencil edits the canvas in the same window, the trash deletes it (press twice: the first press turns it into "Удалить?" for four seconds). For now a canvas is only a cover and a name; its content is built in the next steps.
 
 ## The "Смета" (Smeta) page
 

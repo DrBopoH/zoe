@@ -1,9 +1,9 @@
 import { ref } from 'vue'
-import { apiGetJson, apiJson } from '../utils/api.js'
+import { apiGetJson, apiJson, apiSend, q } from '../utils/api.js'
 import { errText } from '../utils/errText.js'
 
-// Дела (рабочие пространства): список с бэкенда и создание. Ответы приходят вразнобой — засчитывается только последний запрос списка.
-export function useWorkspaces(get = apiGetJson, send = apiJson) {
+// Дела (рабочие пространства): список с бэкенда, создание, правка и удаление. Ответы приходят вразнобой — засчитывается только последний запрос списка.
+export function useWorkspaces(get = apiGetJson, send = apiJson, sendRaw = apiSend) {
   const list = ref([])
   const loading = ref(false)
   const error = ref('')
@@ -29,5 +29,17 @@ export function useWorkspaces(get = apiGetJson, send = apiJson) {
     return ws
   }
 
-  return { list, loading, error, load, create }
+  // Правит дело (имя, цвет, обложка) и обновляет его в списке; ошибку пробрасывает наружу
+  const update = async (id, { name, color = '', image = '' }) => {
+    await send('PUT', '/workspaces', { id, name, color, image })
+    list.value = list.value.map((w) => (w.id === id ? { ...w, name, color, image } : w))
+  }
+
+  // Удаляет дело; из списка убирается после ответа сервера
+  const remove = async (id) => {
+    await sendRaw('DELETE', `/workspaces?id=${q(id)}`)
+    list.value = list.value.filter((w) => w.id !== id)
+  }
+
+  return { list, loading, error, load, create, update, remove }
 }
