@@ -9,27 +9,41 @@ import { useWorkspaces } from '../composables/useWorkspaces.js'
 import { pushRequestError } from '../composables/useToasts.js'
 
 // Раздел «Дела»: рабочие пространства — сферы жизни и проектов (Glovo, семейный бюджет, айти-проект) карточками-полотнами.
-// Справа внизу кнопка «+» открывает окно создания. Пока полотно — только обложка и название; содержимое дел строится следующими шагами.
+// Справа внизу кнопка «+» открывает окно создания; на карточке по наведению — карандаш (правка) и урна (удаление в два клика). Пока полотно — только обложка и название; содержимое дел строится следующими шагами.
 const props = defineProps({
   dataVersion: { type: Number, default: null } // версия данных бэкенда: растёт при любой записи — список перечитывается
 })
 
-const { list, error, load, create } = useWorkspaces()
+const { list, error, load, create, update, remove } = useWorkspaces()
 const open = ref(false)
+const editing = ref(null) // дело в окне правки; null — окно создаёт новое
 const busy = ref(false)
 
 onMounted(load)
 watch(() => props.dataVersion, load)
 
-const onCreate = async (payload) => {
+const openCreate = () => { editing.value = null; open.value = true }
+const openEdit = (w) => { editing.value = w; open.value = true }
+
+const onSubmit = async (payload) => {
   busy.value = true
+  const w = editing.value
   try {
-    await create(payload)
+    if (w) await update(w.id, payload)
+    else await create(payload)
     open.value = false
   } catch (e) {
-    pushRequestError('Не удалось создать дело', e) // окно остаётся открытым: введённое не пропадает
+    pushRequestError(w ? 'Не удалось сохранить дело' : 'Не удалось создать дело', e) // окно остаётся открытым: введённое не пропадает
   } finally {
     busy.value = false
+  }
+}
+
+const onRemove = async (w) => {
+  try {
+    await remove(w.id)
+  } catch (e) {
+    pushRequestError('Не удалось удалить дело', e)
   }
 }
 </script>
@@ -39,18 +53,18 @@ const onCreate = async (payload) => {
     <UiLoadError v-if="error" :message="error" class="mb-3" @retry="load" />
 
     <div v-if="list.length" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-      <WorkspaceCard v-for="w in list" :key="w.id" :workspace="w" />
+      <WorkspaceCard v-for="w in list" :key="w.id" :workspace="w" editable @edit="openEdit" @remove="onRemove" />
     </div>
     <UiEmpty v-else-if="!error">Пока нет дел. Нажми «+», чтобы создать первое</UiEmpty>
 
     <!-- кнопка прилипает к низу экрана и держится у правого края страницы -->
     <div class="sticky bottom-6 mt-auto pt-6 flex justify-end pointer-events-none">
-      <button type="button" class="ws-fab pointer-events-auto" title="Новое дело" aria-label="Новое дело" @click="open = true">
+      <button type="button" class="ws-fab pointer-events-auto" title="Новое дело" aria-label="Новое дело" @click="openCreate">
         <UiIcon name="plus" size="xl" />
       </button>
     </div>
 
-    <WorkspaceModal :is-open="open" :busy="busy" @close="open = false" @create="onCreate" />
+    <WorkspaceModal :is-open="open" :workspace="editing" :busy="busy" @close="open = false" @submit="onSubmit" />
   </div>
 </template>
 

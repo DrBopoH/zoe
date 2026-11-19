@@ -6,12 +6,13 @@ import UiIconButton from './ui/UiIconButton.vue'
 import WorkspaceCard from './WorkspaceCard.vue'
 import { PALETTE, NAME_MAX, cleanName, nameOk, validColor, imageOk } from '../utils/workspaceCover.js'
 
-// Окно создания дела: название, цвет обложки (палитра или свой) и необязательная ссылка на картинку. Сверху живой предпросмотр той же карточки, что будет в «Делах».
+// Окно создания и правки дела: название, цвет обложки (палитра или свой) и необязательная ссылка на картинку. Сверху живой предпросмотр той же карточки, что будет в «Делах».
 const props = defineProps({
   isOpen: { type: Boolean, default: false },
+  workspace: { type: Object, default: null }, // дело для правки; без него окно создаёт новое
   busy: { type: Boolean, default: false } // запрос на создание идёт
 })
-const emit = defineEmits(['close', 'create'])
+const emit = defineEmits(['close', 'submit'])
 
 const name = ref('')
 const color = ref(PALETTE[0])
@@ -20,9 +21,9 @@ const nameInput = ref(null)
 
 watch(() => props.isOpen, (v) => {
   if (!v) return
-  name.value = ''
-  color.value = PALETTE[0]
-  image.value = ''
+  name.value = props.workspace?.name || ''
+  color.value = validColor(props.workspace?.color) || PALETTE[0]
+  image.value = props.workspace?.image || ''
   nextTick(() => nameInput.value?.focus())
 })
 
@@ -35,14 +36,14 @@ const onColor = (e) => { color.value = validColor(e.target.value) || color.value
 
 const submit = () => {
   if (!can.value) return
-  emit('create', { name: cleanName(name.value), color: color.value, image: image.value })
+  emit('submit', { name: cleanName(name.value), color: color.value, image: image.value })
 }
 </script>
 
 <template>
   <UiModal :is-open="isOpen" max-width="max-w-md" @close="emit('close')">
     <div class="flex items-center justify-between gap-3">
-      <span class="text-sm font-bold text-white uppercase tracking-wider">Новое дело</span>
+      <span class="text-sm font-bold text-white uppercase tracking-wider">{{ workspace ? 'Правка дела' : 'Новое дело' }}</span>
       <UiIconButton icon="close" title="Закрыть" @click="emit('close')" />
     </div>
 
@@ -86,7 +87,7 @@ const submit = () => {
 
     <div class="flex justify-end gap-2 pt-1">
       <UiButton variant="cancel" @click="emit('close')">Отмена</UiButton>
-      <UiButton variant="primary" :disabled="!can" @click="submit">{{ busy ? 'Создаю…' : 'Создать' }}</UiButton>
+      <UiButton variant="primary" :disabled="!can" @click="submit">{{ busy ? (workspace ? 'Сохраняю…' : 'Создаю…') : (workspace ? 'Сохранить' : 'Создать') }}</UiButton>
     </div>
   </UiModal>
 </template>
