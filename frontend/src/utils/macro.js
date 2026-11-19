@@ -1,10 +1,13 @@
 import { scaleTicks, timeTicks } from './growthChart.js'
 import { robustRanges, scaleOf } from './chartView.js'
 import { dmy, numText } from './numfmt.js'
+import { gapFlags, tailGap } from './gaps.js'
 
 // Макро НБУ: ключевые ставки и инфляция (ряды из /api/macro). Чистые функции — без интерфейса.
 // Ставки приходят датами смены значения (значение действует до следующей точки), инфляция — помесячно.
 
+// step — ставка: значение действует до следующей смены, и это сама суть ряда. step + reported — отчёт (ВВП, выручка, баланс): значение держится до следующего
+// отчёта, но если отчёта нет заметно дольше обычного шага, держится оно уже «по умолчанию», и такой отрезок рисуется пунктиром (utils/gaps.js).
 export const SERIES = {
   policy_rate: { label: 'Облікова ставка', color: '#34d399', step: true },
   cpi_yoy: { label: 'Инфляция г/г', color: '#fbbf24', step: false },
@@ -24,7 +27,7 @@ export const SERIES = {
   us_cpi_yoy: { label: 'Инфляция США г/г', color: '#fbbf24', step: false },
   us_cpi_mom: { label: 'Инфляция США м/м', color: '#fb923c', step: false },
   us_unrate: { label: 'Безработица США', color: '#38bdf8', step: false },
-  us_gdp: { label: 'Рост ВВП США (в год)', color: '#34d399', step: true },
+  us_gdp: { label: 'Рост ВВП США (в год)', color: '#34d399', step: true, reported: true },
   us_spread: { label: 'Кривая: 10 л. − 2 г.', color: '#a78bfa', step: false },
   // как у индекса страха и жадности: середина (около 20, обычный фон) полупрозрачный серый, высокий VIX = страх голубой, очень низкий = самоуспокоенность янтарная
   us_vix: { label: 'VIX (индекс страха)', color: '#94a3b8', step: false, gradient: { from: 10, to: 50, stops: [[0, '#fbbf24', 1], [0.25, '#94a3b8', 0.4], [0.75, '#38bdf8', 1], [1, '#38bdf8', 1]] } },
@@ -77,7 +80,7 @@ export const SERIES = {
   ez_y10: { label: 'Еврозона 10 л. (AAA)', color: '#38bdf8', step: false },
   ez_cpi_core: { label: 'Базовая инфляция еврозоны г/г', color: '#fb923c', step: false, thin: true },
   ez_u: { label: 'Безработица еврозоны', color: '#38bdf8', step: false },
-  ez_gdp: { label: 'Рост ВВП еврозоны (за квартал)', color: '#34d399', step: true },
+  ez_gdp: { label: 'Рост ВВП еврозоны (за квартал)', color: '#34d399', step: true, reported: true },
   de_cpi: { label: 'Германия: инфляция г/г', color: '#fbbf24', step: false },
   de_u: { label: 'Германия: безработица', color: '#fbbf24', step: false },
   de_y10: { label: 'Германия: 10 лет', color: '#fbbf24', step: false },
@@ -101,7 +104,7 @@ export const SERIES = {
   gb_y10: { label: 'Gilt 10 лет', color: '#fbbf24', step: false },
   gb_cpi: { label: 'Инфляция Великобритании г/г', color: '#fb923c', step: false },
   gb_u: { label: 'Безработица Великобритании', color: '#38bdf8', step: false },
-  gb_gdp: { label: 'Рост ВВП Великобритании (за квартал)', color: '#34d399', step: true },
+  gb_gdp: { label: 'Рост ВВП Великобритании (за квартал)', color: '#34d399', step: true, reported: true },
   ch_policy: { label: 'SNB: ставка', color: '#a78bfa', step: true },
   ch_cpi: { label: 'Инфляция Швейцарии г/г', color: '#fb923c', step: false },
   ch_u: { label: 'Безработица Швейцарии', color: '#38bdf8', step: false },
@@ -325,10 +328,10 @@ export const SERIES = {
   stock_dow_dd: { label: 'Dow Jones: просадка от максимума', color: '#fbbf24', step: false },
   sh_price: { label: 'Цена закрытия месяца', color: '#38bdf8', step: false },
   sh_cap: { label: 'Капитализация', color: '#34d399', step: false },
-  sh_revenue: { label: 'Выручка за год', color: '#fbbf24', step: true },
-  sh_income: { label: 'Чистая прибыль за год', color: '#a78bfa', step: true },
-  sh_assets: { label: 'Активы', color: '#fb923c', step: true },
-  sh_equity: { label: 'Капитал', color: '#38bdf8', step: true },
+  sh_revenue: { label: 'Выручка за год', color: '#fbbf24', step: true, reported: true },
+  sh_income: { label: 'Чистая прибыль за год', color: '#a78bfa', step: true, reported: true },
+  sh_assets: { label: 'Активы', color: '#fb923c', step: true, reported: true },
+  sh_equity: { label: 'Капитал', color: '#38bdf8', step: true, reported: true },
   crypto_btc_dd: { label: 'Bitcoin: просадка от максимума', color: '#fb923c', step: false },
   crypto_eth_dd: { label: 'Ethereum: просадка от максимума', color: '#a78bfa', step: false }
 }
@@ -500,6 +503,29 @@ function firstFrom(e, m0, x, strict = false) {
   return lo
 }
 
+// Пропуски ряда (utils/gaps.js), считаются один раз на массив точек и лежат в его индексе. Ставки (step без reported) держат значение по смыслу — у них пропусков нет (null).
+const flagsFor = (id, points) => {
+  const m = SERIES[id]
+  if (!points || !points.length || (m && m.step && !m.reported)) return null
+  const e = indexOf(points)
+  return (e.gaps ||= gapFlags(e.t))
+}
+
+/** Молчал ли ряд id в момент iso: дата лежит между двумя точками, интервал между которыми — пропуск (или отчёт давно просрочен). Значение «последней точки» там — не данные. */
+export function gapAt(id, points, iso, todayIso) {
+  const f = flagsFor(id, points)
+  if (!f || !iso || iso < points[0].d) return false
+  let lo = 0, hi = points.length - 1
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (points[mid].d <= iso) lo = mid
+    else hi = mid - 1
+  }
+  if (points[lo].d === iso) return false
+  if (lo + 1 < points.length) return f[lo + 1] === 1
+  return !!(SERIES[id] && SERIES[id].reported && todayIso && tailGap(indexOf(points).t, ms(todayIso)))
+}
+
 const THIN_COLS = 2 // порог прореживания: больше стольких точек на единицу ширины графика — режем
 
 const usable = (series, ids) => (ids || []).filter((id) => series && series[id] && series[id].length)
@@ -587,25 +613,36 @@ export function buildMacroChart({ series, ids, view, yRange, todayIso, width = 1
     const end = firstFrom(e, m0, x1 + margin, true)
     let j = from - 1
     if (sc.mode === 'log') while (j >= 0 && !(src[j].v > 0)) j--
-    if (j >= 0) pts.push({ t: x0 - margin, v: src[j].v })
+    const gf = flagsFor(id, src)
+    if (j >= 0) pts.push({ t: x0 - margin, v: src[j].v, g: 0 })
     for (let i = from; i < end; i++) {
       const v = src[i].v
       if (sc.mode === 'log' && !(v > 0)) continue
-      pts.push({ t: (e.t[i] - m0) / YEAR_MS, v })
+      pts.push({ t: (e.t[i] - m0) / YEAR_MS, v, g: gf ? gf[i] : 0 })
     }
     // ступенька — редкие точки, прореживать нечего (и порядок точек в ней важен); плотная ломаная режется до ~4 точек на столбец
     const drawn = meta.step ? pts : thinColumns(pts, X, THIN_COLS * (width - pad.l - pad.r))
-    let d = ''
+    // d — сплошная линия, dg — пунктир: отрезки через пропуск (там данных нет, линия лишь соединяет соседние точки) и хвост просроченного отчёта
+    let d = '', dg = '', px = 0, py = 0
     drawn.forEach((p, i) => {
       const x = X(p.t).toFixed(1), y = Y(p.v).toFixed(1)
-      d += i === 0 ? `M${x} ${y}` : meta.step ? `H${x}V${y}` : `L${x} ${y}`
+      if (i === 0) d += `M${x} ${y}`
+      else if (p.g) {
+        if (meta.step) { dg += `M${px} ${py}H${x}`; d += `M${x} ${py}V${y}` }
+        else { dg += `M${px} ${py}L${x} ${y}`; d += `M${x} ${y}` }
+      } else d += meta.step ? `H${x}V${y}` : `L${x} ${y}`
+      px = x; py = y
     })
-    if (meta.step && pts.length) d += `H${X(Math.min(x1 + margin, 0)).toFixed(1)}`
+    if (meta.step && pts.length) {
+      const tail = X(Math.min(x1 + margin, 0)).toFixed(1)
+      if (meta.reported && tailGap(e.t, m0)) dg += `M${px} ${py}H${tail}`
+      else d += `H${tail}`
+    }
     // градиент по значению: вектор от значения from до to в пикселях графика (userSpaceOnUse), поэтому цвет привязан к уровню, а не к положению на экране
     const g = meta.gradient ? { y1: Y(meta.gradient.from), y2: Y(meta.gradient.to), stops: meta.gradient.stops.map(([offset, color, opacity]) => ({ offset, color, opacity })) } : null
     // ряд из единственной точки (снимок, который только начал копиться) линией не нарисовать: рисуется маркер
     const dot = series[id].length === 1 && pts.length === 1 ? { x: X(pts[0].t), y: Y(pts[0].v) } : null
-    return { id, color: meta.color, label: meta.label, d, dot, gradient: g && isFinite(g.y1) && isFinite(g.y2) && g.y1 !== g.y2 ? g : null }
+    return { id, color: meta.color, label: meta.label, d, dg, dot, gradient: g && isFinite(g.y1) && isFinite(g.y2) && g.y1 !== g.y2 ? g : null }
   })
 
   return {
@@ -709,7 +746,7 @@ function niceStep(raw) {
 
 /**
  * График снимков кривой: сроки равномерно по горизонтали, доходность по вертикали. snaps — [{ key, color, points: curveSnapshot(...) }].
- * Возвращает { empty, xs: [{ x, label }], yTicks: [{ y, v }], lines: [{ key, color, d }], width, height, pad }. Пропуски (v: null) рвут линию.
+ * Возвращает { empty, xs: [{ x, label }], yTicks: [{ y, v }], lines: [{ key, color, d, dg }], width, height, pad }. Срок без данных (v: null) рвёт сплошную линию, а через него идёт пунктир dg.
  */
 export function curveChart(snaps, { width = 1000, height = 220, pad = MACRO_PAD } = {}) {
   const vals = snaps.flatMap((s) => s.points.map((p) => p.v)).filter((v) => typeof v === 'number' && isFinite(v))
@@ -726,13 +763,16 @@ export function curveChart(snaps, { width = 1000, height = 220, pad = MACRO_PAD 
   const yTicks = []
   for (let t = Math.ceil(lo / step) * step; t <= hi + 1e-9; t += step) yTicks.push({ y: yOf(t), v: Math.round(t * 1000) / 1000 })
   const lines = snaps.map((s) => {
-    let d = '', pen = false
+    let d = '', dg = '', pen = false, last = ''
     s.points.forEach((p, i) => {
       if (typeof p.v !== 'number' || !isFinite(p.v)) { pen = false; return }
-      d += `${pen ? 'L' : 'M'}${xOf(i).toFixed(1)} ${yOf(p.v).toFixed(1)} `
+      const at = `${xOf(i).toFixed(1)} ${yOf(p.v).toFixed(1)}`
+      if (!pen && last) dg += `M${last}L${at} ` // срок без данных между двумя известными: пунктир через него
+      d += `${pen ? 'L' : 'M'}${at} `
       pen = true
+      last = at
     })
-    return { key: s.key, color: s.color, d: d.trim() }
+    return { key: s.key, color: s.color, d: d.trim(), dg: dg.trim() }
   })
   return { ...base, empty: false, xs: snaps[0].points.map((p, i) => ({ x: xOf(i), label: p.label })), yTicks, lines }
 }
