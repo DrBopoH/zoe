@@ -9,6 +9,7 @@ import HomeView from './views/HomeView.vue'
 import SmetaView from './views/SmetaView.vue'
 import MarketView from './views/MarketView.vue'
 import DataView from './views/DataView.vue'
+import CasesView from './views/CasesView.vue'
 import { cleanPersonName, isP2PTransaction } from './utils/formatters.js'
 import { apiGetJson, apiSend } from './utils/api.js'
 import { storageGet, storageSet } from './utils/storage.js'
@@ -207,6 +208,7 @@ onUnmounted(() => {
       </div>
 
       <KeepAlive><HomeView v-if="activeTab === 'home'" :accounts="accounts" :transactions="transactions" /></KeepAlive>
+      <KeepAlive><CasesView v-if="activeTab === 'cases'" :data-version="dataVersion" /></KeepAlive>
       <KeepAlive><SmetaView v-if="activeTab === 'dashboard'" :accounts="accounts" :transactions="transactions" /></KeepAlive>
       <KeepAlive><MarketView v-if="activeTab === 'market'" :accounts="accounts" :data-version="dataVersion" :running="!!market?.running" /></KeepAlive>
       <KeepAlive><DataView v-if="activeTab === 'data'" :accounts="accounts" :transactions="transactions" :users="users" :data-version="dataVersion" :persons-count="personsCount" @refresh="fetchData" /></KeepAlive>

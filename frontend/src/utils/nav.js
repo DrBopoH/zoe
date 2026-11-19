@@ -2,7 +2,8 @@
 // «Операционной» и «Лиц» в «Учет») переводятся в новые, чтобы после обновления человек попал туда же.
 
 export const HOME_TAB = 'home' // главная: пустая страница до переборки дизайна (Build 3), вне архива
-export const TOP_TABS = [HOME_TAB, 'dashboard', 'market', 'data']
+export const CASES_TAB = 'cases' // «Дела»: рабочие пространства пользователя; свой раздел бокового меню, не архив
+export const TOP_TABS = [HOME_TAB, CASES_TAB, 'dashboard', 'market', 'data']
 // Страницы прежнего интерфейса живут в разделе «Архив» бокового меню (Build 3 — переборка дизайна); порядок и названия — отсюда
 export const ARCHIVE_PAGES = [
   { key: 'dashboard', label: 'Смета' },
