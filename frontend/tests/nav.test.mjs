@@ -24,8 +24,14 @@ test('вкладка «Рынок» сохраняется как есть', () 
 })
 
 test('ARCHIVE_PAGES: в архиве три прежние страницы, главная вне архива', async () => {
-  const { ARCHIVE_PAGES, TOP_TABS, HOME_TAB } = await import('../src/utils/nav.js')
-  assert.deepEqual(ARCHIVE_PAGES.map((p) => p.key), TOP_TABS.filter((k) => k !== HOME_TAB))
+  const { ARCHIVE_PAGES, TOP_TABS, HOME_TAB, CASES_TAB } = await import('../src/utils/nav.js')
+  assert.deepEqual(ARCHIVE_PAGES.map((p) => p.key), TOP_TABS.filter((k) => k !== HOME_TAB && k !== CASES_TAB))
   assert.deepEqual(ARCHIVE_PAGES.map((p) => p.label), ['Смета', 'Рынок', 'Учет'])
   assert.equal(resolveNav('home', null).tab, 'home')
+})
+
+test('«Дела» — своя вкладка вне архива и читается как есть', async () => {
+  const { CASES_TAB, ARCHIVE_PAGES } = await import('../src/utils/nav.js')
+  assert.deepEqual(resolveNav(CASES_TAB, 'persons'), { tab: 'cases', section: 'persons' })
+  assert.ok(!ARCHIVE_PAGES.some((p) => p.key === CASES_TAB))
 })

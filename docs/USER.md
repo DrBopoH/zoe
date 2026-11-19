@@ -55,6 +55,10 @@ Binance P2P: in a regular statement a P2P purchase is visible only as "+88.85 US
 
 The page the Ζωή brand leads to: a capital tile and a candlestick chart across all accounts for all time. This is the beginning of the future interface; the rest is still in the "Archive".
 
+## Cases (Дела)
+
+A separate section in the side menu: your own spheres of life and projects (a courier job, a family budget, an investment portfolio) as cards-canvases. The top of a card is a cover of your colour or picture, the bottom is a dark fade with the name on the left. The round **+** button at the bottom right opens the creation window: a name, a cover colour (a palette or your own) and an optional picture, with a live preview of the card. For now a canvas is only a cover and a name; its content is built in the next steps.
+
 ## The "Смета" (Smeta) page
 
 The overall picture, top to bottom: a header with **Капитал** (Capital) (in dollar equivalent: dollars as is, hryvnia, euro and Binance at the NBU rate; next to it, in small type, "(≈ ₴…)" is an approximate hryvnia equivalent; next to that the totals of the current month: income, expense and the result without transfers between your own accounts; until rates are loaded the amounts are in hryvnia — press "Обновить" on the "Курсы" (Rates) screen of the "Рынок" page); below, in one row, two blocks: on the left **Структура капитала** (Capital structure) (a ring by layers: cards and accounts, free money at the broker, OVDP bonds, crypto; the inner ring shows the share of hryvnia, dollar and euro; beside it a list with the amount and share of each layer and currency; on hovering a segment or a row the corresponding part is highlighted and its share is shown in the center) and on the right **Портфель ОВДП** (OVDP portfolio) as tiles (amount in bonds, average rate and time to maturity weighted by position value, real yield: the rate adjusted for year-on-year inflation, yield in dollars and real yield in dollars, the nearest payout in the title; positions without a rate or maturity in the ICU reference are not counted); below that, a candlestick chart across all accounts for all time. Transfers between your own accounts and internal movements are not included in the increment.
@@ -75,7 +79,7 @@ The list, prices and curve are stored on the server (they survive a change of br
 
 ### Macro sections
 
-The "Макро" group in the left drawer. Each screen reads its own series and is updated by its own "Обновить" button (it polls only them), "Разведать" updates all sources at once. All data is public, no keys needed; the charts are controlled as described above (wheel, dragging, "Сброс масштаба"). Everywhere it is a picture, not a forecast and not advice. The "Ставка НБУ" (NBU rate) and "Инфляция" screens are described above. **A dashed line means no data:** if a series was silent for noticeably longer than its usual step (hourly P2P snapshots while the server was off, a skipped month, a company report that did not come out), the chart joins the neighbouring points with a dashed segment instead of a solid one, and the tooltip under the cursor writes "нет данных" there rather than the last known value. Rates are not affected: a rate holds until it changes, that is its meaning.
+The "Макро" group in the left drawer. Each screen reads its own series and is updated by its own "Обновить" button (it polls only them), "Разведать" updates all sources at once. All data is public, no keys needed; the charts are controlled as described above (wheel, dragging, "Сброс масштаба"). Everywhere it is a picture, not a forecast and not advice. The "Ставка НБУ" (NBU rate) and "Инфляция" screens are described above.
 
 ### Rates
 
@@ -200,7 +204,6 @@ Links are stored in the permanent database and **survive a cache reset**.
 - The selected timeframe is remembered in the browser.
 - **Moving averages (as on Binance):** three lines over the closing price — **MA(7)** yellow, **MA(25)** pink, **MA(99)** purple: the simple average of the last 7, 25 and 99 candles. A line starts from its Nth candle, the same as on Binance. They show the trend of the capital on the chosen timeframe; the legend is in the chart header.
 - **Volume histogram:** a separate strip under the candles: the bars hang down from its top line, mirroring the candles. For each candle the inflow and the outflow are summed by absolute value; the colour shows which side prevails — green when the inflow is bigger or equal (also when nothing happened: nothing changed outside the capital), red when the outflow is bigger. A transfer between your own accounts is one movement and counts once, it does not change the colour. The tallest bar is the biggest turnover in the visible part; hover a bar to see the inflow and the outflow.
-- **Hatched candle:** there was no Binance valuation at all in this period (the server was off), so the Binance part of the capital is taken at the last known price. The candle is drawn hatched with a dashed outline and the line above the chart says so; the bank part of such a candle is real.
 
 ## Operation badges
 
