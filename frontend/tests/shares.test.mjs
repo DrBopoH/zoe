@@ -48,6 +48,13 @@ test('сверка с Nasdaq: расхождение больше 25 % — пр�
   const bad = capCheck(2.0e12, [{ d: '2026-11-01', v: 1.0e12 }], '2026-11-17') // как GOOGL: в отчёте один класс
   assert.equal(bad.ok, false)
   assert.equal(Math.round(bad.diff), -50)
+  assert.equal(bad.kind, 'under')
+  assert.equal(ok.kind, 'ok')
+  // ADR (TSM): в отчёте обычные акции, цена за расписку из пяти — расчёт выше Nasdaq в ≈ 4,9 раза
+  const adr = capCheck(1.88e12, [{ d: '2026-11-01', v: 9.24e12 }], '2026-11-17')
+  assert.equal(adr.ok, false)
+  assert.equal(adr.kind, 'over')
+  assert.equal(adr.ratio.toFixed(1), '4.9')
   assert.equal(capCheck(4e12, [{ d: '2026-01-01', v: 4e12 }], '2026-11-17'), null)
   assert.equal(capCheck(0, detail.cap, '2026-11-17'), null)
   assert.equal(capCheck(4e12, [], '2026-11-17'), null)
