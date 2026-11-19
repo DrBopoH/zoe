@@ -2,6 +2,7 @@
 // а снизу кладёт тёмный градиент с названием; здесь — палитра, CSS обложки и проверка имени для формы.
 export const NAME_MAX = 60 // как на бэкенде (db.maxWorkspaceName)
 export const IMAGE_MAX = 400_000 // символов в data-URL, как на бэкенде: больше сервер не примет
+export const IMAGE_URL_MAX = 2000 // символов в ссылке на обложку, как на бэкенде
 export const COVER_SIDE = 640 // длинная сторона картинки после сжатия на фронте, px
 
 // Спокойные насыщенные цвета: на тёмной теме читаются и не спорят с акцентом приложения (зелёный — один из них)
@@ -16,6 +17,9 @@ export const nameOk = (name) => {
   const n = cleanName(name)
   return n.length > 0 && [...n].length <= NAME_MAX
 }
+
+/** Ссылка http(s) на картинку без пробелов, кавычек и скобок (её кладут в CSS url("…")) или data:image — как проверяет бэкенд. */
+export const imageOk = (v) => typeof v === 'string' && (/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(v) || (v.length <= IMAGE_URL_MAX && /^https?:\/\/[^\s"'()\\]+$/.test(v)))
 
 /** Цвет #rrggbb (в любом регистре); иначе пусто. */
 export const validColor = (c) => (/^#[0-9a-fA-F]{6}$/.test(String(c ?? '').trim()) ? String(c).trim().toLowerCase() : '')
@@ -33,7 +37,7 @@ export function colorFor(name) {
  */
 export function coverStyle(ws) {
   const color = validColor(ws?.color) || FALLBACK_COLOR
-  const image = typeof ws?.image === 'string' && ws.image.startsWith('data:image/') ? ws.image : ''
+  const image = imageOk(ws?.image) ? ws.image : ''
   return image
     ? { backgroundColor: color, backgroundImage: `url("${image}")`, backgroundSize: 'cover', backgroundPosition: 'center' }
     : { backgroundColor: color, backgroundImage: `linear-gradient(135deg, rgb(255 255 255 / 0.14), rgb(0 0 0 / 0.18))` }

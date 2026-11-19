@@ -12,10 +12,8 @@ const emit = defineEmits(['refresh', 'update:activeTab'])
 const isOpen = ref(false)
 const openKey = ref(null) // раскрытый раздел (аккордеон)
 
-// Раздел-страница (tab) открывает вкладку сразу, остальные раскрываются аккордеоном
-const toggleSection = (s) => {
-  if (s.tab) { openPage(s.tab); return }
-  openKey.value = openKey.value === s.key ? null : s.key
+const toggleSection = (key) => {
+  openKey.value = openKey.value === key ? null : key
 }
 
 const openPage = (key) => {
@@ -52,11 +50,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 
         <div class="flex-1 overflow-y-auto p-3 space-y-2">
           <div v-for="s in SECTIONS" :key="s.key" class="space-y-2">
-            <button type="button" class="ui-drawer-item" :class="{ 'ui-drawer-item--active': s.tab ? activeTab === s.tab : openKey === s.key }" @click="toggleSection(s)">
+            <button type="button" class="ui-drawer-item" :class="{ 'ui-drawer-item--active': openKey === s.key }" @click="toggleSection(s.key)">
               {{ s.label }}
-              <UiIcon v-if="!s.tab" name="chevron" size="sm" class="ui-drawer-chevron" :class="{ 'rotate-90': openKey === s.key }" />
+              <UiIcon name="chevron" size="sm" class="ui-drawer-chevron" :class="{ 'rotate-90': openKey === s.key }" />
             </button>
-            <div v-if="!s.tab && openKey === s.key" class="ui-groups">
+            <div v-if="openKey === s.key" class="ui-groups">
               <UiGroup v-if="s.pages" title="Разделы">
                 <div class="space-y-2">
                   <UiButton

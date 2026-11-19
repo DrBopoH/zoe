@@ -35,12 +35,10 @@ const onCreate = async (payload) => {
 </script>
 
 <template>
-  <div class="flex flex-col min-h-[calc(100vh-11rem)]">
-    <div class="ui-label pb-3">Дела<template v-if="list.length"> · {{ list.length }}</template></div>
-
+  <div class="flex flex-col min-h-[calc(100vh-9rem)]">
     <UiLoadError v-if="error" :message="error" class="mb-3" @retry="load" />
 
-    <div v-if="list.length" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div v-if="list.length" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
       <WorkspaceCard v-for="w in list" :key="w.id" :workspace="w" />
     </div>
     <UiEmpty v-else-if="!error">Пока нет дел. Нажми «+», чтобы создать первое</UiEmpty>
