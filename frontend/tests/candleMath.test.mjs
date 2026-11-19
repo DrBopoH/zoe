@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { TFS, dayStartOf, weekStartOf, alignDown, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, transferSteps, movingAverage, MA_LINES, candleVolume, bnCandle } from '../src/utils/candleMath.js'
+import { TFS, dayStartOf, weekStartOf, alignDown, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, transferSteps, movingAverage, MA_LINES, candleVolume, bnCandle, bucketCandle, matchBinanceTransfers } from '../src/utils/candleMath.js'
 
 test('dayStartOf / weekStartOf: полночь и понедельник', () => {
   const d = new Date(2026, 10, 12, 15, 30) // чт
@@ -190,14 +190,12 @@ test('Volume: перевод между своими счетами считае
   assert.deepEqual(candleVolume(100, 100, 999), { total: 999, up: true }) // не уходит в минус
 })
 
-test('transferSteps: перевод на счёт из tagIds без парной записи помечается', () => {
+test('transferSteps: операции из tagTx помечаются', () => {
   const t0 = Date.parse('2026-11-17T21:52:00Z')
-  const list = [
-    { account_id: 'bank', own_account_id: 'bn', amount: -600, time: new Date(t0).toISOString() },
-    { account_id: 'bank', own_account_id: '', amount: -50, time: new Date(t0 + 1000).toISOString() }
-  ]
-  assert.deepEqual([...transferSteps(list, new Set(['bn'])).tag], [1, 0])
-  assert.deepEqual([...transferSteps(list).tag], [0, 0]) // без tagIds — как раньше
+  const a = { account_id: 'bank', amount: -600, time: new Date(t0).toISOString() }
+  const b = { account_id: 'bank', amount: -50, time: new Date(t0 + 1000).toISOString() }
+  assert.deepEqual([...transferSteps([a, b], new Set([a])).tag], [1, 0])
+  assert.deepEqual([...transferSteps([a, b]).tag], [0, 0]) // без tagTx — как раньше
 })
 
 test('bnCandle: перевод банк → Binance не рисует фантомный фитиль', () => {
@@ -220,4 +218,35 @@ test('bnCandle: вывод с Binance на банк (T > 0) тоже без фа
   // банк 4 000, вывели 6 000 с Binance (там 13 500 → 7 500): капитал весь день 17 500
   const c = bnCandle(4000, 10000, 4000, 4000, [13500, 13500, 7500, 7500], 6000, 0, 6000)
   assert.deepEqual(c, { open: 17500, high: 17500, low: 17500, close: 17500 })
+})
+
+// Реальный день 17 ноября 2026 (данные пользователя): доход 6721,61 на счёт, дальше пять P2P-покупок USDT с банка на Binance
+// (банк −600/−1615/−1400/−1370/−960, Binance +585,55/+1583,27/+1369,02/+1338,15/+937,34 — суммы не равны из-за спреда).
+const DAY = [
+  ['binance', 585.55, '22:04:28', 'p2p'], ['bank', -600, '22:03:53'], ['binance', 1583.27, '22:02:31', 'p2p'], ['bank', -1615, '22:00:52'],
+  ['binance', 1369.02, '21:58:03', 'p2p'], ['bank', -1400, '21:56:35'], ['binance', 1338.15, '21:54:00', 'p2p'], ['bank', -1370, '21:52:33'],
+  ['binance', 937.34, '21:47:00', 'p2p'], ['bank', -960, '21:44:14'], ['bank', -205, '21:34:09'], ['bank', -324.98, '20:19:21'],
+  ['bank2', -6721.61, '20:02:07', '', 'bank'], ['bank', 6721.61, '20:02:07', '', 'bank2'], ['bank', -270, '19:36:30'], ['bank', 50, '19:35:33'],
+  ['bank2', 6721.61, '18:05:31'], ['bank', -125, '13:04:33'], ['binance', 0.02, '06:14:32', 'dividend']
+].map(([account_id, amount, hms, kind, own]) => ({ account_id, amount, kind: kind || undefined, own_account_id: own || undefined, time: `2026-11-17T${hms}+02:00` }))
+
+test('matchBinanceTransfers: P2P-покупки USDT находят свою банковскую сторону по времени и сумме, остальное не трогают', () => {
+  const m = matchBinanceTransfers(DAY, new Set(['binance']))
+  const got = DAY.filter((t) => m.has(t)).map((t) => t.amount).sort((x, y) => x - y)
+  assert.deepEqual(got, [-1615, -1400, -1370, -960, -600])
+})
+
+test('свеча 17 ноября: пик не выше реального (~24 тыс.), без фантома в 30 тыс.', () => {
+  const skip = new Set(['binance'])
+  const tag = matchBinanceTransfers(DAY, skip)
+  const { ms, amt, end, tag: tg } = transferSteps(DAY.filter((t) => !skip.has(t.account_id)), tag)
+  const b = [6813.91, 12815.61, 6717.72, 12774.97] // оценка портфеля Binance за этот день
+  const c1 = 10638.03 // «остальное» (банки) на конец дня
+  const r = bucketCandle(c1, amt, end, tg, 0, ms.length, b, true)
+  assert.ok(Math.abs(r.close - (c1 + b[3])) < 1e-6)
+  assert.ok(r.high >= Math.max(r.open, r.close) && r.high < 24500, `пик ${r.high.toFixed(0)} должен быть около 24 000`)
+  assert.ok(r.low > r.open - 1000, `дно ${r.low.toFixed(0)} не должно уходить сильно ниже открытия ${r.open.toFixed(0)}`)
+  // как было бы без разбора переводов: фантом +6 тысяч сверху
+  const bad = bucketCandle(c1, amt, end, tg, 0, ms.length, b, false)
+  assert.ok(bad.high > 29000, `без разбора пик ${bad.high.toFixed(0)} — тот самый фантом`)
 })
