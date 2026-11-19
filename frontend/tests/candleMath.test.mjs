@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { TFS, dayStartOf, weekStartOf, alignDown, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, transferSteps, movingAverage, MA_LINES, candleVolume } from '../src/utils/candleMath.js'
+import { TFS, dayStartOf, weekStartOf, alignDown, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, transferSteps, movingAverage, MA_LINES, candleVolume, bnCandle } from '../src/utils/candleMath.js'
 
 test('dayStartOf / weekStartOf: полночь и понедельник', () => {
   const d = new Date(2026, 10, 12, 15, 30) // чт
@@ -188,4 +188,36 @@ test('Volume: перевод между своими счетами считае
   // перевод 500 и зарплата 1000: объём 1500, зелёный
   assert.deepEqual(candleVolume(1500, 500, 500), { total: 1500, up: true })
   assert.deepEqual(candleVolume(100, 100, 999), { total: 999, up: true }) // не уходит в минус
+})
+
+test('transferSteps: перевод на счёт из tagIds без парной записи помечается', () => {
+  const t0 = Date.parse('2026-11-17T21:52:00Z')
+  const list = [
+    { account_id: 'bank', own_account_id: 'bn', amount: -600, time: new Date(t0).toISOString() },
+    { account_id: 'bank', own_account_id: '', amount: -50, time: new Date(t0 + 1000).toISOString() }
+  ]
+  assert.deepEqual([...transferSteps(list, new Set(['bn'])).tag], [1, 0])
+  assert.deepEqual([...transferSteps(list).tag], [0, 0]) // без tagIds — как раньше
+})
+
+test('bnCandle: перевод банк → Binance не рисует фантомный фитиль', () => {
+  // банк 10 000, внесли 6 000 на Binance (там 7 500 → 13 500 после внесения): капитал весь день 17 500
+  const c = bnCandle(10000, 4000, 10000, 10000, [7500, 13500, 7500, 13500], -6000, 6000, 0)
+  assert.deepEqual(c, { open: 17500, high: 17500, low: 17500, close: 17500 })
+  // та же ситуация по старой формуле давала бы пик o1 + b[1] = 23 500 (фантом на 6 000)
+  assert.equal(10000 + 13500, 23500)
+})
+
+test('bnCandle: без переводов считает как раньше — крайние точки Binance, сложенные с крайними точками «остального»', () => {
+  const c = bnCandle(1000, 1100, 1200, 950, [500, 650, 480, 520], 0, 0, 0)
+  assert.equal(c.open, 1500)
+  assert.equal(c.close, 1620)
+  assert.equal(c.high, Math.max(1500, 1620, 1200 + 500, 1200 + 520, 1000 + 650, 1100 + 650))
+  assert.equal(c.low, Math.min(1500, 1620, 950 + 500, 950 + 520, 1000 + 480, 1100 + 480))
+})
+
+test('bnCandle: вывод с Binance на банк (T > 0) тоже без фантома', () => {
+  // банк 4 000, вывели 6 000 с Binance (там 13 500 → 7 500): капитал весь день 17 500
+  const c = bnCandle(4000, 10000, 4000, 4000, [13500, 13500, 7500, 7500], 6000, 0, 6000)
+  assert.deepEqual(c, { open: 17500, high: 17500, low: 17500, close: 17500 })
 })

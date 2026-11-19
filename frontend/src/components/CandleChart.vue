@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { apiSend } from '../utils/api.js'
 import { storageGet, storageSet } from '../utils/storage.js'
-import { movingAverage, MA_LINES, candleVolume, TFS, dayStartOf, weekStartOf, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, candleBounds, candleWindow, candleSpans, candleYRanges, visibleSlots, transferSteps } from '../utils/candleMath.js'
+import { movingAverage, MA_LINES, candleVolume, bnCandle, TFS, dayStartOf, weekStartOf, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, candleBounds, candleWindow, candleSpans, candleYRanges, visibleSlots, transferSteps } from '../utils/candleMath.js'
 import { clampWindow } from '../utils/chartView.js'
 import { useChartView } from '../composables/useChartView.js'
 import { toLocalDateStr, formatMoney, formatDateLong, formatShortDateName, formatMonthName } from '../utils/formatters.js'
@@ -165,7 +165,7 @@ onMounted(async () => { await loadBnInfo(); ensureBn() })
 // Операции (кроме Binance-счетов при готовом ряде), по времени. Типизированные массивы: пересчёт свечей без аллокаций.
 const txSorted = computed(() => {
   const skip = bnReady.value ? new Set(props.binanceIds) : null
-  return transferSteps(skip ? props.transactions.filter(t => !skip.has(t.account_id)) : props.transactions)
+  return transferSteps(skip ? props.transactions.filter(t => !skip.has(t.account_id)) : props.transactions, skip)
 })
 
 // Все загруженные корзины в плоских массивах. Считается справа налево от итога капитала (как раньше), без объекта на свечу —
@@ -175,7 +175,7 @@ const series = computed(() => {
   const n = starts.length
   if (n === 0) return null
   void bnVer.value
-  const { ms, amt, end } = txSorted.value
+  const { ms, amt, end, tag } = txSorted.value
   const lo = new Int32Array(n + 1)
   let p = 0
   while (p < ms.length && ms[p] < starts[0]) p++
@@ -193,15 +193,25 @@ const series = computed(() => {
   let minVal = Infinity, maxVal = -Infinity
   for (let i = n - 1; i >= 0; i--) {
     const c1 = cur
-    let net = 0
-    for (let k = lo[i]; k < lo[i + 1]; k++) net += amt[k]
+    const b = (bn && bn.get(starts[i])) || ZERO
+    const useTag = !!(bn && bn.get(starts[i])) // нет ряда Binance за эту корзину — переводы на Binance считаются как обычные операции
+    let net = 0, T = 0, Fp = 0, Fn = 0
+    for (let k = lo[i]; k < lo[i + 1]; k++) {
+      net += amt[k]
+      if (useTag && tag[k]) { T += amt[k]; if (amt[k] < 0) Fp -= amt[k]; else Fn += amt[k] }
+    }
     const o1 = c1 - net
+    const c1n = c1 - T // «остальное» на конец без переводов на Binance
     let run = o1
-    let h1 = Math.max(o1, c1)
-    let l1 = Math.min(o1, c1)
+    let h1 = Math.max(o1, c1n)
+    let l1 = Math.min(o1, c1n)
     let inflow = 0, outflow = 0, pair = 0
     for (let k = lo[i]; k < lo[i + 1]; k++) {
       const a = amt[k]
+      if (useTag && tag[k]) { // перевод на Binance: одно движение денег, капитал не меняет — в объёме один раз и нейтрально
+        inflow += Math.abs(a); outflow += Math.abs(a); pair += Math.abs(a)
+        continue
+      }
       if (a > 0) inflow += a; else outflow -= a
       if (!end[k]) pair += Math.abs(a) // первая запись перевода между своими счетами: одно движение, в объёме один раз
       run += a
@@ -210,13 +220,8 @@ const series = computed(() => {
       if (run < l1) l1 = run
     }
     cur = o1
-    // Binance: свеча оценки (o,h,l,c); до начала ряда — ноль. Пути двух частей внутри корзины неизвестны —
-    // пик/дно берём из достижимых сочетаний крайних точек.
-    const b = (bn && bn.get(starts[i])) || ZERO
-    const open = o1 + b[0]
-    const close = c1 + b[3]
-    const high = Math.max(open, close, h1 + b[0], h1 + b[3], o1 + b[1], c1 + b[1])
-    const low = Math.min(open, close, l1 + b[0], l1 + b[3], o1 + b[2], c1 + b[2])
+    // Binance: свеча оценки (o,h,l,c); до начала ряда — ноль. Пути двух частей внутри корзины неизвестны — см. bnCandle (candleMath.js)
+    const { open, high, low, close } = bnCandle(o1, c1, h1, l1, b, T, Fp, Fn)
     O[i] = open; H[i] = high; L[i] = low; C[i] = close
     BO[i] = b[0]; BC[i] = b[3]; IN[i] = inflow; OUT[i] = outflow; PAIR[i] = pair
     if (low < minVal) minVal = low
