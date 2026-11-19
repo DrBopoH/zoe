@@ -8,6 +8,7 @@ Versions: `R.sB.C+T.hash`. On `dev` there is no state letter (`v1.1.C+T`), the l
 
 Polishing the user-friendly design and finishing QoL, builder and reference features.
 
+- **v1.3.19** — Cases: a pencil (edit in the creation window) and a trash (delete in two presses) on a card, shown on hover
 - **v1.3.18** — Cases: the cover picture is set only by a link; picking a local file (with compression and drag-and-drop) is removed along with data-URL covers in the backend; the creation window lost its extra captions
 - **v1.3.17** — Cases: the button moved from the side menu to the header, cards are smaller (about five per row), the list caption is removed, the cover can be set by a link (http/https) as well as by a file; the backend accepts such links
 - **v1.3.16** — Cases: a new "Дела" section (workspaces). Canvas cards (cover of your colour or picture on top, a dark fade with the name at the bottom), a round "+" button with an SVG icon at the bottom right and a creation window with live preview. Backend: `workspaces` table in core.db and `/api/workspaces` (list, create, update, delete) with validation of name, colour and picture
