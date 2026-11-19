@@ -58,6 +58,7 @@ func (s *Server) Handler() http.Handler {
 		{"/api/users", s.HandleUsers},
 		{"/api/users/alias", s.HandleAddAlias},
 		{"/api/users/link-account", s.HandleLinkAccount},
+		{"/api/workspaces", s.HandleWorkspaces}, // дела: рабочие пространства пользователя (имя и обложка)
 		{"/api/alias-structures", s.HandleAliasStructures},
 		{"/api/iban-masks", s.HandleIBANMasks},
 	}
