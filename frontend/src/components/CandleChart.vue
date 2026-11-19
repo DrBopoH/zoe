@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { apiSend } from '../utils/api.js'
 import { storageGet, storageSet } from '../utils/storage.js'
-import { movingAverage, MA_LINES, candleVolume, TFS, dayStartOf, weekStartOf, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, candleBounds, candleWindow, candleSpans, candleYRanges, visibleSlots, transferSteps } from '../utils/candleMath.js'
+import { movingAverage, MA_LINES, candleVolume, bucketCandle, matchBinanceTransfers, TFS, dayStartOf, weekStartOf, buildIntradayStarts, buildDailyStarts, lowerBound, niceStep, axisLabel, candleBounds, candleWindow, candleSpans, candleYRanges, visibleSlots, transferSteps } from '../utils/candleMath.js'
 import { clampWindow } from '../utils/chartView.js'
 import { useChartView } from '../composables/useChartView.js'
 import { toLocalDateStr, formatMoney, formatDateLong, formatShortDateName, formatMonthName } from '../utils/formatters.js'
@@ -165,7 +165,8 @@ onMounted(async () => { await loadBnInfo(); ensureBn() })
 // Операции (кроме Binance-счетов при готовом ряде), по времени. Типизированные массивы: пересчёт свечей без аллокаций.
 const txSorted = computed(() => {
   const skip = bnReady.value ? new Set(props.binanceIds) : null
-  return transferSteps(skip ? props.transactions.filter(t => !skip.has(t.account_id)) : props.transactions)
+  if (!skip) return transferSteps(props.transactions)
+  return transferSteps(props.transactions.filter(t => !skip.has(t.account_id)), matchBinanceTransfers(props.transactions, skip))
 })
 
 // Все загруженные корзины в плоских массивах. Считается справа налево от итога капитала (как раньше), без объекта на свечу —
@@ -175,7 +176,7 @@ const series = computed(() => {
   const n = starts.length
   if (n === 0) return null
   void bnVer.value
-  const { ms, amt, end } = txSorted.value
+  const { ms, amt, end, tag } = txSorted.value
   const lo = new Int32Array(n + 1)
   let p = 0
   while (p < ms.length && ms[p] < starts[0]) p++
@@ -193,30 +194,12 @@ const series = computed(() => {
   let minVal = Infinity, maxVal = -Infinity
   for (let i = n - 1; i >= 0; i--) {
     const c1 = cur
-    let net = 0
-    for (let k = lo[i]; k < lo[i + 1]; k++) net += amt[k]
-    const o1 = c1 - net
-    let run = o1
-    let h1 = Math.max(o1, c1)
-    let l1 = Math.min(o1, c1)
-    let inflow = 0, outflow = 0, pair = 0
-    for (let k = lo[i]; k < lo[i + 1]; k++) {
-      const a = amt[k]
-      if (a > 0) inflow += a; else outflow -= a
-      if (!end[k]) pair += Math.abs(a) // первая запись перевода между своими счетами: одно движение, в объёме один раз
-      run += a
-      if (!end[k]) continue // середина перевода между своими счетами: капитал ещё не сошёлся, экстремум не фиксируем
-      if (run > h1) h1 = run
-      if (run < l1) l1 = run
-    }
-    cur = o1
-    // Binance: свеча оценки (o,h,l,c); до начала ряда — ноль. Пути двух частей внутри корзины неизвестны —
-    // пик/дно берём из достижимых сочетаний крайних точек.
-    const b = (bn && bn.get(starts[i])) || ZERO
-    const open = o1 + b[0]
-    const close = c1 + b[3]
-    const high = Math.max(open, close, h1 + b[0], h1 + b[3], o1 + b[1], c1 + b[1])
-    const low = Math.min(open, close, l1 + b[0], l1 + b[3], o1 + b[2], c1 + b[2])
+    const bnb = bn && bn.get(starts[i])
+    const b = bnb || ZERO
+    // нет ряда Binance за эту корзину — переводы на Binance считаются как обычные операции (utils/candleMath.js: bucketCandle)
+    const r = bucketCandle(c1, amt, end, tag, lo[i], lo[i + 1], b, !!bnb && bnb !== ZERO)
+    cur = r.o1
+    const { open, high, low, close, inflow, outflow, pair } = r
     O[i] = open; H[i] = high; L[i] = low; C[i] = close
     BO[i] = b[0]; BC[i] = b[3]; IN[i] = inflow; OUT[i] = outflow; PAIR[i] = pair
     if (low < minVal) minVal = low

@@ -76,7 +76,7 @@ export const axisLabel = (v, step, lo, hi) => {
 export const PAIR_WINDOW_MS = 10 * 60 * 1000
 
 // list: [{ id, account_id, own_account_id, time, amount }] → { ms, amt, end } по времени. Запись без пары — шаг из одной записи.
-export function transferSteps(list) {
+export function transferSteps(list, tagTx = null) {
   const items = []
   for (const t of list) {
     if (!t.time) continue
@@ -105,17 +105,101 @@ export function transferSteps(list) {
       mate.used = true
       steps.push({ ms: Math.min(it.ms, mate.ms), amts: [it.t.amount, mate.t.amount] })
     } else {
-      steps.push({ ms: it.ms, amts: [it.t.amount] })
+      // перевод на Binance/с Binance, у которого парной записи нет (запись Binance отфильтрована): помечаем — график разберёт его отдельно
+      steps.push({ ms: it.ms, amts: [it.t.amount], tag: !!(tagTx && tagTx.has(it.t)) })
     }
   }
   steps.sort((a, b) => a.ms - b.ms)
   const n = steps.reduce((m, st) => m + st.amts.length, 0)
-  const ms = new Float64Array(n), amt = new Float64Array(n), end = new Uint8Array(n)
+  const ms = new Float64Array(n), amt = new Float64Array(n), end = new Uint8Array(n), tag = new Uint8Array(n)
   let i = 0
   for (const st of steps) {
-    st.amts.forEach((a, k) => { ms[i] = st.ms; amt[i] = a; end[i] = k === st.amts.length - 1 ? 1 : 0; i++ })
+    st.amts.forEach((a, k) => { ms[i] = st.ms; amt[i] = a; end[i] = k === st.amts.length - 1 ? 1 : 0; tag[i] = st.tag ? 1 : 0; i++ })
   }
-  return { ms, amt, end }
+  return { ms, amt, end, tag }
+}
+
+// Какие банковские операции — это деньги, ушедшие на Binance или пришедшие с него (P2P, пополнение, вывод). Запись самого Binance
+// (kind p2p | deposit | withdraw) отфильтровывается из истории — его вклад уже в оценке портфеля, — а банковская сторона у P2P НЕ
+// связана «своим счётом» (контрагент — человек на P2P) и суммы не равны (спред ~2%). Поэтому ищем по времени и сумме: для записи
+// Binance с суммой a ближайшая по времени операция другого счёта противоположного знака в окне MATCH_WINDOW_MS и в пределах MATCH_TOL
+// по сумме. Каждая банковская операция берётся один раз. Возвращает Set операций (по ссылке), которые график считает переводом на Binance.
+export const MATCH_WINDOW_MS = 15 * 60 * 1000
+export const MATCH_TOL = 0.08
+export function matchBinanceTransfers(list, binanceIds) {
+  const bn = binanceIds instanceof Set ? binanceIds : new Set(binanceIds)
+  const kinds = new Set(['p2p', 'deposit', 'withdraw'])
+  const bank = [], legs = []
+  for (const t of list) {
+    if (!t.time || !t.amount) continue
+    const ms = new Date(t.time).getTime()
+    if (bn.has(t.account_id)) { if (kinds.has(t.kind)) legs.push({ t, ms }) }
+    else bank.push({ t, ms, used: false })
+  }
+  const out = new Set()
+  for (const lg of legs) {
+    const a = lg.t.amount
+    let best = null, bestD = Infinity
+    for (const c of bank) {
+      if (c.used || Math.sign(c.t.amount) === Math.sign(a)) continue
+      const d = a > 0 ? lg.ms - c.ms : c.ms - lg.ms // деньги сначала уходят из банка, потом приходят на Binance (и наоборот при выводе)
+      if (d < -60_000 || d > MATCH_WINDOW_MS) continue
+      if (Math.abs(Math.abs(c.t.amount) - Math.abs(a)) > MATCH_TOL * Math.abs(a)) continue
+      const ad = Math.abs(d)
+      if (ad < bestD) { bestD = ad; best = c }
+    }
+    if (best) { best.used = true; out.add(best.t) }
+  }
+  return out
+}
+
+// Одна свеча капитала по корзине (k0..k1 — операции корзины в массивах ms/amt/end/tag), от «остального» капитала c1 на конец корзины.
+// b — свеча Binance [o,h,l,c] (или null, если ряда за корзину нет), useTag — разбирать ли переводы на Binance отдельно.
+export function bucketCandle(c1, amt, end, tag, k0, k1, b, useTag) {
+  let net = 0, T = 0, Fp = 0, Fn = 0
+  for (let k = k0; k < k1; k++) {
+    net += amt[k]
+    if (useTag && tag[k]) { T += amt[k]; if (amt[k] < 0) Fp -= amt[k]; else Fn += amt[k] }
+  }
+  const o1 = c1 - net
+  const c1n = c1 - T // «остальное» на конец без переводов на Binance
+  let run = o1
+  let h1 = Math.max(o1, c1n)
+  let l1 = Math.min(o1, c1n)
+  let inflow = 0, outflow = 0, pair = 0
+  for (let k = k0; k < k1; k++) {
+    const a = amt[k]
+    if (useTag && tag[k]) { // перевод на Binance: одно движение денег, капитал не меняет — в объёме один раз и нейтрально
+      inflow += Math.abs(a); outflow += Math.abs(a); pair += Math.abs(a)
+      continue
+    }
+    if (a > 0) inflow += a; else outflow -= a
+    if (!end[k]) pair += Math.abs(a) // первая запись перевода между своими счетами: одно движение, в объёме один раз
+    run += a
+    if (!end[k]) continue // середина перевода между своими счетами: капитал ещё не сошёлся, экстремум не фиксируем
+    if (run > h1) h1 = run
+    if (run < l1) l1 = run
+  }
+  const bb = b || [0, 0, 0, 0]
+  return { o1, inflow, outflow, pair, ...bnCandle(o1, c1, h1, l1, bb, T, Fp, Fn) }
+}
+
+// Свеча капитала при ряде Binance (оценка портфеля o,h,l,c на корзину). Капитал = «остальное» (банки) + Binance. Перевод с банка
+// на Binance (и обратно) капитал не меняет: банк упал на A, Binance вырос на A. Но у Binance известны только четыре точки корзины, а
+// момент перевода внутри неё — нет, и если складывать крайние точки двух частей независимо, пик получает А сверху дважды (фантомный
+// фитиль). Поэтому из Binance-части вычитается накопленный перевод Fcum(t) ∈ [−Fn, Fp]: M(t) = B(t) − Fcum(t) — это «чистое» движение
+// рынка, а из банковской части переводы выкидываются. Крайние значения M берутся без фантомов (в сторону, где они не выше/не ниже).
+//   o1 — «остальное» на начало корзины, c1 — на конец (с переводами), h1/l1 — экстремумы «остального» без переводов,
+//   b = [o,h,l,c] Binance, T — сумма переводов банка на Binance в корзине (минус = внесли на Binance), Fp/Fn — внесено/выведено.
+export function bnCandle(o1, c1, h1, l1, b, T = 0, Fp = 0, Fn = 0) {
+  const c1n = c1 - T // «остальное» на конец без переводов
+  const mEnd = b[3] + T
+  const mHigh = Math.max(b[0], mEnd, b[1] - Fp)
+  const mLow = Math.min(b[0], mEnd, b[2] + Fn)
+  const open = o1 + b[0], close = c1 + b[3]
+  const high = Math.max(open, close, h1 + b[0], h1 + mEnd, o1 + mHigh, c1n + mHigh)
+  const low = Math.min(open, close, l1 + b[0], l1 + mEnd, o1 + mLow, c1n + mLow)
+  return { open, high, low, close }
 }
 
 // Скользящие средние как на Binance: MA(7), MA(25), MA(99) — простое среднее цены закрытия за N последних свечей, включая текущую.
