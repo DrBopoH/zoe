@@ -130,8 +130,13 @@ func TestWorkspaceEntryTxColumnMigration(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	for i := 0; i < 2; i++ {
+		if err := s.ensureWorkspaceEntrySrcColumn(); err != nil {
+			t.Fatal(err)
+		}
+	}
 	es, err := s.GetWorkspaceEntries("ws")
-	if err != nil || len(es) != 1 || es[0].Note != "ремонт" || es[0].TxID != "" {
+	if err != nil || len(es) != 1 || es[0].Note != "ремонт" || es[0].TxID != "" || es[0].Src != "" {
 		t.Fatalf("старая запись читается без операции: %+v %v", es, err)
 	}
 }

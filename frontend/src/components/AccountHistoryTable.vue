@@ -43,6 +43,8 @@ const props = defineProps({
   saveCash: { type: Function, default: null },
   // операции, уже разобранные соседними делами: Map(id операции → { id, name, color }); строка тускнеет и подписана делом, действия не блокируются
   foreign: { type: Object, default: () => new Map() },
+  // записи дела с источником (расход от сжигания партии ХимЛаба): рисуются в истории по дате между операциями, только для чтения
+  inserts: { type: Array, default: () => [] },
   // карточки товаров ХимЛаба под операциями с бейджем «Расход»: Map(id операции → карточки), saveCard(карточка) → true/false,
   // подсказки формы — вещества и производители из уже введённых карточек
   cards: { type: Object, default: () => new Map() },
@@ -76,9 +78,12 @@ const order = computed(() => effectiveTimes(props.transactions, props.memo))
 const rows = computed(() => {
   const ids = byId.value
   const at = order.value
-  return [...props.transactions, ...props.memo]
+  const acc = props.selected[0]?.id
+  const fromInserts = acc ? props.inserts.map((e) => ({ id: `ins:${e.id}`, account_id: acc, time: `${e.day}T12:00:00`, amount: entrySigned(e, props.badges), currency_code: 980, insert: e })) : []
+  const when = (t) => at.get(t.id) ?? new Date(t.time).getTime()
+  return [...props.transactions, ...props.memo, ...fromInserts]
     .filter(t => ids.has(t.account_id) && inRange(t))
-    .sort((a, b) => at.get(b.id) - at.get(a.id))
+    .sort((a, b) => when(b) - when(a))
 })
 
 const { shown, rest, more, reset: resetPage, page } = usePaged(rows, 100)
@@ -269,7 +274,21 @@ const editingCash = (t, e) => cashForm.value && cashForm.value.txId === t.id && 
         </thead>
         <tbody class="font-mono">
           <template v-for="t in shown" :key="t.id">
+            <!-- Запись другого дела (сжигание): та же сетка, без раскрытия и правки -->
+            <tr v-if="t.insert" class="border-b border-slate-800/60 row-marked" data-testid="insert-row">
+              <td class="p-3 whitespace-nowrap text-slate-400">{{ formatTxDate(t.time) }}</td>
+              <td v-if="selected.length > 1" class="p-3" />
+              <td class="p-3 max-w-[360px]">
+                <div class="font-bold text-slate-200 truncate">
+                  <span v-if="cashChip(t.insert)" class="mr-1.5 text-[9px] px-1.5 py-0.5 rounded border font-bold" :class="cashChip(t.insert).cls">{{ cashChip(t.insert).label }}</span>{{ t.insert.note }}
+                </div>
+                <div class="text-[10px] text-slate-500">записано другим делом, правке не поддаётся</div>
+              </td>
+              <td class="p-3 text-slate-600">—</td>
+              <td class="p-3 text-right whitespace-nowrap font-bold" :class="tone(t.amount)">{{ money(t.amount, t) }}</td>
+            </tr>
             <tr
+              v-else
               class="border-b border-slate-800/60 hover:bg-slate-800/40 cursor-pointer transition-colors"
               :class="[openId === t.id && 'bg-slate-800/30', inGroup(t) && 'cash-group', badgeDef(t) && 'row-marked', foreignOf(t) && 'row-foreign']"
               @click="toggleRow(t.id)"

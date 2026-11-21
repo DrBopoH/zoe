@@ -28,7 +28,9 @@ export function useWorkspaceDocs(wsId, kind, get = apiGetJson, send = apiJson, s
 
   const add = async (e) => {
     const out = await send('POST', '/workspaces/docs', { workspace_id: wsId(), kind, day: e.day || '', data: body(e) })
-    docs.value = byDay([...docs.value, flat(out)])
+    const doc = flat(out)
+    docs.value = byDay([...docs.value, doc])
+    return doc
   }
   const update = async (e) => {
     await sendRaw('PUT', '/workspaces/docs', { workspace_id: wsId(), id: e.id, kind, day: e.day || '', data: body(e) })

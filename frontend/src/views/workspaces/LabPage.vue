@@ -4,10 +4,12 @@ import WorkspaceLedger from '../../components/WorkspaceLedger.vue'
 import LabStock from '../../components/LabStock.vue'
 import LabBatches from '../../components/LabBatches.vue'
 import UiLoadError from '../../components/ui/UiLoadError.vue'
+import { useWorkspaces } from '../../composables/useWorkspaces.js'
+import { apiJson } from '../../utils/api.js'
 import { useWorkspaceDocs } from '../../composables/useWorkspaceDocs.js'
 import { pushRequestError } from '../../composables/useToasts.js'
 import UiEmpty from '../../components/ui/UiEmpty.vue'
-import { LAB_BADGES, CARD_KIND, BATCH_KIND, batchUsage } from '../../utils/labLedger.js'
+import { LAB_BADGES, CARD_KIND, BATCH_KIND, MOVE_KIND, batchUsage, batchCost } from '../../utils/labLedger.js'
 
 // Страница дела «ХимЛаб» (производство напитков): четыре части.
 // «Учёт» — счета, бейджи Расход / Убыток / Продажа и наличные записи (общий механизм со страницей Glovo).
@@ -31,17 +33,45 @@ const part = ref('ledger')
 // Карточки и партии нужны Складу и Партиям; перечитываются при входе в эти части
 const cardDocs = useWorkspaceDocs(() => props.workspace.id, CARD_KIND)
 const batchDocs = useWorkspaceDocs(() => props.workspace.id, BATCH_KIND)
-const reload = () => Promise.all([cardDocs.load(), batchDocs.load()])
+const moveDocs = useWorkspaceDocs(() => props.workspace.id, MOVE_KIND)
+const allWorkspaces = useWorkspaces()
+const others = computed(() => allWorkspaces.list.value.filter((w) => w.id !== props.workspace.id))
+const reload = () => Promise.all([cardDocs.load(), batchDocs.load(), moveDocs.load(), allWorkspaces.load()])
 watch(part, (p) => { if (p === 'stock' || p === 'batches') reload() })
 onMounted(() => { if (part.value !== 'ledger') reload() })
-const error = computed(() => cardDocs.error.value || batchDocs.error.value)
+const error = computed(() => cardDocs.error.value || batchDocs.error.value || moveDocs.error.value)
 const used = computed(() => batchUsage(batchDocs.docs.value))
 
 const onSaveBatch = async (b) => {
   try { await (b.id ? batchDocs.update(b) : batchDocs.add(b)); return true } catch (e) { pushRequestError('Не удалось сохранить партию', e); return false }
 }
+// Продажа — просто запись с ценой. Сжигание ещё и пишет расход в выбранное дело (запись с источником — id этого движения):
+// она рисуется там в истории между операциями и уходит вместе с движением. Не вышло записать расход — движение откатывается.
+const onSaveMove = async (m) => {
+  try {
+    const batch = batchDocs.docs.value.find((b) => b.id === m.batch_id)
+    const doc = await moveDocs.add(m)
+    if (m.type === 'burn') {
+      const unit = batch && batch.pieces ? batchCost(batch, cardDocs.docs.value).cost / batch.pieces : 0
+      try {
+        await apiJson('POST', '/workspaces/entries', { workspace_id: m.target_ws, day: m.day, badge: 'expense', amount: Math.round(unit * m.pieces * 100) / 100, note: `ХимЛаб · ${batch ? batch.code : ''} · ${m.pieces} шт`, tx_id: '', src: doc.id })
+      } catch (e) {
+        await moveDocs.remove(doc.id).catch(() => {})
+        throw e
+      }
+    }
+    return true
+  } catch (e) { pushRequestError('Не удалось сохранить движение', e); return false }
+}
+const onRemoveMove = async (id) => {
+  try { await moveDocs.remove(id) } catch (e) { pushRequestError('Не удалось удалить движение', e) }
+}
 const onRemoveBatch = async (id) => {
-  try { await batchDocs.remove(id) } catch (e) { pushRequestError('Не удалось удалить партию', e) }
+  try {
+    // движения партии уходят вместе с ней (расход в других делах — тоже)
+    for (const m of moveDocs.docs.value.filter((x) => x.batch_id === id)) await moveDocs.remove(m.id)
+    await batchDocs.remove(id)
+  } catch (e) { pushRequestError('Не удалось удалить партию', e) }
 }
 </script>
 
@@ -64,7 +94,7 @@ const onRemoveBatch = async (id) => {
     <template v-else-if="part === 'stock' || part === 'batches'">
       <UiLoadError v-if="error" :message="error" @retry="reload" />
       <LabStock v-if="part === 'stock'" :cards="cardDocs.docs.value" :used="used" />
-      <LabBatches v-else :batches="batchDocs.docs.value" :cards="cardDocs.docs.value" :save="onSaveBatch" :remove="onRemoveBatch" />
+      <LabBatches v-else :batches="batchDocs.docs.value" :cards="cardDocs.docs.value" :save="onSaveBatch" :remove="onRemoveBatch" :moves="moveDocs.docs.value" :workspaces="others" :save-move="onSaveMove" :remove-move="onRemoveMove" />
     </template>
     <UiEmpty v-else>{{ PARTS.find((p) => p.key === part).hint }}</UiEmpty>
   </div>

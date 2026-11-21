@@ -294,7 +294,8 @@ CREATE TABLE IF NOT EXISTS workspace_entries (
 	badge        TEXT NOT NULL,
 	amount       REAL NOT NULL,
 	note         TEXT NOT NULL DEFAULT '',
-	tx_id        TEXT NOT NULL DEFAULT ''
+	tx_id        TEXT NOT NULL DEFAULT '',
+	src          TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_workspace_entries_ws ON workspace_entries(workspace_id);
 CREATE TABLE IF NOT EXISTS workspace_docs (
@@ -502,6 +503,16 @@ func (s *Storage) ensureWorkspaceEntryTxColumn() error {
 	return err
 }
 
+// ensureWorkspaceEntrySrcColumn добавляет записям дела источник (src — id документа другого дела, например сжигания ХимЛаба;
+// пусто — запись ручная). Запись с источником только для чтения и уходит вместе с документом.
+func (s *Storage) ensureWorkspaceEntrySrcColumn() error {
+	if hasColumn(s.coreDB, "workspace_entries", "src") {
+		return nil
+	}
+	_, err := s.coreDB.Exec(`ALTER TABLE workspace_entries ADD COLUMN src TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
 func (s *Storage) initCore() error {
 	s.coreMu.Lock()
 	defer s.coreMu.Unlock()
@@ -523,6 +534,9 @@ func (s *Storage) initCore() error {
 		return err
 	}
 	if err := s.ensureWorkspaceEntryTxColumn(); err != nil {
+		return err
+	}
+	if err := s.ensureWorkspaceEntrySrcColumn(); err != nil {
 		return err
 	}
 	if err := s.ensureAccountLifeColumns(); err != nil {

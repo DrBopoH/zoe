@@ -13,7 +13,9 @@ const TX = [
 
 let docs
 let calls
+let failEntries
 beforeEach(() => {
+  failEntries = false
   docs = [{ id: 'wd_1', kind: 'card', day: '2026-11-10', data: { tx_id: 't1', substance: 'мальтодекстрин', maker: 'Nutri', net_g: 1000, price: 96, qty: 5, note: '' } }]
   calls = []
   vi.useFakeTimers({ toFake: ['Date'] })
@@ -28,6 +30,8 @@ beforeEach(() => {
       const kind = new URL(u, 'http://x').searchParams.get('kind')
       return json(docs.filter((d) => !kind || d.kind === kind))
     }
+    if (/\/workspaces(\?|$)/.test(u)) return json([{ id: 'lab', name: 'ХимЛаб', color: '' }, { id: 'glovo', name: 'Glovo', color: '#00aa00' }])
+    if (u.includes('/workspaces/entries') && init.method === 'POST') return failEntries ? new Response('{"error":"boom"}', { status: 500, headers: { 'Content-Type': 'application/json' } }) : json({ id: 'we_1', ...body })
     if (u.includes('/workspaces/accounts')) return json(['acc1'])
     if (u.includes('/workspaces/marks')) return json([{ tx_id: 't1', workspace_id: 'lab', badge: 'expense' }, { tx_id: 't2', workspace_id: 'lab', badge: 'sale' }])
     return json([])
@@ -235,6 +239,86 @@ describe('LabPage', () => {
     expect(document.querySelector('[data-field="per"]').value).toBe('16.688')
     await setBy(document.querySelector('[data-field="per"]'), '0.125')
     expect(document.querySelector('[data-field="grams"]').value).toBe('0.75')
+    w.unmount()
+  })
+
+  const BATCH = { id: 'wd_b', kind: 'batch', day: '2026-11-15', data: { code: '261115-1', pieces: 10, note: '', lines: [{ card_id: 'wd_1', grams: 200 }] } } // 19,20 ₴, штука 1,92 ₴
+  const openBatch = async (w) => {
+    await w.findAll('[role="tab"]')[2].trigger('click')
+    await flushPromises()
+    await w.get('[data-testid="batch"] .group').trigger('click')
+  }
+
+  it('Продажа партии: штуки и цена, выручка и наценка, остаток штук', async () => {
+    docs.push(BATCH)
+    const w = await mountLab()
+    await openBatch(w)
+    expect(w.get('[data-testid="batch-left"]').text()).toBe('10')
+    await w.get('[data-testid="move-sale"]').trigger('click')
+    await setBy(document.querySelector('[data-testid="move-form"] [data-field="pieces"]'), '4')
+    await setBy(document.querySelector('[data-testid="move-form"] [data-field="price"]'), '15')
+    expect(norm(document.querySelector('[data-testid="move-amount"]').textContent)).toContain('Выручка 60,00') // 4 × 15
+    expect(norm(document.querySelector('[data-testid="move-amount"]').textContent)).toContain('наценка 52,32') // 60 − 4×1,92
+    ;[...document.querySelectorAll('[data-testid="move-form"] button')].find((b) => b.textContent.includes('Продать')).click()
+    await flushPromises()
+    const post = calls.find((c) => c[0] === 'POST' && c[1].includes('/workspaces/docs') && c[2].kind === 'move')
+    expect(post[2].data).toEqual({ type: 'sale', batch_id: 'wd_b', pieces: 4, note: '', price: 15 })
+    expect(calls.some((c) => c[1].includes('/workspaces/entries') && c[0] === 'POST')).toBe(false) // продажа расхода не пишет
+    expect(w.get('[data-testid="batch-left"]').text()).toBe('6')
+    expect(norm(w.get('[data-testid="move-row"]').text())).toContain('4 шт × 15,00')
+    w.unmount()
+  })
+
+  it('Сжигание: движение и расход по себестоимости в выбранном деле с источником; нельзя больше остатка', async () => {
+    docs.push(BATCH)
+    const w = await mountLab()
+    await openBatch(w)
+    await w.get('[data-testid="move-burn"]').trigger('click')
+    const opts = [...document.querySelectorAll('[data-testid="move-form"] [data-field="target"] option')].map((o) => o.textContent)
+    expect(opts).toEqual(['Glovo']) // само дело в списке не предлагается
+    await setBy(document.querySelector('[data-testid="move-form"] [data-field="pieces"]'), '11')
+    expect(document.querySelector('[data-testid="move-over"]')).not.toBeNull()
+    await setBy(document.querySelector('[data-testid="move-form"] [data-field="pieces"]'), '2')
+    expect(norm(document.querySelector('[data-testid="move-amount"]').textContent)).toContain('3,84') // 2 × 1,92
+    ;[...document.querySelectorAll('[data-testid="move-form"] button')].find((b) => b.textContent.includes('Сжечь')).click()
+    await flushPromises()
+    const doc = calls.find((c) => c[0] === 'POST' && c[1].includes('/workspaces/docs') && c[2].kind === 'move')
+    expect(doc[2].data).toMatchObject({ type: 'burn', pieces: 2, target_ws: 'glovo', target_name: 'Glovo' })
+    const entry = calls.find((c) => c[0] === 'POST' && c[1].includes('/workspaces/entries'))
+    expect(entry[2]).toEqual({ workspace_id: 'glovo', day: '2026-11-21', badge: 'expense', amount: 3.84, note: 'ХимЛаб · 261115-1 · 2 шт', tx_id: '', src: 'wd_9' })
+    expect(w.get('[data-testid="batch-left"]').text()).toBe('8')
+    w.unmount()
+  })
+
+  it('Сжигание откатывается, если расход в деле не записался', async () => {
+    docs.push(BATCH)
+    const w = await mountLab()
+    await openBatch(w)
+    await w.get('[data-testid="move-burn"]').trigger('click')
+    failEntries = true
+    ;[...document.querySelectorAll('[data-testid="move-form"] button')].find((b) => b.textContent.includes('Сжечь')).click()
+    await flushPromises()
+    expect(calls.some((c) => c[0] === 'DELETE' && c[1].includes('doc=wd_9'))).toBe(true) // движение убрано
+    expect(w.find('[data-testid="move-row"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('Партия без штук не продаётся; удаление партии уносит её движения', async () => {
+    docs.push({ ...BATCH, id: 'wd_c', data: { ...BATCH.data, pieces: 0, code: '261116-1' } })
+    docs.push(BATCH, { id: 'wd_m', kind: 'move', day: '2026-11-16', data: { type: 'sale', batch_id: 'wd_b', pieces: 1, price: 10, note: '' } })
+    const w = await mountLab()
+    await w.findAll('[role="tab"]')[2].trigger('click')
+    await flushPromises()
+    const rows = w.findAll('[data-testid="batch"]')
+    await rows[0].find('.group').trigger('click') // 261116-1, без штук
+    expect(rows[0].text()).toContain('Укажи число штук')
+    expect(rows[0].find('[data-testid="move-sale"]').exists()).toBe(false)
+    await rows[1].find('[data-testid="batch-remove"]').trigger('click')
+    await rows[1].find('[data-testid="batch-remove"]').trigger('click')
+    await flushPromises()
+    const del = calls.filter((c) => c[0] === 'DELETE').map((c) => c[1])
+    expect(del.findIndex((u) => u.includes('doc=wd_m'))).toBeGreaterThanOrEqual(0)
+    expect(del.findIndex((u) => u.includes('doc=wd_m'))).toBeLessThan(del.findIndex((u) => u.includes('doc=wd_b')))
     w.unmount()
   })
 })
