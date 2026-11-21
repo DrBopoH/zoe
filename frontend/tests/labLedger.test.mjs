@@ -132,3 +132,27 @@ test('граммы — до миллиграмма: 0,125 г не округля
   assert.equal(c.gramsPerPiece, 3.375)
   assert.equal(stockModel(cards, new Map([['a', 0.3]])).groups[0].rows[0].left, 99.7)
 })
+
+import { cleanMove, batchPieces, moveAmounts } from '../src/utils/labLedger.js'
+test('cleanMove: продажа с ценой, сжигание с делом, целые штуки', () => {
+  const sale = { type: 'sale', batch_id: 'b', day: '2026-11-21', pieces: '3', price: '15,5', note: ' ' }
+  assert.deepEqual(cleanMove(sale), { type: 'sale', batch_id: 'b', day: '2026-11-21', pieces: 3, note: '', price: 15.5 })
+  assert.equal(cleanMove({ ...sale, price: '' }), null)
+  assert.equal(cleanMove({ ...sale, price: '0' }).price, 0) // подарок по нулевой цене — всё равно продажа
+  assert.equal(cleanMove({ ...sale, pieces: '0' }), null)
+  assert.equal(cleanMove({ ...sale, pieces: '1.5' }), null)
+  assert.equal(cleanMove({ ...sale, day: '' }), null)
+  assert.equal(cleanMove({ ...sale, type: 'gift' }), null)
+  const burn = { type: 'burn', batch_id: 'b', day: '2026-11-21', pieces: 2, target_ws: 'ws1', target_name: 'Glovo' }
+  assert.deepEqual(cleanMove(burn), { type: 'burn', batch_id: 'b', day: '2026-11-21', pieces: 2, note: '', target_ws: 'ws1', target_name: 'Glovo' })
+  assert.equal(cleanMove({ ...burn, target_ws: '' }), null)
+})
+test('штуки партии и деньги движений: сжигание по себестоимости без наценки, продажа с наценкой', () => {
+  const cards = [{ id: 'a', substance: 'x', net_g: 1000, price: 96, qty: 5 }]
+  const batch = { id: 'p', pieces: 10, lines: [{ card_id: 'a', grams: 200 }] } // 19,2 ₴ → 1,92 за штуку
+  const moves = [{ batch_id: 'p', type: 'sale', pieces: 4, price: 15 }, { batch_id: 'p', type: 'burn', pieces: 2 }, { batch_id: 'other', pieces: 9 }]
+  assert.deepEqual(batchPieces(batch, moves), { total: 10, moved: 6, left: 4 })
+  assert.deepEqual(batchPieces({ id: 'p', pieces: 0 }, moves), { total: 0, moved: 6, left: 0 })
+  assert.deepEqual(moveAmounts(moves[0], batch, cards), { cost: 7.68, revenue: 60, margin: 52.32 })
+  assert.deepEqual(moveAmounts(moves[1], batch, cards), { cost: 3.84, revenue: 0, margin: 0 })
+})

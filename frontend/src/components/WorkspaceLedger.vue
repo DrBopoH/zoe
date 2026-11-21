@@ -72,7 +72,9 @@ const cashByTx = computed(() => {
   }
   return m
 })
-const orphans = computed(() => entries.value.filter((e) => !e.tx_id || !visibleTx.value.has(e.tx_id)))
+const orphans = computed(() => entries.value.filter((e) => !e.src && (!e.tx_id || !visibleTx.value.has(e.tx_id))))
+// записи других дел (сжигание партий ХимЛаба) стоят в истории по дате, а не в списке без операций
+const inserts = computed(() => entries.value.filter((e) => e.src))
 const totals = computed(() => badgeTotals(merged.value.transactions, merged.value.marks, props.badges))
 
 // Таймлайн номинального дохода: номинал недели сверяется с приходом следующей недели
@@ -136,6 +138,7 @@ const tone = (v) => (v > 0 ? 'text-emerald-400' : v < 0 ? 'text-rose-400' : 'tex
       :cash="cashByTx"
       :save-cash="onSaveEntry"
       :foreign="foreign"
+      :inserts="inserts"
       :cardable="productCards"
       :cards="cardsOfTx"
       :save-card="onSaveCard"

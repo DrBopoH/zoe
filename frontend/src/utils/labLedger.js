@@ -125,3 +125,37 @@ export function batchCost(batch, cards) {
   const pieces = batch.pieces || 0
   return { lines, cost, grams, perPiece: pieces ? r2(cost / pieces) : null, gramsPerPiece: pieces ? r3(grams / pieces) : null }
 }
+
+// Движения партии: продажа (штуки по цене, с наценкой) и сжигание (своя продукция по себестоимости в другом деле).
+// Документ вида move: { type: 'sale' | 'burn', batch_id, pieces, price (продажа, за штуку), target_ws и target_name (сжигание), note }.
+export const MOVE_KIND = 'move'
+
+// движение из полей формы или null: нужны тип, партия, дата, целое число штук; у продажи цена, у сжигания дело
+export function cleanMove(f) {
+  const n = (v) => Number(String(v ?? '').replace(',', '.'))
+  const pieces = n(f.pieces)
+  if (!['sale', 'burn'].includes(f.type) || !f.batch_id || !/^\d{4}-\d{2}-\d{2}$/.test(f.day || '')) return null
+  if (!Number.isInteger(pieces) || pieces < 1) return null
+  const base = { type: f.type, batch_id: f.batch_id, day: f.day, pieces, note: String(f.note || '').trim() }
+  if (f.type === 'sale') {
+    const price = n(f.price)
+    return price >= 0 && f.price !== '' && f.price != null ? { ...base, price: r2(price) } : null
+  }
+  return f.target_ws ? { ...base, target_ws: f.target_ws, target_name: String(f.target_name || '') } : null
+}
+
+// сколько штук партии уже продано и сожжено; сколько осталось
+export function batchPieces(batch, moves) {
+  const out = moves.filter((m) => m.batch_id === batch.id).reduce((s, m) => s + m.pieces, 0)
+  return { total: batch.pieces || 0, moved: out, left: Math.max(0, (batch.pieces || 0) - out) }
+}
+
+// деньги движения: себестоимость штуки берётся из партии (точная, без округления до копеек), продажа добавляет выручку и наценку
+export function moveAmounts(move, batch, cards) {
+  const c = batchCost(batch, cards)
+  const unit = batch.pieces ? c.cost / batch.pieces : 0
+  const cost = r2(unit * move.pieces)
+  if (move.type === 'burn') return { cost, revenue: 0, margin: 0 }
+  const revenue = r2(move.price * move.pieces)
+  return { cost, revenue, margin: r2(revenue - cost) }
+}

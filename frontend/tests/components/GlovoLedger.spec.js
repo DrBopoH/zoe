@@ -3,6 +3,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import GlovoPage from '../../src/views/workspaces/GlovoPage.vue'
 import WorkspaceLedger from '../../src/components/WorkspaceLedger.vue'
 
+const norm = (s) => s.replace(/\s/g, ' ')
 const json = (v) => new Response(JSON.stringify(v), { status: 200, headers: { 'Content-Type': 'application/json' } })
 
 const ACCOUNTS = [
@@ -27,6 +28,7 @@ beforeEach(() => {
     if (u.includes('/workspaces/marks') && u.includes('other=1')) return json(server.other || [])
     if (/\/workspaces(\?|$)/.test(u)) return json(server.list || [])
     if (u.includes('/workspaces/marks')) return init.method === 'PUT' ? json({ status: 'success' }) : json(server.marks)
+    if (u.includes('/workspaces/entries')) return json(server.entries || [])
     if (u.includes('/workspaces/weeks')) return init.method && init.method !== 'GET' ? json({ status: 'success' }) : json(server.weeks)
     return json([])
   }))
@@ -70,6 +72,23 @@ describe('WorkspaceLedger', () => {
     const w = await mountLedger()
     expect(w.text()).toContain('Термосумка')
     expect(w.findAll('[data-testid="row-badge"]').map((b) => b.text())).toEqual(['Расход'])
+    w.unmount()
+  })
+
+  it('расход от сжигания партии ХимЛаба стоит в истории по дате, только для чтения, и считается в итогах', async () => {
+    server.entries = [{ id: 'we_b', day: '2026-11-11', badge: 'expense', amount: 3.84, note: 'ХимЛаб · 261115-1 · 2 шт', tx_id: '', src: 'wd_9' }]
+    const w = await mountLedger()
+    const rows = w.findAll('tbody tr')
+    const idx = (txt) => rows.findIndex((r) => r.text().includes(txt))
+    const ins = idx('ХимЛаб · 261115-1')
+    expect(ins).toBeGreaterThanOrEqual(0)
+    expect(rows[ins].attributes('data-testid')).toBe('insert-row')
+    expect(rows[ins].text()).toContain('Расход')
+    expect(w.find('[data-testid="cash-orphans"]').exists()).toBe(false) // не «наличные без операции»
+    expect(norm(rows[ins].text())).toContain('−₴ 3,84')
+    await rows[ins].trigger('click')
+    expect(w.findAll('button').some((b) => b.text() === 'Доход')).toBe(false) // не раскрывается, бейджи не ставятся
+    expect(norm(w.get('[data-testid="badge-totals"]').text())).toContain('-454,34') // 450,50 + 3,84
     w.unmount()
   })
 
