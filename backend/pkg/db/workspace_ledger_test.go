@@ -49,6 +49,12 @@ func TestWorkspaceLedgerAccountsMarksWeeks(t *testing.T) {
 	if ms, _ = s.GetWorkspaceMarks(a.ID); len(ms) != 0 {
 		t.Fatalf("операция переехала в другое дело: %+v", ms)
 	}
+	if om, _ := s.GetOtherWorkspaceMarks(a.ID); len(om) != 1 || om[0].WorkspaceID != b.ID {
+		t.Fatalf("соседние пометки: %+v", om)
+	}
+	if om, _ := s.GetOtherWorkspaceMarks(b.ID); len(om) != 0 {
+		t.Fatalf("у b соседних нет: %+v", om)
+	}
 	if ms, _ = s.GetWorkspaceMarks(b.ID); len(ms) != 1 || ms[0].Badge != "expense" {
 		t.Fatalf("и стала его: %+v", ms)
 	}

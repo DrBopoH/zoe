@@ -39,7 +39,12 @@ func (s *Server) HandleWorkspaceAccounts(w http.ResponseWriter, r *http.Request)
 func (s *Server) HandleWorkspaceMarks(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		list, err := s.storage.GetWorkspaceMarks(r.URL.Query().Get("id"))
+		q := r.URL.Query()
+		get := s.storage.GetWorkspaceMarks
+		if q.Get("other") == "1" { // пометки соседних дел
+			get = s.storage.GetOtherWorkspaceMarks
+		}
+		list, err := get(q.Get("id"))
 		if err != nil {
 			failErr(w, err)
 			return

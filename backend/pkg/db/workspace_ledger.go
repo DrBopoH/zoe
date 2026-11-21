@@ -104,7 +104,16 @@ func (s *Storage) SetWorkspaceMark(wsID, txID, badge string) error {
 
 // GetWorkspaceMarks — все пометки дела.
 func (s *Storage) GetWorkspaceMarks(wsID string) ([]WorkspaceMark, error) {
-	rows, err := s.coreDB.Query(`SELECT tx_id, workspace_id, badge FROM workspace_marks WHERE workspace_id = ? ORDER BY tx_id`, wsID)
+	return s.queryMarks(`WHERE workspace_id = ?`, wsID)
+}
+
+// GetOtherWorkspaceMarks — пометки всех остальных дел: фронт серит в истории операции, уже разобранные соседними делами.
+func (s *Storage) GetOtherWorkspaceMarks(wsID string) ([]WorkspaceMark, error) {
+	return s.queryMarks(`WHERE workspace_id <> ?`, wsID)
+}
+
+func (s *Storage) queryMarks(where string, arg string) ([]WorkspaceMark, error) {
+	rows, err := s.coreDB.Query(`SELECT tx_id, workspace_id, badge FROM workspace_marks `+where+` ORDER BY tx_id`, arg)
 	if err != nil {
 		return nil, err
 	}
