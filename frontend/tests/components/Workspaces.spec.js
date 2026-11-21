@@ -125,7 +125,7 @@ describe('WorkspaceModal: страница', () => {
     input.dispatchEvent(new Event('input'))
     await w.vm.$nextTick()
     const sel = document.body.querySelector('select')
-    expect([...sel.options].map((o) => o.value)).toEqual(['', 'glovo'])
+    expect([...sel.options].map((o) => o.value)).toEqual(['', 'glovo', 'lab'])
     sel.value = 'glovo'
     sel.dispatchEvent(new Event('change'))
     await w.vm.$nextTick()

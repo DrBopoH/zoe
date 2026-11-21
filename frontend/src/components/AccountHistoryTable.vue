@@ -169,7 +169,7 @@ const cashOf = (t) => props.cash.get(t.id) || []
 const withCashTotal = (t) => {
   const list = cashOf(t)
   if (!list.length) return null
-  return Math.round((t.amount + list.reduce((s, e) => s + entrySigned(e), 0)) * 100) / 100 + 0
+  return Math.round((t.amount + list.reduce((s, e) => s + entrySigned(e, props.badges), 0)) * 100) / 100 + 0
 }
 const cols = computed(() => (props.selected.length > 1 ? 5 : 4))
 const inGroup = (t) => cashOf(t).length > 0 || (props.cashable && openId.value === t.id && !!cashForm.value && cashForm.value.txId === t.id)
@@ -302,7 +302,7 @@ const editingCash = (t, e) => cashForm.value && cashForm.value.txId === t.id && 
             <template v-for="(e, i) in cashOf(t)" :key="e.id">
               <tr v-if="editingCash(t, e)" class="cash-group" data-testid="cash-row">
                 <td :colspan="cols" class="px-3 py-2 pl-10">
-                  <CashEntryForm :entry="e" :tx-id="t.id" :day="dayOfTx(t)" :busy="cashBusy" @save="onCashSave" @cancel="cashForm = null" />
+                  <CashEntryForm :entry="e" :tx-id="t.id" :day="dayOfTx(t)" :busy="cashBusy" :badges="badges" @save="onCashSave" @cancel="cashForm = null" />
                 </td>
               </tr>
               <tr v-else class="cash-group cash-line group" data-testid="cash-row">
@@ -322,7 +322,7 @@ const editingCash = (t, e) => cashForm.value && cashForm.value.txId === t.id && 
                     <UiIconButton v-else icon="edit" tone="accent" size="sm" title="Править запись" data-testid="cash-edit" @click.stop="openCashForm(t, e)" />
                     <UiIconButton icon="trash" tone="danger" size="sm" :title="armedCash === e.id ? 'Нажми ещё раз — удалить' : 'Удалить запись'" data-testid="cash-remove" @click.stop="onCashTrash(e)" />
                   </span>
-                  <span class="font-bold" :class="tone(entrySigned(e))">{{ money(entrySigned(e), t) }}</span>
+                  <span class="font-bold" :class="tone(entrySigned(e, badges))">{{ money(entrySigned(e, badges), t) }}</span>
                 </td>
               </tr>
             </template>
@@ -335,7 +335,7 @@ const editingCash = (t, e) => cashForm.value && cashForm.value.txId === t.id && 
 
             <tr v-if="cashable && openId === t.id" class="cash-group">
               <td :colspan="cols" class="px-3 pb-2 pl-10">
-                <CashEntryForm v-if="cashForm && cashForm.txId === t.id && !cashForm.entry" :tx-id="t.id" :day="dayOfTx(t)" :busy="cashBusy" @save="onCashSave" @cancel="cashForm = null" />
+                <CashEntryForm v-if="cashForm && cashForm.txId === t.id && !cashForm.entry" :tx-id="t.id" :day="dayOfTx(t)" :busy="cashBusy" :badges="badges" @save="onCashSave" @cancel="cashForm = null" />
                 <button v-else type="button" class="text-[11px] font-bold text-slate-500 hover:text-sky-300 transition-colors cursor-pointer" data-testid="cash-add" @click.stop="openCashForm(t)">+ Наличные</button>
               </td>
             </tr>

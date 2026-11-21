@@ -13,7 +13,8 @@ export const BADGES = [
   { key: 'payout', label: 'Выплата', side: 'in', cls: 'bg-sky-500/15 text-sky-300 border-sky-500/30' }
 ]
 
-export const badgeOf = (key) => BADGES.find((b) => b.key === key) || null
+// badges — набор бейджей страницы (по умолчанию Glovo): у каждой страницы дела свой набор, механика итогов и наличных записей общая
+export const badgeOf = (key, badges = BADGES) => badges.find((b) => b.key === key) || null
 
 const r2 = (v) => Math.round(v * 100) / 100 + 0
 
@@ -21,8 +22,8 @@ const r2 = (v) => Math.round(v * 100) / 100 + 0
  * Итоги по бейджам: по каждому ключу число операций и сумма (как в операции: приход плюс, расход минус).
  * marks — Map(id операции → ключ бейджа), transactions — операции кэша. Помеченная операция, которой нет в кэше, не считается.
  */
-export function badgeTotals(transactions, marks) {
-  const out = Object.fromEntries(BADGES.map((b) => [b.key, { count: 0, sum: 0 }]))
+export function badgeTotals(transactions, marks, badges = BADGES) {
+  const out = Object.fromEntries(badges.map((b) => [b.key, { count: 0, sum: 0 }]))
   for (const t of transactions || []) {
     const k = marks.get(t.id)
     if (!k || !out[k]) continue
@@ -218,20 +219,20 @@ export function taxModel({ transactions, marks, params, today }) {
 // сверка и смета считают её так же, как операцию из выписки.
 export const CASH_PREFIX = 'cash:'
 export const isCashId = (id) => String(id).startsWith(CASH_PREFIX)
-export const entrySigned = (e) => {
-  const b = badgeOf(e.badge)
+export const entrySigned = (e, badges = BADGES) => {
+  const b = badgeOf(e.badge, badges)
   const v = Number(e.amount) || 0
   return b && b.side === 'out' ? -v : v
 }
 
 /** Операции кэша и пометки + ручные записи: { transactions, marks } для badgeTotals / timelineWeeks / estimateModel. */
-export function withCash(transactions, marks, entries) {
-  const list = (entries || []).filter((e) => badgeOf(e.badge))
+export function withCash(transactions, marks, entries, badges = BADGES) {
+  const list = (entries || []).filter((e) => badgeOf(e.badge, badges))
   if (!list.length) return { transactions: transactions || [], marks }
   const m = new Map(marks)
   const tx = list.map((e) => {
     m.set(CASH_PREFIX + e.id, e.badge)
-    return { id: CASH_PREFIX + e.id, account_id: '', time: `${e.day}T12:00:00`, description: e.note || 'Наличные', amount: entrySigned(e), currency_code: 980, cash: true }
+    return { id: CASH_PREFIX + e.id, account_id: '', time: `${e.day}T12:00:00`, description: e.note || 'Наличные', amount: entrySigned(e, badges), currency_code: 980, cash: true }
   })
   return { transactions: [...(transactions || []), ...tx], marks: m }
 }
