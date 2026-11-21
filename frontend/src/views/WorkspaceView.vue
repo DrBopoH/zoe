@@ -8,7 +8,11 @@ import { pageOf } from '../utils/workspacePages.js'
 // Страница одного дела: шапка из данных карточки (обложка, название) и под ней страница из реестра по ключу дела.
 // Нет ключа или страница не зарегистрирована — заглушка, дело при этом открывается.
 const props = defineProps({
-  workspace: { type: Object, required: true } // { id, name, color, image, page }
+  workspace: { type: Object, required: true }, // { id, name, color, image, page }
+  // данные кэша для страницы дела (передаются ей как есть)
+  accounts: { type: Array, default: () => [] },
+  transactions: { type: Array, default: () => [] },
+  users: { type: Array, default: () => [] }
 })
 defineEmits(['back'])
 
@@ -30,7 +34,7 @@ const Page = computed(() => (entry.value ? defineAsyncComponent(entry.value.load
       <h2 class="ws-head-name">{{ workspace.name }}</h2>
     </header>
 
-    <component :is="Page" v-if="Page" :key="workspace.page" :workspace="workspace" />
+    <component :is="Page" v-if="Page" :key="workspace.page" :workspace="workspace" :accounts="accounts" :transactions="transactions" :users="users" />
     <UiEmpty v-else>У этого дела пока нет страницы. Выбрать её можно в правке (карандаш на карточке)</UiEmpty>
   </div>
 </template>

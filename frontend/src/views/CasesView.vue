@@ -12,6 +12,9 @@ import { pushRequestError } from '../composables/useToasts.js'
 // Раздел «Дела»: рабочие пространства — сферы жизни и проектов (Glovo, семейный бюджет, айти-проект) карточками-полотнами.
 // Справа внизу кнопка «+» открывает окно создания; на карточке по наведению — карандаш (правка) и урна (удаление в два клика). Клик по карточке открывает страницу дела (шапка из данных карточки, страница по ключу из реестра workspacePages).
 const props = defineProps({
+  accounts: { type: Array, default: () => [] }, // счета и операции кэша: страницы дел привязывают их к делу
+  transactions: { type: Array, default: () => [] },
+  users: { type: Array, default: () => [] },
   dataVersion: { type: Number, default: null } // версия данных бэкенда: растёт при любой записи — список перечитывается
 })
 
@@ -56,7 +59,7 @@ const onRemove = async (w) => {
   <div class="flex flex-col min-h-[calc(100vh-9rem)]">
     <UiLoadError v-if="error" :message="error" class="mb-3" @retry="load" />
 
-    <WorkspaceView v-if="current" :workspace="current" @back="openId = null" />
+    <WorkspaceView v-if="current" :workspace="current" :accounts="accounts" :transactions="transactions" :users="users" @back="openId = null" />
 
     <div v-else-if="list.length" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
       <WorkspaceCard v-for="w in list" :key="w.id" :workspace="w" editable @open="(x) => (openId = x.id)" @edit="openEdit" @remove="onRemove" />

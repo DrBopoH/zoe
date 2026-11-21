@@ -1,0 +1,100 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
+import GlovoPage from '../../src/views/workspaces/GlovoPage.vue'
+import WorkspaceLedger from '../../src/components/WorkspaceLedger.vue'
+
+const json = (v) => new Response(JSON.stringify(v), { status: 200, headers: { 'Content-Type': 'application/json' } })
+
+const ACCOUNTS = [
+  { id: 'acc1', name: 'UA213223130000026007233566001', iban: 'UA213223130000026007233566001', balance: 100, currency_code: 980, type: 'white', bank_key: 'mono' }
+]
+const TX = [
+  { id: 't1', account_id: 'acc1', time: '2026-11-16T10:00:00Z', description: 'Glovo Ukraine', amount: 1200, currency_code: 980 },
+  { id: 't2', account_id: 'acc1', time: '2026-11-17T10:00:00Z', description: 'Термосумка', amount: -450.5, currency_code: 980 }
+]
+
+let calls
+let server
+beforeEach(() => {
+  calls = []
+  server = { accounts: ['acc1'], marks: [{ tx_id: 't2', workspace_id: 'ws1', badge: 'expense' }], weeks: [{ week: '2026-11-16', nominal: 2200 }] }
+  vi.stubGlobal('fetch', vi.fn(async (url, init = {}) => {
+    const u = String(url)
+    calls.push([init.method || 'GET', u, init.body ? JSON.parse(init.body) : undefined])
+    if (u.includes('/workspaces/accounts')) return init.method === 'PUT' ? json({ status: 'success' }) : json(server.accounts)
+    if (u.includes('/workspaces/marks')) return init.method === 'PUT' ? json({ status: 'success' }) : json(server.marks)
+    if (u.includes('/workspaces/weeks')) return init.method && init.method !== 'GET' ? json({ status: 'success' }) : json(server.weeks)
+    return json([])
+  }))
+})
+
+const mountLedger = async () => {
+  const w = mount(WorkspaceLedger, { props: { workspaceId: 'ws1', accounts: ACCOUNTS, transactions: TX, users: [] }, attachTo: document.body })
+  await flushPromises()
+  return w
+}
+
+describe('GlovoPage', () => {
+  it('две части: Учёт по умолчанию, Смета по вкладке', async () => {
+    const w = mount(GlovoPage, { props: { workspace: { id: 'ws1', name: 'Glovo' }, accounts: ACCOUNTS, transactions: TX } })
+    await flushPromises()
+    const tabs = w.findAll('[role="tab"]')
+    expect(tabs.map((t) => t.text())).toEqual(['Учёт', 'Смета'])
+    expect(tabs[0].attributes('aria-selected')).toBe('true')
+    expect(w.text()).toContain('Счета дела')
+    await tabs[1].trigger('click')
+    expect(w.text()).toContain('Смета пока пустая')
+    expect(w.text()).not.toContain('Счета дела')
+  })
+})
+
+describe('WorkspaceLedger', () => {
+  it('итоги по бейджам считают помеченные операции', async () => {
+    const w = await mountLedger()
+    const totals = w.get('[data-testid="badge-totals"]').text()
+    expect(totals).toContain('Расход')
+    expect(totals).toContain('450,50')
+    expect(totals).toContain('1 опер.')
+    w.unmount()
+  })
+
+  it('история показывает операции привязанных счетов, помеченная — с бейджем', async () => {
+    const w = await mountLedger()
+    expect(w.text()).toContain('Термосумка')
+    expect(w.findAll('[data-testid="row-badge"]').map((b) => b.text())).toEqual(['Расход'])
+    w.unmount()
+  })
+
+  it('бейдж ставится из раскрытой строки и уходит на бэкенд', async () => {
+    const w = await mountLedger()
+    const row = w.findAll('tbody tr').find((r) => r.text().includes('Glovo Ukraine'))
+    await row.trigger('click')
+    const btn = w.findAll('button').find((b) => b.text() === 'Доход')
+    await btn.trigger('click')
+    await flushPromises()
+    const put = calls.find(([m, u]) => m === 'PUT' && u.includes('/workspaces/marks'))
+    expect(put[2]).toEqual({ workspace_id: 'ws1', tx_id: 't1', badge: 'income' })
+    expect(w.findAll('[data-testid="row-badge"]').map((b) => b.text()).sort()).toEqual(['Доход', 'Расход'])
+    w.unmount()
+  })
+
+  it('неделя: дата любого дня ложится на понедельник, сумма уходит на бэкенд, список обновляется', async () => {
+    const w = await mountLedger()
+    expect(w.get('[data-testid="weeks"]').text()).toContain('16.11 — 22.11')
+    await w.get('input[type="date"]').setValue('2026-11-26') // четверг
+    await w.get('input[aria-label="Номинальный доход"]').setValue('1500,5')
+    await w.findAll('button').find((b) => b.text() === 'Записать').trigger('click')
+    await flushPromises()
+    const put = calls.find(([m, u]) => m === 'PUT' && u.includes('/workspaces/weeks'))
+    expect(put[2]).toEqual({ workspace_id: 'ws1', week: '2026-11-23', nominal: 1500.5 })
+    expect(w.get('[data-testid="weeks"]').text()).toContain('23.11 — 29.11')
+    w.unmount()
+  })
+
+  it('«Записать» недоступна без суммы', async () => {
+    const w = await mountLedger()
+    const btn = w.findAll('button').find((b) => b.text() === 'Записать')
+    expect(btn.attributes('disabled')).toBeDefined()
+    w.unmount()
+  })
+})
