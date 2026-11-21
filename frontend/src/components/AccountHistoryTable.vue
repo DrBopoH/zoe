@@ -4,6 +4,9 @@ import { formatMoney, formatMaskedIBAN, money as fmtMoney, moneySigned, curSym, 
 import { usePaged } from '../composables/usePaged.js'
 import { counterpartyName, isPersonTransaction } from '../utils/personLayout.js'
 import UiButton from './ui/UiButton.vue'
+import UiIconButton from './ui/UiIconButton.vue'
+import CashEntryForm from './CashEntryForm.vue'
+import { entrySigned, txDate } from '../utils/glovoLedger.js'
 import { effectiveTimes, isDateOnly } from '../utils/historyOrder.js'
 import { tagsFor, cleanTitle } from '../utils/txTags.js'
 import { usersById, personOf, swapAlias } from '../utils/personName.js'
@@ -30,9 +33,14 @@ const props = defineProps({
   badges: { type: Array, default: () => [] },
   // «Снять выбор» (в деле счета выбираются в своём блоке) и подсказка пустой таблицы
   clearable: { type: Boolean, default: true },
-  emptyHint: { type: String, default: 'Выберите карту (клик по плитке, можно несколько) или свечу на графике' }
+  emptyHint: { type: String, default: 'Выберите карту (клик по плитке, можно несколько) или свечу на графике' },
+  // наличные записи дела, прикреплённые к операциям: Map(id операции → записи), рисуются под строкой операции.
+  // saveCash(запись) сохраняет (true — удалось); cashable включает «+ Наличные» в раскрытой строке
+  cash: { type: Object, default: () => new Map() },
+  cashable: { type: Boolean, default: false },
+  saveCash: { type: Function, default: null }
 })
-const emit = defineEmits(['clear', 'clear-range', 'mark'])
+const emit = defineEmits(['clear', 'clear-range', 'mark', 'remove-cash'])
 
 const badgeDef = (t) => props.badges.find((b) => b.key === props.marks.get(t.id)) || null
 
@@ -67,6 +75,7 @@ const { shown, rest, more, reset: resetPage, page } = usePaged(rows, 100)
 watch(() => props.selected.map(a => a.id).join('|') + '|' + (props.range ? props.range.key : ''), () => {
   resetPage()
   openId.value = null
+  cashForm.value = null
 })
 
 
@@ -154,6 +163,33 @@ const details = (t) => {
 }
 
 const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
+
+// Наличные записи под операцией: список, форма добавления внизу и правка записи на месте
+const cashOf = (t) => props.cash.get(t.id) || []
+const withCashTotal = (t) => {
+  const list = cashOf(t)
+  if (!list.length) return null
+  return Math.round((t.amount + list.reduce((s, e) => s + entrySigned(e), 0)) * 100) / 100 + 0
+}
+const cashForm = ref(null) // { txId, entry|null }
+const cashBusy = ref(false)
+const armedCash = ref('')
+let armTimer
+const openCashForm = (t, entry = null) => { cashForm.value = { txId: t.id, entry } }
+const onCashSave = async (e) => {
+  if (!props.saveCash) return
+  cashBusy.value = true
+  try { if (await props.saveCash(e)) cashForm.value = null } finally { cashBusy.value = false }
+}
+const onCashTrash = (e) => {
+  if (armedCash.value === e.id) { clearTimeout(armTimer); armedCash.value = ''; emit('remove-cash', e.id); return }
+  armedCash.value = e.id
+  clearTimeout(armTimer)
+  armTimer = setTimeout(() => { armedCash.value = '' }, 4000)
+}
+const cashChip = (e) => props.badges.find((b) => b.key === e.badge) || null
+const dayOfTx = (t) => txDate(t)
+const editingCash = (t, e) => cashForm.value && cashForm.value.txId === t.id && cashForm.value.entry?.id === e.id
 </script>
 
 <template>
@@ -234,6 +270,7 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
                 <span v-if="['move', 'trade', 'swap'].includes(t.memo)" class="text-slate-600 font-normal">—</span>
                 <span v-else :class="(t.internal || t.own_account_id || t.memo) && 'opacity-60'">{{ money(t.amount, t) }}</span>
                 <span v-if="t.is_hold" class="ml-1 text-[9px] text-amber-400 font-normal">HOLD</span>
+                <div v-if="withCashTotal(t) !== null" class="text-[10px] font-normal text-slate-500" data-testid="with-cash">с наличными <span :class="tone(withCashTotal(t))">{{ money(withCashTotal(t), t) }}</span></div>
               </td>
             </tr>
 
@@ -257,6 +294,34 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
                     <dd class="text-slate-300 break-all">{{ v }}</dd>
                   </template>
                 </dl>
+              </td>
+            </tr>
+
+            <tr v-for="e in cashOf(t)" :key="e.id" data-testid="cash-row">
+              <td :colspan="selected.length > 1 ? 5 : 4" class="px-3 py-1.5">
+                <div class="ml-6 border-l border-blue-500/30 pl-3">
+                  <CashEntryForm v-if="editingCash(t, e)" :entry="e" :tx-id="t.id" :day="dayOfTx(t)" :busy="cashBusy" @save="onCashSave" @cancel="cashForm = null" />
+                  <div v-else class="flex items-center gap-2 text-[11px] rounded border border-blue-500/30 bg-blue-950/30 px-2 py-1.5">
+                    <span v-if="cashChip(e)" class="text-[9px] px-1.5 py-0.5 rounded border font-bold shrink-0" :class="cashChip(e).cls">{{ cashChip(e).label }}</span>
+                    <span class="text-blue-100 truncate flex-1 min-w-0">{{ e.note || 'Наличные' }}</span>
+                    <span class="text-slate-500 text-[10px] shrink-0">нал.</span>
+                    <span class="font-bold tabular-nums shrink-0" :class="tone(entrySigned(e))">{{ entrySigned(e) > 0 ? '+' : '−' }}{{ formatMoney(e.amount) }}</span>
+                    <template v-if="cashable">
+                      <span v-if="armedCash === e.id" class="text-[10px] font-bold uppercase tracking-wider text-rose-300 shrink-0">Удалить?</span>
+                      <UiIconButton v-else icon="edit" tone="accent" size="sm" title="Править запись" data-testid="cash-edit" @click.stop="openCashForm(t, e)" />
+                      <UiIconButton icon="trash" tone="danger" size="sm" :title="armedCash === e.id ? 'Нажми ещё раз — удалить' : 'Удалить запись'" data-testid="cash-remove" @click.stop="onCashTrash(e)" />
+                    </template>
+                  </div>
+                </div>
+              </td>
+            </tr>
+
+            <tr v-if="cashable && openId === t.id" class="border-b border-slate-800/60 bg-slate-950/50">
+              <td :colspan="selected.length > 1 ? 5 : 4" class="px-3 pb-3">
+                <div class="ml-6 border-l border-blue-500/30 pl-3">
+                  <CashEntryForm v-if="cashForm && cashForm.txId === t.id && !cashForm.entry" :tx-id="t.id" :day="dayOfTx(t)" :busy="cashBusy" @save="onCashSave" @cancel="cashForm = null" />
+                  <UiButton v-else variant="subtle" size="sm" data-testid="cash-add" @click.stop="openCashForm(t)">+ Наличные</UiButton>
+                </div>
               </td>
             </tr>
           </template>

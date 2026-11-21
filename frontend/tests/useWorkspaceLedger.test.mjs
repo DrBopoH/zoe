@@ -8,10 +8,12 @@ const mk = (data = {}) => {
     if (p.startsWith('/workspaces/accounts')) return data.accounts || []
     if (p.startsWith('/workspaces/marks')) return data.marks || []
     if (p.startsWith('/workspaces/params')) return data.params || []
+    if (p.startsWith('/workspaces/entries')) return data.entries || []
     return data.weeks || []
   }
   const raw = async (m, p, b) => { calls.push([m, p, b]) }
-  return { l: useWorkspaceLedger(() => 'ws1', get, async () => ({}), raw), calls }
+  const send = async (m, p, b) => { calls.push([m, p, b]); return { id: 'we_1', ...b } }
+  return { l: useWorkspaceLedger(() => 'ws1', get, send, raw), calls }
 }
 
 test('load: счета, пометки и недели с бэкенда', async () => {
@@ -72,4 +74,19 @@ test('параметры: load читает, setParam и resetParam шлют н�
   await l.resetParam('tax_rate')
   assert.deepEqual(calls[1], ['DELETE', '/workspaces/params?id=ws1&key=tax_rate', undefined])
   assert.equal(l.params.value.has('tax_rate'), false)
+})
+
+test('наличные записи: load читает, add/update/remove шлют на бэкенд и держат порядок по дате', async () => {
+  const { l, calls } = mk({ entries: [{ id: 'we_0', day: '2026-11-12', badge: 'tips', amount: 100, note: '' }] })
+  await l.load()
+  assert.equal(l.entries.value.length, 1)
+  await l.addEntry({ day: '2026-11-10', badge: 'expense', amount: 600, note: 'парафин', tx_id: 't2' })
+  assert.deepEqual(calls[0], ['POST', '/workspaces/entries', { workspace_id: 'ws1', day: '2026-11-10', badge: 'expense', amount: 600, note: 'парафин', tx_id: 't2' }])
+  assert.deepEqual(l.entries.value.map((e) => e.id), ['we_1', 'we_0']) // раньше по дате — выше
+  await l.updateEntry({ id: 'we_1', day: '2026-11-13', badge: 'loss', amount: 900, note: '', tx_id: 't2' })
+  assert.deepEqual(calls[1], ['PUT', '/workspaces/entries', { workspace_id: 'ws1', id: 'we_1', day: '2026-11-13', badge: 'loss', amount: 900, note: '', tx_id: 't2' }])
+  assert.deepEqual(l.entries.value.map((e) => e.id), ['we_0', 'we_1'])
+  await l.removeEntry('we_0')
+  assert.deepEqual(calls[2], ['DELETE', '/workspaces/entries?id=ws1&entry=we_0', undefined])
+  assert.deepEqual(l.entries.value.map((e) => e.id), ['we_1'])
 })

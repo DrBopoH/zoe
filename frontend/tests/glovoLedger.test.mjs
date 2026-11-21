@@ -183,3 +183,37 @@ test('смета: «в кармане» считается после налог
   assert.equal(m.afterTax, r2like(1000 - 50 - 10 - 1902.34))
 })
 function r2like(v) { return Math.round(v * 100) / 100 }
+
+import { withCash, entrySigned, isCashId } from '../src/utils/glovoLedger.js'
+
+test('наличные записи: знак даёт бейдж, запись считается как операция', () => {
+  assert.equal(entrySigned({ badge: 'expense', amount: 600 }), -600)
+  assert.equal(entrySigned({ badge: 'loss', amount: 900 }), -900)
+  assert.equal(entrySigned({ badge: 'tips', amount: 500 }), 500)
+  const tx = [{ id: 'r', time: '2026-11-10T10:57:00', amount: -2500 }]
+  const marks = new Map([['r', 'loss']])
+  const entries = [
+    { id: 'a', day: '2026-11-10', badge: 'expense', amount: 600, note: 'парафин' },
+    { id: 'b', day: '2026-11-10', badge: 'loss', amount: 900, note: 'ремонт' }
+  ]
+  const m = withCash(tx, marks, entries)
+  assert.equal(m.transactions.length, 3)
+  assert.equal(isCashId(m.transactions[1].id), true)
+  const t = badgeTotals(m.transactions, m.marks)
+  assert.equal(t.loss.sum, -3400) // 2500 с карты + 900 наличными
+  assert.equal(t.loss.count, 2)
+  assert.equal(t.expense.sum, -600)
+  assert.equal(marks.size, 1) // исходные пометки не меняются
+  const est = estimateModel({ transactions: m.transactions, marks: m.marks, weeks: [], params: new Map(), today: '2026-11-21' })
+  assert.equal(est.outflow, -4000) // ровно те 4000, что ушли на ремонт и масло
+  assert.equal(est.flow[0].week, '2026-11-09')
+})
+
+test('наличные записи: без записей вернутся те же операции и пометки', () => {
+  const tx = [{ id: 'r', time: '2026-11-10T10:57:00', amount: -1 }]
+  const marks = new Map()
+  const m = withCash(tx, marks, [])
+  assert.equal(m.transactions, tx)
+  assert.equal(m.marks, marks)
+  assert.equal(withCash(tx, marks, [{ id: 'x', day: '2026-11-10', badge: 'нет', amount: 5 }]).transactions, tx) // неизвестный бейдж игнорируется
+})

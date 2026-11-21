@@ -3,9 +3,10 @@ import { computed, onMounted, ref, watch } from 'vue'
 import AccountPanel from './AccountPanel.vue'
 import AccountHistoryTable from './AccountHistoryTable.vue'
 import WeekTimeline from './WeekTimeline.vue'
+import CashEntries from './CashEntries.vue'
 import UiLoadError from './ui/UiLoadError.vue'
 import { prepareAccount } from '../utils/accountView.js'
-import { BADGES, badgeTotals, weekMonday, timelineWeeks } from '../utils/glovoLedger.js'
+import { BADGES, badgeTotals, weekMonday, timelineWeeks, withCash } from '../utils/glovoLedger.js'
 import { useWorkspaceLedger } from '../composables/useWorkspaceLedger.js'
 import { pushRequestError } from '../composables/useToasts.js'
 import { formatMoney, toLocalDateStr } from '../utils/formatters.js'
@@ -19,7 +20,7 @@ const props = defineProps({
   users: { type: Array, default: () => [] }
 })
 
-const { linked, marks, weeks, error, load, toggleAccount, setMark, setWeek, removeWeek } = useWorkspaceLedger(() => props.workspaceId)
+const { linked, marks, weeks, entries, error, load, toggleAccount, setMark, setWeek, removeWeek, addEntry, updateEntry, removeEntry } = useWorkspaceLedger(() => props.workspaceId)
 onMounted(load)
 watch(() => props.workspaceId, load)
 
@@ -30,6 +31,11 @@ const onToggleAccount = guard('Не удалось изменить счета �
 const onMark = guard('Не удалось поставить бейдж', setMark)
 const onSaveWeek = guard('Не удалось записать неделю', setWeek)
 const onRemoveWeek = guard('Не удалось удалить неделю', removeWeek)
+const onRemoveEntry = guard('Не удалось удалить запись', removeEntry)
+// сохранение наличной записи: true — удалось, при ошибке тост и окно остаётся открытым
+const onSaveEntry = async (e) => {
+  try { await (e.id ? updateEntry(e) : addEntry(e)); return true } catch (err) { pushRequestError('Не удалось сохранить запись', err); return false }
+}
 
 const cards = computed(() => props.accounts.map(prepareAccount))
 const isLinked = (c) => linked.value.has(c.id)
@@ -38,13 +44,26 @@ const toRow = (a) => ({ id: a.id, label: a.pans[0] || a.displayIban, fullLabel: 
 const ownRows = computed(() => cards.value.map(toRow))
 const linkedRows = computed(() => cards.value.filter(isLinked).map(toRow))
 
-const totals = computed(() => badgeTotals(props.transactions, marks.value))
+// операции из выписок и наличные записи считаются вместе
+const merged = computed(() => withCash(props.transactions, marks.value, entries.value))
+// наличные записи под своей операцией в истории; чья операция не видна (нет в кеше или счёт не в деле) — отдельным списком
+const visibleTx = computed(() => new Set(props.transactions.filter((t) => linked.value.has(t.account_id)).map((t) => t.id)))
+const cashByTx = computed(() => {
+  const m = new Map()
+  for (const e of entries.value) {
+    if (!e.tx_id || !visibleTx.value.has(e.tx_id)) continue
+    m.set(e.tx_id, [...(m.get(e.tx_id) || []), e])
+  }
+  return m
+})
+const orphans = computed(() => entries.value.filter((e) => !e.tx_id || !visibleTx.value.has(e.tx_id)))
+const totals = computed(() => badgeTotals(merged.value.transactions, merged.value.marks))
 
 // Таймлайн номинального дохода: номинал недели сверяется с приходом следующей недели
 const today = computed(() => toLocalDateStr(new Date()))
 const currentWeek = computed(() => weekMonday(today.value))
 const back = ref(0) // на сколько недель продлена лента назад («Раньше»)
-const timeline = computed(() => timelineWeeks({ weeks: weeks.value, transactions: props.transactions, marks: marks.value, today: today.value, back: back.value }))
+const timeline = computed(() => timelineWeeks({ weeks: weeks.value, transactions: merged.value.transactions, marks: merged.value.marks, today: today.value, back: back.value }))
 const tone = (v) => (v > 0 ? 'text-emerald-400' : v < 0 ? 'text-rose-400' : 'text-slate-400')
 </script>
 
@@ -83,6 +102,8 @@ const tone = (v) => (v > 0 ? 'text-emerald-400' : v < 0 ? 'text-rose-400' : 'tex
       </div>
     </section>
 
+    <CashEntries v-if="orphans.length" :entries="orphans" @remove="onRemoveEntry" />
+
     <section class="space-y-3">
       <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Номинальный доход по неделям</div>
       <p class="text-[11px] text-slate-500">Номинал — то, что Glovo записал за неделю до налога и вычетов. Деньги приходят на карту через 2–4 дня после отчёта, то есть на следующей неделе (бейджи «Доход» и «Выплата»); разница показывается как удержанное.</p>
@@ -95,11 +116,15 @@ const tone = (v) => (v > 0 ? 'text-emerald-400' : v < 0 ? 'text-rose-400' : 'tex
       empty-hint="Отметь счета дела выше: здесь появятся их операции"
       :badges="BADGES"
       :marks="marks"
+      cashable
+      :cash="cashByTx"
+      :save-cash="onSaveEntry"
       :users="users"
       :own="ownRows"
       :transactions="transactions"
       :selected="linkedRows"
       @mark="onMark"
+      @remove-cash="onRemoveEntry"
     />
   </div>
 </template>

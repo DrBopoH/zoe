@@ -211,3 +211,27 @@ export function taxModel({ transactions, marks, params, today }) {
   const sum = (k) => r2(months.reduce((s, m) => s + m[k], 0))
   return { rates: p, months, payout: sum('payout'), tax: sum('tax'), war: sum('war'), esv: sum('esv'), total: sum('total') }
 }
+
+// ───────── Ручные (наличные) записи ─────────
+// Деньги, которых нет в выписках: наличные расходы, компенсация и т. п. Запись хранит положительную сумму, знак даёт бейдж
+// (расход и убыток — минус, остальное — плюс). Для подсчётов запись превращается в обычную операцию с пометкой, поэтому итоги, недели,
+// сверка и смета считают её так же, как операцию из выписки.
+export const CASH_PREFIX = 'cash:'
+export const isCashId = (id) => String(id).startsWith(CASH_PREFIX)
+export const entrySigned = (e) => {
+  const b = badgeOf(e.badge)
+  const v = Number(e.amount) || 0
+  return b && b.side === 'out' ? -v : v
+}
+
+/** Операции кэша и пометки + ручные записи: { transactions, marks } для badgeTotals / timelineWeeks / estimateModel. */
+export function withCash(transactions, marks, entries) {
+  const list = (entries || []).filter((e) => badgeOf(e.badge))
+  if (!list.length) return { transactions: transactions || [], marks }
+  const m = new Map(marks)
+  const tx = list.map((e) => {
+    m.set(CASH_PREFIX + e.id, e.badge)
+    return { id: CASH_PREFIX + e.id, account_id: '', time: `${e.day}T12:00:00`, description: e.note || 'Наличные', amount: entrySigned(e), currency_code: 980, cash: true }
+  })
+  return { transactions: [...(transactions || []), ...tx], marks: m }
+}
