@@ -53,7 +53,7 @@ const tip = (r) => `${dm(r.week)}\n` + BADGES.filter((b) => r[b.key]).map((b) =>
       <span v-for="b in BADGES" :key="b.key" class="flex items-center gap-1 text-slate-400"><i class="w-2 h-2 rounded-sm inline-block" :style="{ background: COLORS[b.key] }" />{{ b.label }}</span>
       <span class="flex items-center gap-1 text-slate-400"><i class="w-3 h-0.5 inline-block bg-white" />Накоплено</span>
     </div>
-    <div ref="box" class="overflow-x-auto border border-slate-800 rounded bg-slate-900/60">
+    <div ref="box" class="overflow-x-auto">
       <svg :width="geo.width" :height="H" :viewBox="`0 0 ${geo.width} ${H}`" class="block">
         <line :x1="0" :x2="geo.width" :y1="geo.zero" :y2="geo.zero" stroke="#334155" stroke-width="1" />
         <rect v-for="(b, n) in geo.bars" :key="n" :x="b.x" :y="b.y" :width="COL - 10" :height="Math.max(1, b.h)" :fill="COLORS[b.key]" rx="1" />

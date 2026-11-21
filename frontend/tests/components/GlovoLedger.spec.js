@@ -48,7 +48,7 @@ describe('GlovoPage', () => {
     expect(w.text()).toContain('Счета дела')
     await tabs[1].trigger('click')
     await flushPromises()
-    expect(w.text()).toContain('Сведение')
+    expect(w.text()).toContain('От прихода к')
     expect(w.text()).toContain('В кармане')
     expect(w.text()).not.toContain('Счета дела')
   })
