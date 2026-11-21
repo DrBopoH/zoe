@@ -184,6 +184,24 @@ func TestWorkspaceLedgerAPI(t *testing.T) {
 	if w := do("DELETE", "/api/workspaces/weeks?id=ws&week=2026-11-16", ""); w.Code != 200 {
 		t.Fatalf("удаление недели: %d", w.Code)
 	}
+	if w := do("PUT", "/api/workspaces/params", `{"workspace_id":"ws","key":"tax_rate","value":5}`); w.Code != 200 {
+		t.Fatalf("параметр: %d %s", w.Code, w.Body.String())
+	}
+	if w := do("PUT", "/api/workspaces/params", `{"workspace_id":"ws","key":"Tax","value":5}`); w.Code != 400 {
+		t.Fatalf("плохой ключ — 400, а не %d", w.Code)
+	}
+	if w := do("PUT", "/api/workspaces/params", `{"workspace_id":"ws","key":"tax_rate","value":-1}`); w.Code != 400 {
+		t.Fatalf("отрицательное значение — 400, а не %d", w.Code)
+	}
+	if w := do("GET", "/api/workspaces/params?id=ws", ""); !strings.Contains(w.Body.String(), `"key":"tax_rate","value":5`) {
+		t.Fatalf("список параметров: %s", w.Body.String())
+	}
+	if w := do("DELETE", "/api/workspaces/params?id=ws", ""); w.Code != 400 {
+		t.Fatalf("удаление без ключа — 400, а не %d", w.Code)
+	}
+	if w := do("DELETE", "/api/workspaces/params?id=ws&key=tax_rate", ""); w.Code != 200 {
+		t.Fatalf("удаление параметра: %d", w.Code)
+	}
 	if w := do("POST", "/api/workspaces/marks", ""); w.Code != 405 {
 		t.Fatalf("метод не тот — 405, а не %d", w.Code)
 	}

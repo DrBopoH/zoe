@@ -7,6 +7,7 @@ const mk = (data = {}) => {
   const get = async (p) => {
     if (p.startsWith('/workspaces/accounts')) return data.accounts || []
     if (p.startsWith('/workspaces/marks')) return data.marks || []
+    if (p.startsWith('/workspaces/params')) return data.params || []
     return data.weeks || []
   }
   const raw = async (m, p, b) => { calls.push([m, p, b]) }
@@ -59,4 +60,16 @@ test('ошибка сервера не меняет локальное сост�
   await l.load()
   await assert.rejects(() => l.setMark('t1', 'income'), /boom/)
   assert.equal(l.marks.value.size, 0)
+})
+
+test('параметры: load читает, setParam и resetParam шлют на бэкенд и меняют карту', async () => {
+  const { l, calls } = mk({ params: [{ key: 'tax_rate', value: 5 }] })
+  await l.load()
+  assert.equal(l.params.value.get('tax_rate'), 5)
+  await l.setParam('esv', 1902.34)
+  assert.deepEqual(calls[0], ['PUT', '/workspaces/params', { workspace_id: 'ws1', key: 'esv', value: 1902.34 }])
+  assert.equal(l.params.value.get('esv'), 1902.34)
+  await l.resetParam('tax_rate')
+  assert.deepEqual(calls[1], ['DELETE', '/workspaces/params?id=ws1&key=tax_rate', undefined])
+  assert.equal(l.params.value.has('tax_rate'), false)
 })

@@ -98,6 +98,26 @@ func TestWorkspaceLedgerAccountsMarksWeeks(t *testing.T) {
 		t.Fatalf("после удаления: %+v", ws)
 	}
 
+	// параметры: ключ и значение проверяются, повтор заменяет, удаление возвращает к умолчанию
+	if err := s.SetWorkspaceParam(a.ID, WorkspaceParam{Key: "tax_rate", Value: 5}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetWorkspaceParam(a.ID, WorkspaceParam{Key: "tax_rate", Value: 6}); err != nil {
+		t.Fatal(err)
+	}
+	if ps, _ := s.GetWorkspaceParams(a.ID); len(ps) != 1 || ps[0].Value != 6 {
+		t.Fatalf("параметры дела: %v", ps)
+	}
+	if err := s.SetWorkspaceParam(a.ID, WorkspaceParam{Key: "Bad", Value: 1}); !errors.Is(err, ErrWorkspace) {
+		t.Fatalf("плохой ключ: %v", err)
+	}
+	if err := s.SetWorkspaceParam(a.ID, WorkspaceParam{Key: "esv", Value: -1}); !errors.Is(err, ErrWorkspace) {
+		t.Fatalf("отрицательное значение: %v", err)
+	}
+	if err := s.SetWorkspaceParam(b.ID, WorkspaceParam{Key: "esv", Value: 1902.34}); err != nil {
+		t.Fatal(err)
+	}
+
 	// удаление дела уносит его учёт, чужое не трогает
 	if err := s.SetWorkspaceMark(a.ID, "tx9", "tips"); err != nil {
 		t.Fatal(err)
@@ -117,7 +137,13 @@ func TestWorkspaceLedgerAccountsMarksWeeks(t *testing.T) {
 	if ws, _ := s.GetWorkspaceWeeks(a.ID); len(ws) != 0 {
 		t.Fatalf("недели ушли с делом: %v", ws)
 	}
+	if ps, _ := s.GetWorkspaceParams(a.ID); len(ps) != 0 {
+		t.Fatalf("параметры ушли с делом: %v", ps)
+	}
 	if ms, _ := s.GetWorkspaceMarks(b.ID); len(ms) != 1 {
 		t.Fatalf("чужое дело не тронуто: %v", ms)
+	}
+	if ps, _ := s.GetWorkspaceParams(b.ID); len(ps) != 1 {
+		t.Fatalf("чужие параметры не тронуты: %v", ps)
 	}
 }

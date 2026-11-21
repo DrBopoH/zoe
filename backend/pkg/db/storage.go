@@ -281,6 +281,12 @@ CREATE TABLE IF NOT EXISTS workspace_weeks (
 	nominal      REAL NOT NULL,
 	PRIMARY KEY (workspace_id, week)
 );
+CREATE TABLE IF NOT EXISTS workspace_params (
+	workspace_id TEXT NOT NULL,
+	key          TEXT NOT NULL,
+	value        REAL NOT NULL,
+	PRIMARY KEY (workspace_id, key)
+);
 -- Ручные правки счёта (лимит, IBAN, PAN) — это пользовательские данные, им не место в кеше.
 CREATE TABLE IF NOT EXISTS account_overrides (
 	account_id TEXT PRIMARY KEY,

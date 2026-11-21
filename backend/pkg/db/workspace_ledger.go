@@ -16,6 +16,10 @@ var workspaceBadge = regexp.MustCompile(`^[a-z][a-z0-9-]{0,15}$`)
 
 const maxWeeklyNominal = 10_000_000
 
+var workspaceParamKey = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
+
+const maxWorkspaceParam = 1_000_000_000
+
 // WorkspaceMark — бейдж на одной операции. Операция принадлежит ровно одному делу: повторная пометка из другого дела переносит её.
 type WorkspaceMark struct {
 	TxID        string `json:"tx_id"`
@@ -159,5 +163,57 @@ func (s *Storage) GetWorkspaceWeeks(wsID string) ([]WorkspaceWeek, error) {
 		out = append(out, w)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Week < out[j].Week })
+	return out, rows.Err()
+}
+
+// WorkspaceParam — числовой параметр дела (например, ставки налога ФОП). Смысл ключей задаёт страница дела на фронте.
+type WorkspaceParam struct {
+	Key   string  `json:"key"`
+	Value float64 `json:"value"`
+}
+
+// SetWorkspaceParam записывает параметр дела (повтор ключа заменяет значение).
+func (s *Storage) SetWorkspaceParam(wsID string, p WorkspaceParam) error {
+	if wsID == "" {
+		return fmt.Errorf("%w: workspace id is required", ErrWorkspace)
+	}
+	if !workspaceParamKey.MatchString(p.Key) {
+		return fmt.Errorf("%w: bad param key", ErrWorkspace)
+	}
+	if math.IsNaN(p.Value) || math.IsInf(p.Value, 0) || p.Value < 0 || p.Value > maxWorkspaceParam {
+		return fmt.Errorf("%w: param must be between 0 and %d", ErrWorkspace, maxWorkspaceParam)
+	}
+	defer s.bump()
+	s.coreMu.Lock()
+	defer s.coreMu.Unlock()
+	_, err := s.coreDB.Exec(`INSERT INTO workspace_params(workspace_id, key, value) VALUES(?,?,?)
+		ON CONFLICT(workspace_id, key) DO UPDATE SET value = excluded.value`, wsID, p.Key, p.Value)
+	return err
+}
+
+// DeleteWorkspaceParam убирает параметр (нет такого — не ошибка): страница вернётся к значению по умолчанию.
+func (s *Storage) DeleteWorkspaceParam(wsID, key string) error {
+	defer s.bump()
+	s.coreMu.Lock()
+	defer s.coreMu.Unlock()
+	_, err := s.coreDB.Exec(`DELETE FROM workspace_params WHERE workspace_id = ? AND key = ?`, wsID, key)
+	return err
+}
+
+// GetWorkspaceParams — параметры дела по возрастанию ключа.
+func (s *Storage) GetWorkspaceParams(wsID string) ([]WorkspaceParam, error) {
+	rows, err := s.coreDB.Query(`SELECT key, value FROM workspace_params WHERE workspace_id = ? ORDER BY key`, wsID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []WorkspaceParam{}
+	for rows.Next() {
+		var p WorkspaceParam
+		if err := rows.Scan(&p.Key, &p.Value); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
 	return out, rows.Err()
 }

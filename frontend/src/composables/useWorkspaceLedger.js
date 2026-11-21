@@ -8,6 +8,7 @@ export function useWorkspaceLedger(wsId, get = apiGetJson, send = apiJson, sendR
   const accountIds = ref([])
   const marks = ref(new Map()) // id операции → ключ бейджа
   const weeks = ref([])
+  const params = ref(new Map()) // числовые параметры дела (ключ → значение), чего нет — страница берёт по умолчанию
   const error = ref('')
   let seq = 0
 
@@ -15,15 +16,17 @@ export function useWorkspaceLedger(wsId, get = apiGetJson, send = apiJson, sendR
     const my = ++seq
     const id = q(wsId())
     try {
-      const [a, m, w] = await Promise.all([
+      const [a, m, w, pr] = await Promise.all([
         get(`/workspaces/accounts?id=${id}`),
         get(`/workspaces/marks?id=${id}`),
-        get(`/workspaces/weeks?id=${id}`)
+        get(`/workspaces/weeks?id=${id}`),
+        get(`/workspaces/params?id=${id}`)
       ])
       if (my !== seq) return
       accountIds.value = Array.isArray(a) ? a : []
       marks.value = new Map((Array.isArray(m) ? m : []).map((x) => [x.tx_id, x.badge]))
       weeks.value = Array.isArray(w) ? w : []
+      params.value = new Map((Array.isArray(pr) ? pr : []).map((x) => [x.key, x.value]))
       error.value = ''
     } catch (e) {
       if (my === seq) error.value = errText(e)
@@ -62,5 +65,18 @@ export function useWorkspaceLedger(wsId, get = apiGetJson, send = apiJson, sendR
     weeks.value = weeks.value.filter((x) => x.week !== week)
   }
 
-  return { accountIds, linked, marks, weeks, error, load, toggleAccount, setMark, setWeek, removeWeek }
+  // записывает параметр дела; сброс возвращает значение по умолчанию
+  const setParam = async (key, value) => {
+    await sendRaw('PUT', '/workspaces/params', { workspace_id: wsId(), key, value })
+    params.value = new Map(params.value).set(key, value)
+  }
+
+  const resetParam = async (key) => {
+    await sendRaw('DELETE', `/workspaces/params?id=${q(wsId())}&key=${q(key)}`)
+    const m = new Map(params.value)
+    m.delete(key)
+    params.value = m
+  }
+
+  return { accountIds, linked, marks, weeks, params, error, load, toggleAccount, setMark, setWeek, removeWeek, setParam, resetParam }
 }

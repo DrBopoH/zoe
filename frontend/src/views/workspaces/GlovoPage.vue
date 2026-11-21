@@ -1,10 +1,10 @@
 <script setup>
 import { ref } from 'vue'
 import WorkspaceLedger from '../../components/WorkspaceLedger.vue'
-import UiEmpty from '../../components/ui/UiEmpty.vue'
+import WorkspaceEstimate from '../../components/WorkspaceEstimate.vue'
 
 // Страница дела «Glovo»: две части. «Учёт» — счета дела, бейджи на операциях (Расход, Убыток, Чай, Доход, Выплата) и понедельный номинальный доход.
-// «Смета» — графики со сведением всех данных дела; пока пустая. Шапку с названием и обложкой рисует WorkspaceView.
+// «Смета» — сведение всех данных дела: номинал → пришло → расходы → в кармане и деньги по неделям. Шапку с названием и обложкой рисует WorkspaceView.
 defineProps({
   workspace: { type: Object, required: true },
   accounts: { type: Array, default: () => [] },
@@ -35,6 +35,6 @@ const part = ref('ledger')
     </div>
 
     <WorkspaceLedger v-if="part === 'ledger'" :workspace-id="workspace.id" :accounts="accounts" :transactions="transactions" :users="users" />
-    <UiEmpty v-else>Смета пока пустая: здесь будут графики со сведением всех данных дела</UiEmpty>
+    <WorkspaceEstimate v-else :workspace-id="workspace.id" :transactions="transactions" />
   </div>
 </template>
