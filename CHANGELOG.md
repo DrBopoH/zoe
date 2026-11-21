@@ -8,6 +8,7 @@ Versions: `R.sB.C+T.hash`. On `dev` there is no state letter (`v1.1.C+T`), the l
 
 Polishing the user-friendly design and finishing QoL, builder and reference features.
 
+- **v1.3.21** — Cases: clicking a card opens the page of the canvas. Pages are bound to cards by a key (the `page` field of a workspace, a registry in `workspacePages.js`, the choice is in the creation and edit window); the header is drawn from the card data (cover, name, back button). One page so far, an empty "Glovo"; a canvas without a page opens with a stub. Backend: the `page` column in `workspaces` (an existing database is migrated on start)
 - **v1.3.20** — P2P charts and header: buying USDT is now green and selling red (was the other way round, which read counter-intuitively); the P2P spread is signed now: negative when selling is priced above buying
 - **v1.3.19** — Cases: a pencil (edit in the creation window) and a trash (delete in two presses) on a card, shown on hover
 - **v1.3.18** — Cases: the cover picture is set only by a link; picking a local file (with compression and drag-and-drop) is removed along with data-URL covers in the backend; the creation window lost its extra captions
