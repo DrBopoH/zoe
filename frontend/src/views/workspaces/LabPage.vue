@@ -39,7 +39,7 @@ const part = ref('ledger')
       >{{ p.label }}</button>
     </div>
 
-    <WorkspaceLedger v-if="part === 'ledger'" :workspace-id="workspace.id" :accounts="accounts" :transactions="transactions" :users="users" :badges="LAB_BADGES" :nominal="false" />
+    <WorkspaceLedger v-if="part === 'ledger'" :workspace-id="workspace.id" :accounts="accounts" :transactions="transactions" :users="users" :badges="LAB_BADGES" :nominal="false" product-cards />
     <UiEmpty v-else>{{ PARTS.find((p) => p.key === part).hint }}</UiEmpty>
   </div>
 </template>

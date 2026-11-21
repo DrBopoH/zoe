@@ -24,6 +24,8 @@ beforeEach(() => {
     const u = String(url)
     calls.push([init.method || 'GET', u, init.body ? JSON.parse(init.body) : undefined])
     if (u.includes('/workspaces/accounts')) return init.method === 'PUT' ? json({ status: 'success' }) : json(server.accounts)
+    if (u.includes('/workspaces/marks') && u.includes('other=1')) return json(server.other || [])
+    if (/\/workspaces(\?|$)/.test(u)) return json(server.list || [])
     if (u.includes('/workspaces/marks')) return init.method === 'PUT' ? json({ status: 'success' }) : json(server.marks)
     if (u.includes('/workspaces/weeks')) return init.method && init.method !== 'GET' ? json({ status: 'success' }) : json(server.weeks)
     return json([])
@@ -68,6 +70,26 @@ describe('WorkspaceLedger', () => {
     const w = await mountLedger()
     expect(w.text()).toContain('Термосумка')
     expect(w.findAll('[data-testid="row-badge"]').map((b) => b.text())).toEqual(['Расход'])
+    w.unmount()
+  })
+
+  it('операция, уже разобранная соседним делом, тускнеет и подписана делом; действия не заблокированы', async () => {
+    server.list = [{ id: 'ws1', name: 'Glovo', color: '#00aa00' }, { id: 'ws9', name: 'Семейный бюджет', color: '#3366ff' }]
+    server.other = [{ tx_id: 't1', workspace_id: 'ws9', badge: 'expense' }, { tx_id: 'tx-none', workspace_id: 'ws1', badge: 'income' }]
+    const w = await mountLedger()
+    const chips = w.findAll('[data-testid="foreign-chip"]')
+    expect(chips.length).toBe(1)
+    expect(chips[0].text()).toContain('в деле «Семейный бюджет»')
+    expect(chips[0].get('span').attributes('style')).toContain('#3366ff')
+    const row = w.findAll('tbody tr').find((r) => r.text().includes('Glovo Ukraine'))
+    expect(row.classes()).toContain('row-foreign')
+    expect(w.findAll('tbody tr').filter((r) => r.classes().includes('row-foreign')).length).toBe(1)
+    // не заблокирована: пометка ставится, операция переезжает в это дело и сереть перестаёт
+    await row.trigger('click')
+    await w.findAll('button').find((b) => b.text() === 'Доход').trigger('click')
+    await flushPromises()
+    expect(calls.some(([m, u]) => m === 'PUT' && u.includes('/workspaces/marks'))).toBe(true)
+    expect(w.find('[data-testid="foreign-chip"]').exists()).toBe(false)
     w.unmount()
   })
 

@@ -8,6 +8,8 @@ import UiLoadError from './ui/UiLoadError.vue'
 import { prepareAccount } from '../utils/accountView.js'
 import { BADGES, badgeTotals, weekMonday, timelineWeeks, withCash } from '../utils/glovoLedger.js'
 import { useWorkspaceLedger } from '../composables/useWorkspaceLedger.js'
+import { useWorkspaceDocs } from '../composables/useWorkspaceDocs.js'
+import { CARD_KIND, cardsByTx, cardNames } from '../utils/labLedger.js'
 import { pushRequestError } from '../composables/useToasts.js'
 import { formatMoney, toLocalDateStr } from '../utils/formatters.js'
 
@@ -20,12 +22,22 @@ const props = defineProps({
   users: { type: Array, default: () => [] },
   // набор бейджей страницы дела (по умолчанию Glovo) и показ понедельного номинала (он только у Glovo)
   badges: { type: Array, default: () => BADGES },
-  nominal: { type: Boolean, default: true }
+  nominal: { type: Boolean, default: true },
+  // карточки товаров под операциями «Расход» (страница ХимЛаб)
+  productCards: { type: Boolean, default: false }
 })
 
-const { linked, marks, weeks, entries, error, load, toggleAccount, setMark, setWeek, removeWeek, addEntry, updateEntry, removeEntry } = useWorkspaceLedger(() => props.workspaceId)
-onMounted(load)
-watch(() => props.workspaceId, load)
+const { linked, marks, foreign, weeks, entries, error, load, toggleAccount, setMark, setWeek, removeWeek, addEntry, updateEntry, removeEntry } = useWorkspaceLedger(() => props.workspaceId)
+const cardDocs = useWorkspaceDocs(() => props.workspaceId, CARD_KIND)
+const reload = () => Promise.all([load(), props.productCards ? cardDocs.load() : null])
+onMounted(reload)
+watch(() => props.workspaceId, reload)
+const onSaveCard = async (c) => {
+  try { await (c.id ? cardDocs.update(c) : cardDocs.add(c)); return true } catch (err) { pushRequestError('Не удалось сохранить карточку', err); return false }
+}
+const cardsOfTx = computed(() => cardsByTx(cardDocs.docs.value))
+const cardSubstances = computed(() => cardNames(cardDocs.docs.value, 'substance'))
+const cardMakers = computed(() => cardNames(cardDocs.docs.value, 'maker'))
 
 const guard = (title, fn) => async (...args) => {
   try { await fn(...args) } catch (e) { pushRequestError(title, e) }
@@ -35,6 +47,7 @@ const onMark = guard('Не удалось поставить бейдж', setMar
 const onSaveWeek = guard('Не удалось записать неделю', setWeek)
 const onRemoveWeek = guard('Не удалось удалить неделю', removeWeek)
 const onRemoveEntry = guard('Не удалось удалить запись', removeEntry)
+const onRemoveCard = guard('Не удалось удалить карточку', cardDocs.remove)
 // сохранение наличной записи: true — удалось, при ошибке тост и окно остаётся открытым
 const onSaveEntry = async (e) => {
   try { await (e.id ? updateEntry(e) : addEntry(e)); return true } catch (err) { pushRequestError('Не удалось сохранить запись', err); return false }
@@ -72,7 +85,7 @@ const tone = (v) => (v > 0 ? 'text-emerald-400' : v < 0 ? 'text-rose-400' : 'tex
 
 <template>
   <div class="space-y-6 font-mono select-none">
-    <UiLoadError v-if="error" :message="error" @retry="load" />
+    <UiLoadError v-if="error || cardDocs.error.value" :message="error || cardDocs.error.value" @retry="reload" />
 
     <section class="space-y-3">
       <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Счета дела</div>
@@ -122,12 +135,19 @@ const tone = (v) => (v > 0 ? 'text-emerald-400' : v < 0 ? 'text-rose-400' : 'tex
       cashable
       :cash="cashByTx"
       :save-cash="onSaveEntry"
+      :foreign="foreign"
+      :cardable="productCards"
+      :cards="cardsOfTx"
+      :save-card="onSaveCard"
+      :card-substances="cardSubstances"
+      :card-makers="cardMakers"
       :users="users"
       :own="ownRows"
       :transactions="transactions"
       :selected="linkedRows"
       @mark="onMark"
       @remove-cash="onRemoveEntry"
+      @remove-card="onRemoveCard"
     />
   </div>
 </template>

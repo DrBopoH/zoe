@@ -297,6 +297,14 @@ CREATE TABLE IF NOT EXISTS workspace_entries (
 	tx_id        TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_workspace_entries_ws ON workspace_entries(workspace_id);
+CREATE TABLE IF NOT EXISTS workspace_docs (
+	id           TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL,
+	kind         TEXT NOT NULL,
+	day          TEXT NOT NULL DEFAULT '',
+	data         TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_workspace_docs_ws ON workspace_docs(workspace_id, kind);
 -- Ручные правки счёта (лимит, IBAN, PAN) — это пользовательские данные, им не место в кеше.
 CREATE TABLE IF NOT EXISTS account_overrides (
 	account_id TEXT PRIMARY KEY,
