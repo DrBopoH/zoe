@@ -220,6 +220,27 @@ func TestWorkspaceLedgerAPI(t *testing.T) {
 	if w := do("DELETE", "/api/workspaces/entries?id=ws", ""); w.Code != 400 {
 		t.Fatalf("удаление без записи — 400, а не %d", w.Code)
 	}
+	if w := do("POST", "/api/workspaces/docs", `{"workspace_id":"ws","kind":"card","day":"2026-11-10","data":{"substance":"фруктоза","net_g":1000,"price":120,"qty":2}}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"id":"wd_`) {
+		t.Fatalf("документ: %d %s", w.Code, w.Body.String())
+	}
+	if w := do("POST", "/api/workspaces/docs", `{"workspace_id":"ws","kind":"Card","data":{}}`); w.Code != 400 {
+		t.Fatalf("плохой вид — 400, а не %d", w.Code)
+	}
+	if w := do("POST", "/api/workspaces/docs", `{"workspace_id":"ws","kind":"card","data":[1]}`); w.Code != 400 {
+		t.Fatalf("не объект — 400, а не %d", w.Code)
+	}
+	if w := do("GET", "/api/workspaces/docs?id=ws&kind=card", ""); !strings.Contains(w.Body.String(), `"substance":"фруктоза"`) {
+		t.Fatalf("список документов: %s", w.Body.String())
+	}
+	if w := do("GET", "/api/workspaces/docs?id=ws&kind=batch", ""); strings.TrimSpace(w.Body.String()) != "[]" {
+		t.Fatalf("другой вид — пусто: %s", w.Body.String())
+	}
+	if w := do("PUT", "/api/workspaces/docs", `{"workspace_id":"ws","id":"nope","kind":"card","data":{}}`); w.Code != 404 {
+		t.Fatalf("правка чужого — 404, а не %d", w.Code)
+	}
+	if w := do("DELETE", "/api/workspaces/docs?id=ws", ""); w.Code != 400 {
+		t.Fatalf("удаление без документа — 400, а не %d", w.Code)
+	}
 	if w := do("POST", "/api/workspaces/marks", ""); w.Code != 405 {
 		t.Fatalf("метод не тот — 405, а не %d", w.Code)
 	}

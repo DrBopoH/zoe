@@ -6,7 +6,7 @@ import (
 	"economic/pkg/db"
 )
 
-// Учёт дела: /api/workspaces/accounts, /marks, /weeks, /params, /entries. Во всех GET и DELETE дело задаётся ?id=, в PUT — полем workspace_id.
+// Учёт дела: /api/workspaces/accounts, /marks, /weeks, /params, /entries, /docs. Во всех GET и DELETE дело задаётся ?id=, в PUT — полем workspace_id.
 
 // GET ?id= → ["acc", …]; PUT {workspace_id, accounts: […]} заменяет список целиком.
 func (s *Server) HandleWorkspaceAccounts(w http.ResponseWriter, r *http.Request) {
@@ -181,6 +181,62 @@ func (s *Server) HandleWorkspaceEntries(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		if err := s.storage.DeleteWorkspaceEntry(q.Get("id"), q.Get("entry")); err != nil {
+			failErr(w, err)
+			return
+		}
+		writeOK(w)
+	default:
+		fail(w, http.StatusMethodNotAllowed, "Method not allowed")
+	}
+}
+
+// GET ?id=[&kind=] → [{id, kind, day, data}]; POST {workspace_id, kind, day, data} → документ с id;
+// PUT {workspace_id, id, kind, day, data}; DELETE ?id=&doc=.
+func (s *Server) HandleWorkspaceDocs(w http.ResponseWriter, r *http.Request) {
+	type body struct {
+		WorkspaceID string `json:"workspace_id"`
+		db.WorkspaceDoc
+	}
+	switch r.Method {
+	case http.MethodGet:
+		q := r.URL.Query()
+		list, err := s.storage.GetWorkspaceDocs(q.Get("id"), q.Get("kind"))
+		if err != nil {
+			failErr(w, err)
+			return
+		}
+		writeJSON(w, list)
+	case http.MethodPost:
+		var in body
+		if !readJSON(w, r, &in) {
+			return
+		}
+		out, err := s.storage.CreateWorkspaceDoc(in.WorkspaceID, in.WorkspaceDoc)
+		if workspaceFail(w, err) {
+			return
+		}
+		writeJSON(w, out)
+	case http.MethodPut:
+		var in body
+		if !readJSON(w, r, &in) {
+			return
+		}
+		ok, err := s.storage.UpdateWorkspaceDoc(in.WorkspaceID, in.WorkspaceDoc)
+		if workspaceFail(w, err) {
+			return
+		}
+		if !ok {
+			fail(w, http.StatusNotFound, "No such doc")
+			return
+		}
+		writeOK(w)
+	case http.MethodDelete:
+		q := r.URL.Query()
+		if q.Get("id") == "" || q.Get("doc") == "" {
+			fail(w, http.StatusBadRequest, "Missing id or doc")
+			return
+		}
+		if err := s.storage.DeleteWorkspaceDoc(q.Get("id"), q.Get("doc")); err != nil {
 			failErr(w, err)
 			return
 		}
