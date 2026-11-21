@@ -41,6 +41,8 @@ const props = defineProps({
   cash: { type: Object, default: () => new Map() },
   cashable: { type: Boolean, default: false },
   saveCash: { type: Function, default: null },
+  // операции, уже разобранные соседними делами: Map(id операции → { id, name, color }); строка тускнеет и подписана делом, действия не блокируются
+  foreign: { type: Object, default: () => new Map() },
   // карточки товаров ХимЛаба под операциями с бейджем «Расход»: Map(id операции → карточки), saveCard(карточка) → true/false,
   // подсказки формы — вещества и производители из уже введённых карточек
   cards: { type: Object, default: () => new Map() },
@@ -51,6 +53,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['clear', 'clear-range', 'mark', 'remove-cash', 'remove-card'])
 
+const foreignOf = (t) => props.foreign.get(t.id) || null
 const badgeDef = (t) => props.badges.find((b) => b.key === props.marks.get(t.id)) || null
 
 const openId = ref(null)
@@ -268,7 +271,7 @@ const editingCash = (t, e) => cashForm.value && cashForm.value.txId === t.id && 
           <template v-for="t in shown" :key="t.id">
             <tr
               class="border-b border-slate-800/60 hover:bg-slate-800/40 cursor-pointer transition-colors"
-              :class="[openId === t.id && 'bg-slate-800/30', inGroup(t) && 'cash-group', badgeDef(t) && 'row-marked']"
+              :class="[openId === t.id && 'bg-slate-800/30', inGroup(t) && 'cash-group', badgeDef(t) && 'row-marked', foreignOf(t) && 'row-foreign']"
               @click="toggleRow(t.id)"
             >
               <td class="p-3 whitespace-nowrap text-slate-400">
@@ -279,8 +282,12 @@ const editingCash = (t, e) => cashForm.value && cashForm.value.txId === t.id && 
                   {{ byId.get(t.account_id)?.label }}
                 </span>
               </td>
-              <td class="p-3 max-w-[360px]">
-                <div class="font-bold text-slate-200 truncate">
+              <td class="p-3 max-w-[360px] foreign-title">
+                <div v-if="foreignOf(t)" class="mb-0.5 text-[10px] font-normal text-slate-300 flex items-center gap-1.5 min-w-0" data-testid="foreign-chip" :title="`Уже разобрана в деле «${foreignOf(t).name}». Здесь её тоже можно пометить: она переедет в это дело`">
+                  <span class="inline-block w-2 h-2 rounded-full shrink-0 border border-white/20" :style="{ backgroundColor: foreignOf(t).color || '#64748b' }" />
+                  <span class="truncate">в деле «{{ foreignOf(t).name }}»</span>
+                </div>
+                <div class="font-bold text-slate-200 truncate foreign-dim">
                   <span v-if="badgeDef(t)" class="mr-1.5 text-[9px] px-1.5 py-0.5 rounded border font-bold" :class="badgeDef(t).cls" data-testid="row-badge">{{ badgeDef(t).label }}</span>
                   <template v-for="(g, i) in tagsFor(t)" :key="i"><span v-if="g.sep" class="mr-1.5 text-[10px] text-slate-500 font-normal">{{ g.label }}</span><span v-else class="mr-1.5 text-[9px] px-1.5 py-0.5 rounded border font-normal" :class="g.cls">{{ g.label }}</span></template>
                   <template v-if="who(t)">
@@ -291,7 +298,7 @@ const editingCash = (t, e) => cashForm.value && cashForm.value.txId === t.id && 
                   </template>
                   <template v-else>{{ cleanTitle(t, title(t)) }}</template>
                 </div>
-                <div v-if="!who(t) && subtitle(t)" class="text-[10px] text-slate-500 truncate">{{ subtitle(t) }}</div>
+                <div v-if="!who(t) && subtitle(t)" class="text-[10px] text-slate-500 truncate foreign-dim">{{ subtitle(t) }}</div>
               </td>
               <td class="p-3 whitespace-nowrap">
                 <span v-if="counterAcct(t)" class="text-[9px] px-1.5 py-0.5 rounded border text-slate-400 font-normal" :class="counterAcct(t).exact ? 'border-slate-700' : 'border-dashed border-slate-600'" :title="counterAcct(t).exact ? 'Счёт или карта контрагента' : counterAcct(t).tip">{{ counterAcct(t).text }}<template v-if="counterAcct(t).more"> <span class="text-slate-500">+{{ counterAcct(t).more }}</span></template></span>
@@ -436,6 +443,9 @@ const editingCash = (t, e) => cashForm.value && cashForm.value.txId === t.id && 
 </template>
 
 <style scoped>
+/* операция соседнего дела: тускнеет только визуально, подпись с делом остаётся яркой */
+.row-foreign > td:not(.foreign-title) { opacity: 0.4; }
+.row-foreign .foreign-dim { opacity: 0.4; }
 .cash-group > td:first-child, .row-marked > td:first-child { box-shadow: inset 2px 0 0 rgb(56 189 248 / 0.45); }
 .cash-group > td, .row-marked > td { background-color: rgb(56 189 248 / 0.04); }
 /* линия-связка от операции к записям: вертикаль с коленом к бейджу */

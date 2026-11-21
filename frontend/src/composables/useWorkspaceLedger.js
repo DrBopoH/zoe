@@ -10,6 +10,7 @@ export function useWorkspaceLedger(wsId, get = apiGetJson, send = apiJson, sendR
   const weeks = ref([])
   const entries = ref([]) // ручные (наличные) записи дела
   const params = ref(new Map()) // числовые параметры дела (ключ → значение), чего нет — страница берёт по умолчанию
+  const foreign = ref(new Map()) // id операции → { id, name, color } дела, в котором она уже разобрана (соседние дела)
   const error = ref('')
   let seq = 0
 
@@ -34,6 +35,22 @@ export function useWorkspaceLedger(wsId, get = apiGetJson, send = apiJson, sendR
     } catch (e) {
       if (my === seq) error.value = errText(e)
     }
+    loadForeign(my, id)
+  }
+
+  // Операции, уже помеченные соседними делами: только для подсветки в истории, сбой не мешает странице
+  const loadForeign = async (my, id) => {
+    try {
+      const [other, list] = await Promise.all([get(`/workspaces/marks?id=${id}&other=1`), get('/workspaces')])
+      if (my !== seq) return
+      const byId = new Map((Array.isArray(list) ? list : []).map((w) => [w.id, w]))
+      const m = new Map()
+      for (const x of Array.isArray(other) ? other : []) {
+        const w = byId.get(x.workspace_id)
+        if (w && x.workspace_id !== wsId()) m.set(x.tx_id, { id: w.id, name: w.name, color: w.color || '' })
+      }
+      foreign.value = m
+    } catch { /* подсветка необязательна */ }
   }
 
   const linked = computed(() => new Set(accountIds.value))
@@ -54,6 +71,11 @@ export function useWorkspaceLedger(wsId, get = apiGetJson, send = apiJson, sendR
     if (next) m.set(txId, next)
     else m.delete(txId)
     marks.value = m
+    if (next && foreign.value.has(txId)) { // операция переехала в это дело
+      const f = new Map(foreign.value)
+      f.delete(txId)
+      foreign.value = f
+    }
   }
 
   // записывает или заменяет неделю (week — понедельник)
@@ -96,5 +118,5 @@ export function useWorkspaceLedger(wsId, get = apiGetJson, send = apiJson, sendR
     entries.value = entries.value.filter((x) => x.id !== id)
   }
 
-  return { accountIds, linked, marks, weeks, params, entries, error, load, toggleAccount, setMark, setWeek, removeWeek, setParam, resetParam, addEntry, updateEntry, removeEntry }
+  return { accountIds, linked, marks, foreign, weeks, params, entries, error, load, toggleAccount, setMark, setWeek, removeWeek, setParam, resetParam, addEntry, updateEntry, removeEntry }
 }

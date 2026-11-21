@@ -27,7 +27,7 @@ const props = defineProps({
   productCards: { type: Boolean, default: false }
 })
 
-const { linked, marks, weeks, entries, error, load, toggleAccount, setMark, setWeek, removeWeek, addEntry, updateEntry, removeEntry } = useWorkspaceLedger(() => props.workspaceId)
+const { linked, marks, foreign, weeks, entries, error, load, toggleAccount, setMark, setWeek, removeWeek, addEntry, updateEntry, removeEntry } = useWorkspaceLedger(() => props.workspaceId)
 const cardDocs = useWorkspaceDocs(() => props.workspaceId, CARD_KIND)
 const reload = () => Promise.all([load(), props.productCards ? cardDocs.load() : null])
 onMounted(reload)
@@ -135,6 +135,7 @@ const tone = (v) => (v > 0 ? 'text-emerald-400' : v < 0 ? 'text-rose-400' : 'tex
       cashable
       :cash="cashByTx"
       :save-cash="onSaveEntry"
+      :foreign="foreign"
       :cardable="productCards"
       :cards="cardsOfTx"
       :save-card="onSaveCard"
