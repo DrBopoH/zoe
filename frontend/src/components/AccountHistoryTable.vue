@@ -6,6 +6,8 @@ import { counterpartyName, isPersonTransaction } from '../utils/personLayout.js'
 import UiButton from './ui/UiButton.vue'
 import UiIconButton from './ui/UiIconButton.vue'
 import CashEntryForm from './CashEntryForm.vue'
+import ProductCardForm from './ProductCardForm.vue'
+import { cardSplit, cardTitle, cardTotal } from '../utils/labLedger.js'
 import { entrySigned, txDate } from '../utils/glovoLedger.js'
 import { effectiveTimes, isDateOnly } from '../utils/historyOrder.js'
 import { tagsFor, cleanTitle } from '../utils/txTags.js'
@@ -38,9 +40,16 @@ const props = defineProps({
   // saveCash(запись) сохраняет (true — удалось); cashable включает «+ Наличные» в раскрытой строке
   cash: { type: Object, default: () => new Map() },
   cashable: { type: Boolean, default: false },
-  saveCash: { type: Function, default: null }
+  saveCash: { type: Function, default: null },
+  // карточки товаров ХимЛаба под операциями с бейджем «Расход»: Map(id операции → карточки), saveCard(карточка) → true/false,
+  // подсказки формы — вещества и производители из уже введённых карточек
+  cards: { type: Object, default: () => new Map() },
+  cardable: { type: Boolean, default: false },
+  saveCard: { type: Function, default: null },
+  cardSubstances: { type: Array, default: () => [] },
+  cardMakers: { type: Array, default: () => [] }
 })
-const emit = defineEmits(['clear', 'clear-range', 'mark', 'remove-cash'])
+const emit = defineEmits(['clear', 'clear-range', 'mark', 'remove-cash', 'remove-card'])
 
 const badgeDef = (t) => props.badges.find((b) => b.key === props.marks.get(t.id)) || null
 
@@ -76,6 +85,7 @@ watch(() => props.selected.map(a => a.id).join('|') + '|' + (props.range ? props
   resetPage()
   openId.value = null
   cashForm.value = null
+  cardForm.value = null
 })
 
 
@@ -172,7 +182,7 @@ const withCashTotal = (t) => {
   return Math.round((t.amount + list.reduce((s, e) => s + entrySigned(e, props.badges), 0)) * 100) / 100 + 0
 }
 const cols = computed(() => (props.selected.length > 1 ? 5 : 4))
-const inGroup = (t) => cashOf(t).length > 0 || (props.cashable && openId.value === t.id && !!cashForm.value && cashForm.value.txId === t.id)
+const inGroup = (t) => cashOf(t).length > 0 || cardsOf(t).length > 0 || (props.cardable && openId.value === t.id && !!cardForm.value && cardForm.value.txId === t.id) || (props.cashable && openId.value === t.id && !!cashForm.value && cashForm.value.txId === t.id)
 const cashForm = ref(null) // { txId, entry|null }
 const cashBusy = ref(false)
 const armedCash = ref('')
@@ -191,6 +201,26 @@ const onCashTrash = (e) => {
 }
 const cashChip = (e) => props.badges.find((b) => b.key === e.badge) || null
 const dayOfTx = (t) => txDate(t)
+// Карточки товаров под операцией «Расход»: строки с составом закупки и остаток суммы, который не вошёл в товары
+const cardsOf = (t) => props.cards.get(t.id) || []
+const canCard = (t) => props.cardable && props.marks.get(t.id) === 'expense'
+const cardForm = ref(null) // { txId, card|null }
+const cardBusy = ref(false)
+const armedCard = ref('')
+const openCardForm = (t, card = null) => { cardForm.value = { txId: t.id, card } }
+const onCardSave = async (c) => {
+  if (!props.saveCard) return
+  cardBusy.value = true
+  try { if (await props.saveCard(c)) cardForm.value = null } finally { cardBusy.value = false }
+}
+const onCardTrash = (c) => {
+  if (armedCard.value === c.id) { clearTimeout(armTimer); armedCard.value = ''; emit('remove-card', c.id); return }
+  armedCard.value = c.id
+  clearTimeout(armTimer)
+  armTimer = setTimeout(() => { armedCard.value = '' }, 4000)
+}
+const splitOf = (t) => cardSplit(t.amount, cardsOf(t))
+const editingCard = (t, c) => cardForm.value && cardForm.value.txId === t.id && cardForm.value.card?.id === c.id
 const editingCash = (t, e) => cashForm.value && cashForm.value.txId === t.id && cashForm.value.entry?.id === e.id
 </script>
 
@@ -295,6 +325,48 @@ const editingCash = (t, e) => cashForm.value && cashForm.value.txId === t.id && 
                     <dd class="text-slate-300 break-all">{{ v }}</dd>
                   </template>
                 </dl>
+              </td>
+            </tr>
+
+            <!-- Карточки товаров: что именно куплено в этой операции -->
+            <template v-for="(c, i) in cardsOf(t)" :key="c.id">
+              <tr v-if="editingCard(t, c)" class="cash-group" data-testid="card-row">
+                <td :colspan="cols" class="px-3 py-2 pl-10">
+                  <ProductCardForm :card="c" :tx-id="t.id" :day="dayOfTx(t)" :busy="cardBusy" :substances="cardSubstances" :makers="cardMakers" @save="onCardSave" @cancel="cardForm = null" />
+                </td>
+              </tr>
+              <tr v-else class="cash-group cash-line group" data-testid="card-row">
+                <td class="p-0" />
+                <td v-if="selected.length > 1" class="p-0" />
+                <td class="cash-tree py-2 pr-3" :class="i === cardsOf(t).length - 1 && 'cash-tree--last'">
+                  <div class="pl-10 flex items-center gap-2 min-w-0">
+                    <span class="text-[9px] px-1.5 py-0.5 rounded border font-bold shrink-0 bg-amber-500/15 text-amber-300 border-amber-500/30">Товар</span>
+                    <span class="text-slate-300 truncate">{{ cardTitle(c) }}</span>
+                    <span class="text-[10px] text-slate-500 shrink-0 tabular-nums">{{ c.qty }} × {{ fmtMoney(c.price, cur(t)) }}</span>
+                  </div>
+                </td>
+                <td class="p-0" />
+                <td class="py-2 px-3 text-right whitespace-nowrap">
+                  <span v-if="cardable" class="inline-flex items-center gap-0.5 mr-2 align-middle transition-opacity" :class="armedCard === c.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'">
+                    <span v-if="armedCard === c.id" class="text-[10px] font-bold uppercase tracking-wider text-rose-300 mr-1">Удалить?</span>
+                    <UiIconButton v-else icon="edit" tone="accent" size="sm" title="Править карточку" data-testid="card-edit" @click.stop="openCardForm(t, c)" />
+                    <UiIconButton icon="trash" tone="danger" size="sm" :title="armedCard === c.id ? 'Нажми ещё раз — удалить' : 'Удалить карточку'" data-testid="card-remove" @click.stop="onCardTrash(c)" />
+                  </span>
+                  <span class="font-bold text-slate-300">{{ fmtMoney(cardTotal(c), cur(t)) }}</span>
+                </td>
+              </tr>
+            </template>
+            <tr v-if="cardsOf(t).length" class="cash-group" data-testid="card-split">
+              <td :colspan="cols - 1" class="px-3 pb-2 pt-1 text-right text-[10px] uppercase tracking-wider text-slate-500">
+                В карточках {{ fmtMoney(splitOf(t).sum, cur(t)) }} из {{ fmtMoney(Math.abs(t.amount), cur(t)) }}
+                <span v-if="Math.abs(splitOf(t).diff) >= 0.01" :class="splitOf(t).diff > 0 ? 'text-amber-300' : 'text-rose-300'">· {{ splitOf(t).diff > 0 ? 'ещё' : 'лишние' }} {{ fmtMoney(Math.abs(splitOf(t).diff), cur(t)) }}</span>
+              </td>
+              <td class="px-3 pb-2 pt-1" />
+            </tr>
+            <tr v-if="canCard(t) && openId === t.id" class="cash-group">
+              <td :colspan="cols" class="px-3 pb-2 pl-10">
+                <ProductCardForm v-if="cardForm && cardForm.txId === t.id && !cardForm.card" :tx-id="t.id" :day="dayOfTx(t)" :busy="cardBusy" :substances="cardSubstances" :makers="cardMakers" @save="onCardSave" @cancel="cardForm = null" />
+                <button v-else type="button" class="text-[11px] font-bold text-slate-500 hover:text-amber-300 transition-colors cursor-pointer" data-testid="card-add" @click.stop="openCardForm(t)">+ Товар</button>
               </td>
             </tr>
 
