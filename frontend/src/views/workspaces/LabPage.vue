@@ -1,12 +1,13 @@
 <script setup>
 import { ref } from 'vue'
 import WorkspaceLedger from '../../components/WorkspaceLedger.vue'
+import LabStock from '../../components/LabStock.vue'
 import UiEmpty from '../../components/ui/UiEmpty.vue'
 import { LAB_BADGES } from '../../utils/labLedger.js'
 
 // Страница дела «ХимЛаб» (производство напитков): четыре части.
 // «Учёт» — счета, бейджи Расход / Убыток / Продажа и наличные записи (общий механизм со страницей Glovo).
-// «Склад» (вещества, карточки товаров, запасы), «Партии» (производство и себестоимость) и «Смета» — следующие шаги.
+// «Склад» — вещества и их карточки с запасом от номинала до расчётного; «Партии» (производство и себестоимость) и «Смета» — следующие шаги.
 // Шапку с названием и обложкой рисует WorkspaceView.
 defineProps({
   workspace: { type: Object, required: true },
@@ -17,7 +18,7 @@ defineProps({
 
 const PARTS = [
   { key: 'ledger', label: 'Учёт' },
-  { key: 'stock', label: 'Склад', hint: 'Склад появится следующим шагом: вещества, карточки товаров и запасы от номинала до расчётного.' },
+  { key: 'stock', label: 'Склад' },
   { key: 'batches', label: 'Партии', hint: 'Партии появятся после склада: номер партии, рецепт на штуку и себестоимость.' },
   { key: 'estimate', label: 'Смета', hint: 'Смета лаба появится, когда будут склад и партии: стоимость склада, себестоимость штуки, выручка, потери.' }
 ]
@@ -40,6 +41,7 @@ const part = ref('ledger')
     </div>
 
     <WorkspaceLedger v-if="part === 'ledger'" :workspace-id="workspace.id" :accounts="accounts" :transactions="transactions" :users="users" :badges="LAB_BADGES" :nominal="false" product-cards />
+    <LabStock v-else-if="part === 'stock'" :workspace-id="workspace.id" />
     <UiEmpty v-else>{{ PARTS.find((p) => p.key === part).hint }}</UiEmpty>
   </div>
 </template>

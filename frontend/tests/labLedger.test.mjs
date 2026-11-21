@@ -63,3 +63,27 @@ test('подсказки: уникальные вещества и произв�
   assert.deepEqual(cardNames(l, 'substance'), ['мальтодекстрин', 'фруктоза'])
   assert.deepEqual(cardNames(l, 'maker'), ['А', 'Б'])
 })
+
+import { stockModel } from '../src/utils/labLedger.js'
+test('stockModel: группы по веществу без учёта регистра, остаток от номинала, цены карточек раздельно', () => {
+  const cards = [
+    { id: 'a', day: '2026-11-10', substance: 'Мальтодекстрин', maker: 'А', net_g: 1000, price: 96, qty: 5 },
+    { id: 'b', day: '2026-11-12', substance: 'мальтодекстрин', maker: 'Б', net_g: 500, price: 60, qty: 2 },
+    { id: 'c', day: '2026-11-11', substance: 'фруктоза', maker: '', net_g: 1000, price: 120, qty: 2 }
+  ]
+  const m = stockModel(cards)
+  assert.deepEqual(m.groups.map((g) => g.name), ['Мальтодекстрин', 'фруктоза'])
+  assert.equal(m.groups[0].nominal, 6000)
+  assert.equal(m.groups[0].left, 6000)
+  assert.equal(m.groups[0].valueTotal, 600) // 480 + 2×60
+  assert.equal(m.valueTotal, 840)
+  assert.equal(m.valueLeft, 840)
+  // расход по карточке a: 2500 г из 5000 — остаток по её цене 0,096 ₴/г
+  const u = stockModel(cards, new Map([['a', 2500], ['c', 99999]]))
+  assert.equal(u.groups[0].rows[0].left, 2500)
+  assert.equal(u.groups[0].rows[0].pct, 0.5)
+  assert.equal(u.groups[0].rows[0].valueLeft, 240)
+  assert.equal(u.groups[1].left, 0) // списано больше номинала — остаток не уходит в минус
+  assert.equal(u.groups[0].left, 2500 + 1000)
+  assert.deepEqual(stockModel([]), { groups: [], cards: 0, valueTotal: 0, valueLeft: 0 })
+})
