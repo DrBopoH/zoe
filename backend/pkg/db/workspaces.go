@@ -111,6 +111,7 @@ func (s *Storage) DeleteWorkspace(id string) error {
 		`DELETE FROM workspace_marks WHERE workspace_id = ?`,
 		`DELETE FROM workspace_weeks WHERE workspace_id = ?`,
 		`DELETE FROM workspace_params WHERE workspace_id = ?`,
+		`DELETE FROM workspace_entries WHERE workspace_id = ?`,
 		`DELETE FROM workspaces WHERE id = ?`,
 	} {
 		if _, err := tx.Exec(q, id); err != nil {

@@ -202,6 +202,24 @@ func TestWorkspaceLedgerAPI(t *testing.T) {
 	if w := do("DELETE", "/api/workspaces/params?id=ws&key=tax_rate", ""); w.Code != 200 {
 		t.Fatalf("удаление параметра: %d", w.Code)
 	}
+	if w := do("POST", "/api/workspaces/entries", `{"workspace_id":"ws","day":"2026-11-10","badge":"expense","amount":600,"note":"парафин","tx_id":"t1"}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"id":"we_`) {
+		t.Fatalf("ручная запись: %d %s", w.Code, w.Body.String())
+	}
+	if w := do("POST", "/api/workspaces/entries", `{"workspace_id":"ws","day":"10.11.2026","badge":"expense","amount":600}`); w.Code != 400 {
+		t.Fatalf("плохая дата — 400, а не %d", w.Code)
+	}
+	if w := do("POST", "/api/workspaces/entries", `{"workspace_id":"ws","day":"2026-11-10","badge":"loss","amount":0}`); w.Code != 400 {
+		t.Fatalf("нулевая сумма — 400, а не %d", w.Code)
+	}
+	if w := do("GET", "/api/workspaces/entries?id=ws", ""); !strings.Contains(w.Body.String(), `"note":"парафин"`) || !strings.Contains(w.Body.String(), `"tx_id":"t1"`) {
+		t.Fatalf("список записей: %s", w.Body.String())
+	}
+	if w := do("PUT", "/api/workspaces/entries", `{"workspace_id":"ws","id":"nope","day":"2026-11-10","badge":"loss","amount":900}`); w.Code != 404 {
+		t.Fatalf("правка чужой записи — 404, а не %d", w.Code)
+	}
+	if w := do("DELETE", "/api/workspaces/entries?id=ws", ""); w.Code != 400 {
+		t.Fatalf("удаление без записи — 400, а не %d", w.Code)
+	}
 	if w := do("POST", "/api/workspaces/marks", ""); w.Code != 405 {
 		t.Fatalf("метод не тот — 405, а не %d", w.Code)
 	}

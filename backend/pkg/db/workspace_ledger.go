@@ -5,7 +5,9 @@ import (
 	"math"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Учёт дела (Core DB): какие счета входят в дело, бейджи на операциях этих счетов и понедельные записи номинального дохода.
@@ -214,6 +216,106 @@ func (s *Storage) GetWorkspaceParams(wsID string) ([]WorkspaceParam, error) {
 			return nil, err
 		}
 		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// WorkspaceEntry — ручная запись дела: деньги, которых нет в выписках (наличные расходы, компенсация и т. п.).
+// Amount — положительная величина; приход это или уход, решает бейдж на странице дела.
+// TxID — операция, к которой запись прикреплена (на странице она рисуется под ней); пусто — запись без операции.
+type WorkspaceEntry struct {
+	ID     string  `json:"id"`
+	Day    string  `json:"day"` // YYYY-MM-DD
+	Badge  string  `json:"badge"`
+	Amount float64 `json:"amount"`
+	Note   string  `json:"note"`
+	TxID   string  `json:"tx_id"`
+}
+
+const (
+	maxEntryNote = 200
+	maxEntryTxID = 128
+)
+
+func (e WorkspaceEntry) clean() (WorkspaceEntry, error) {
+	e.Note = strings.TrimSpace(e.Note)
+	e.TxID = strings.TrimSpace(e.TxID)
+	if len(e.TxID) > maxEntryTxID {
+		return e, fmt.Errorf("%w: tx id is longer than %d characters", ErrWorkspace, maxEntryTxID)
+	}
+	if utf8.RuneCountInString(e.Note) > maxEntryNote {
+		return e, fmt.Errorf("%w: note is longer than %d characters", ErrWorkspace, maxEntryNote)
+	}
+	if _, err := time.Parse("2006-01-02", e.Day); err != nil {
+		return e, fmt.Errorf("%w: day must be YYYY-MM-DD", ErrWorkspace)
+	}
+	if !workspaceBadge.MatchString(e.Badge) {
+		return e, fmt.Errorf("%w: bad badge key", ErrWorkspace)
+	}
+	if math.IsNaN(e.Amount) || math.IsInf(e.Amount, 0) || e.Amount <= 0 || e.Amount > maxWeeklyNominal {
+		return e, fmt.Errorf("%w: amount must be above 0 and at most %d", ErrWorkspace, maxWeeklyNominal)
+	}
+	e.Amount = math.Round(e.Amount*100) / 100
+	return e, nil
+}
+
+// CreateWorkspaceEntry добавляет ручную запись; id ставит сервер.
+func (s *Storage) CreateWorkspaceEntry(wsID string, e WorkspaceEntry) (WorkspaceEntry, error) {
+	if wsID == "" {
+		return e, fmt.Errorf("%w: workspace id is required", ErrWorkspace)
+	}
+	e, err := e.clean()
+	if err != nil {
+		return e, err
+	}
+	e.ID = fmt.Sprintf("we_%d", time.Now().UnixNano())
+	defer s.bump()
+	s.coreMu.Lock()
+	defer s.coreMu.Unlock()
+	_, err = s.coreDB.Exec(`INSERT INTO workspace_entries(id, workspace_id, day, badge, amount, note, tx_id) VALUES(?,?,?,?,?,?,?)`, e.ID, wsID, e.Day, e.Badge, e.Amount, e.Note, e.TxID)
+	return e, err
+}
+
+// UpdateWorkspaceEntry правит запись своего дела; false — такой записи нет.
+func (s *Storage) UpdateWorkspaceEntry(wsID string, e WorkspaceEntry) (bool, error) {
+	e, err := e.clean()
+	if err != nil {
+		return false, err
+	}
+	defer s.bump()
+	s.coreMu.Lock()
+	defer s.coreMu.Unlock()
+	res, err := s.coreDB.Exec(`UPDATE workspace_entries SET day=?, badge=?, amount=?, note=?, tx_id=? WHERE id=? AND workspace_id=?`, e.Day, e.Badge, e.Amount, e.Note, e.TxID, e.ID, wsID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// DeleteWorkspaceEntry удаляет запись своего дела (нет такой — не ошибка).
+func (s *Storage) DeleteWorkspaceEntry(wsID, id string) error {
+	defer s.bump()
+	s.coreMu.Lock()
+	defer s.coreMu.Unlock()
+	_, err := s.coreDB.Exec(`DELETE FROM workspace_entries WHERE id = ? AND workspace_id = ?`, id, wsID)
+	return err
+}
+
+// GetWorkspaceEntries — записи дела по дате (внутри даты по порядку добавления).
+func (s *Storage) GetWorkspaceEntries(wsID string) ([]WorkspaceEntry, error) {
+	rows, err := s.coreDB.Query(`SELECT id, day, badge, amount, note, tx_id FROM workspace_entries WHERE workspace_id = ? ORDER BY day, id`, wsID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []WorkspaceEntry{}
+	for rows.Next() {
+		var e WorkspaceEntry
+		if err := rows.Scan(&e.ID, &e.Day, &e.Badge, &e.Amount, &e.Note, &e.TxID); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
 	}
 	return out, rows.Err()
 }
