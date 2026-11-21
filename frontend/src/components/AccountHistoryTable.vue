@@ -171,6 +171,8 @@ const withCashTotal = (t) => {
   if (!list.length) return null
   return Math.round((t.amount + list.reduce((s, e) => s + entrySigned(e), 0)) * 100) / 100 + 0
 }
+const cols = computed(() => (props.selected.length > 1 ? 5 : 4))
+const inGroup = (t) => cashOf(t).length > 0 || (props.cashable && openId.value === t.id && !!cashForm.value && cashForm.value.txId === t.id)
 const cashForm = ref(null) // { txId, entry|null }
 const cashBusy = ref(false)
 const armedCash = ref('')
@@ -236,7 +238,7 @@ const editingCash = (t, e) => cashForm.value && cashForm.value.txId === t.id && 
           <template v-for="t in shown" :key="t.id">
             <tr
               class="border-b border-slate-800/60 hover:bg-slate-800/40 cursor-pointer transition-colors"
-              :class="openId === t.id && 'bg-slate-800/30'"
+              :class="[openId === t.id && 'bg-slate-800/30', inGroup(t) && 'cash-group']"
               @click="toggleRow(t.id)"
             >
               <td class="p-3 whitespace-nowrap text-slate-400">
@@ -270,7 +272,6 @@ const editingCash = (t, e) => cashForm.value && cashForm.value.txId === t.id && 
                 <span v-if="['move', 'trade', 'swap'].includes(t.memo)" class="text-slate-600 font-normal">—</span>
                 <span v-else :class="(t.internal || t.own_account_id || t.memo) && 'opacity-60'">{{ money(t.amount, t) }}</span>
                 <span v-if="t.is_hold" class="ml-1 text-[9px] text-amber-400 font-normal">HOLD</span>
-                <div v-if="withCashTotal(t) !== null" class="text-[10px] font-normal text-slate-500" data-testid="with-cash">с наличными <span :class="tone(withCashTotal(t))">{{ money(withCashTotal(t), t) }}</span></div>
               </td>
             </tr>
 
@@ -297,31 +298,45 @@ const editingCash = (t, e) => cashForm.value && cashForm.value.txId === t.id && 
               </td>
             </tr>
 
-            <tr v-for="e in cashOf(t)" :key="e.id" data-testid="cash-row">
-              <td :colspan="selected.length > 1 ? 5 : 4" class="px-3 py-1.5">
-                <div class="ml-6 border-l border-blue-500/30 pl-3">
-                  <CashEntryForm v-if="editingCash(t, e)" :entry="e" :tx-id="t.id" :day="dayOfTx(t)" :busy="cashBusy" @save="onCashSave" @cancel="cashForm = null" />
-                  <div v-else class="flex items-center gap-2 text-[11px] rounded border border-blue-500/30 bg-blue-950/30 px-2 py-1.5">
+            <!-- Наличные записи связки: те же колонки, что у таблицы, сумма стоит под суммой операции -->
+            <template v-for="(e, i) in cashOf(t)" :key="e.id">
+              <tr v-if="editingCash(t, e)" class="cash-group" data-testid="cash-row">
+                <td :colspan="cols" class="px-3 py-2 pl-10">
+                  <CashEntryForm :entry="e" :tx-id="t.id" :day="dayOfTx(t)" :busy="cashBusy" @save="onCashSave" @cancel="cashForm = null" />
+                </td>
+              </tr>
+              <tr v-else class="cash-group cash-line group" data-testid="cash-row">
+                <td class="p-0" />
+                <td v-if="selected.length > 1" class="p-0" />
+                <td class="cash-tree py-2 pr-3" :class="i === cashOf(t).length - 1 && 'cash-tree--last'">
+                  <div class="pl-10 flex items-center gap-2 min-w-0">
                     <span v-if="cashChip(e)" class="text-[9px] px-1.5 py-0.5 rounded border font-bold shrink-0" :class="cashChip(e).cls">{{ cashChip(e).label }}</span>
-                    <span class="text-blue-100 truncate flex-1 min-w-0">{{ e.note || 'Наличные' }}</span>
-                    <span class="text-slate-500 text-[10px] shrink-0">нал.</span>
-                    <span class="font-bold tabular-nums shrink-0" :class="tone(entrySigned(e))">{{ entrySigned(e) > 0 ? '+' : '−' }}{{ formatMoney(e.amount) }}</span>
-                    <template v-if="cashable">
-                      <span v-if="armedCash === e.id" class="text-[10px] font-bold uppercase tracking-wider text-rose-300 shrink-0">Удалить?</span>
-                      <UiIconButton v-else icon="edit" tone="accent" size="sm" title="Править запись" data-testid="cash-edit" @click.stop="openCashForm(t, e)" />
-                      <UiIconButton icon="trash" tone="danger" size="sm" :title="armedCash === e.id ? 'Нажми ещё раз — удалить' : 'Удалить запись'" data-testid="cash-remove" @click.stop="onCashTrash(e)" />
-                    </template>
+                    <span class="text-slate-300 truncate">{{ e.note || 'Наличные' }}</span>
+                    <span class="text-[9px] uppercase tracking-wider text-slate-600 shrink-0">нал.</span>
                   </div>
-                </div>
-              </td>
+                </td>
+                <td class="p-0" />
+                <td class="py-2 px-3 text-right whitespace-nowrap">
+                  <span v-if="cashable" class="inline-flex items-center gap-0.5 mr-2 align-middle transition-opacity" :class="armedCash === e.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'">
+                    <span v-if="armedCash === e.id" class="text-[10px] font-bold uppercase tracking-wider text-rose-300 mr-1">Удалить?</span>
+                    <UiIconButton v-else icon="edit" tone="accent" size="sm" title="Править запись" data-testid="cash-edit" @click.stop="openCashForm(t, e)" />
+                    <UiIconButton icon="trash" tone="danger" size="sm" :title="armedCash === e.id ? 'Нажми ещё раз — удалить' : 'Удалить запись'" data-testid="cash-remove" @click.stop="onCashTrash(e)" />
+                  </span>
+                  <span class="font-bold" :class="tone(entrySigned(e))">{{ money(entrySigned(e), t) }}</span>
+                </td>
+              </tr>
+            </template>
+
+            <!-- Итог связки: операция плюс её наличные -->
+            <tr v-if="cashOf(t).length" class="cash-group" data-testid="cash-total">
+              <td :colspan="cols - 1" class="px-3 pb-2 pt-1 text-right text-[10px] uppercase tracking-wider text-slate-500">Итого с наличными</td>
+              <td class="px-3 pb-2 pt-1 text-right whitespace-nowrap font-bold border-t border-dashed border-slate-700" :class="tone(withCashTotal(t))" data-testid="with-cash">{{ money(withCashTotal(t), t) }}</td>
             </tr>
 
-            <tr v-if="cashable && openId === t.id" class="border-b border-slate-800/60 bg-slate-950/50">
-              <td :colspan="selected.length > 1 ? 5 : 4" class="px-3 pb-3">
-                <div class="ml-6 border-l border-blue-500/30 pl-3">
-                  <CashEntryForm v-if="cashForm && cashForm.txId === t.id && !cashForm.entry" :tx-id="t.id" :day="dayOfTx(t)" :busy="cashBusy" @save="onCashSave" @cancel="cashForm = null" />
-                  <UiButton v-else variant="subtle" size="sm" data-testid="cash-add" @click.stop="openCashForm(t)">+ Наличные</UiButton>
-                </div>
+            <tr v-if="cashable && openId === t.id" class="cash-group">
+              <td :colspan="cols" class="px-3 pb-2 pl-10">
+                <CashEntryForm v-if="cashForm && cashForm.txId === t.id && !cashForm.entry" :tx-id="t.id" :day="dayOfTx(t)" :busy="cashBusy" @save="onCashSave" @cancel="cashForm = null" />
+                <button v-else type="button" class="text-[11px] font-bold text-slate-500 hover:text-sky-300 transition-colors cursor-pointer" data-testid="cash-add" @click.stop="openCashForm(t)">+ Наличные</button>
               </td>
             </tr>
           </template>
@@ -347,3 +362,13 @@ const editingCash = (t, e) => cashForm.value && cashForm.value.txId === t.id && 
     </div>
   </div>
 </template>
+
+<style scoped>
+.cash-group > td:first-child { box-shadow: inset 2px 0 0 rgb(56 189 248 / 0.45); }
+.cash-group > td { background-color: rgb(56 189 248 / 0.04); }
+/* линия-связка от операции к записям: вертикаль с коленом к бейджу */
+.cash-tree { position: relative; }
+.cash-tree::before { content: ''; position: absolute; left: 22px; top: 0; bottom: 0; width: 1px; background: rgb(100 116 139 / 0.55); }
+.cash-tree--last::before { bottom: 50%; }
+.cash-tree::after { content: ''; position: absolute; left: 22px; top: 50%; width: 12px; height: 1px; background: rgb(100 116 139 / 0.55); }
+</style>

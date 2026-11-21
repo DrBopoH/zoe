@@ -33,7 +33,7 @@ const submit = () => {
 </script>
 
 <template>
-  <div class="space-y-2 rounded border border-slate-800 bg-slate-950/40 p-2 select-none" data-testid="cash-form" @click.stop>
+  <div class="space-y-2 rounded-md border border-slate-700/60 bg-slate-900/70 p-3 select-none" data-testid="cash-form" @click.stop>
     <div class="flex flex-wrap gap-1.5" data-testid="cash-badges">
       <button
         v-for="b in BADGES"
