@@ -25,7 +25,8 @@ beforeEach(() => {
     if (u.includes('/workspaces/docs')) {
       if (init.method === 'POST') return json({ id: 'wd_9', kind: body.kind, day: body.day, data: body.data })
       if (init.method === 'PUT' || init.method === 'DELETE') return json({ status: 'success' })
-      return json(docs)
+      const kind = new URL(u, 'http://x').searchParams.get('kind')
+      return json(docs.filter((d) => !kind || d.kind === kind))
     }
     if (u.includes('/workspaces/accounts')) return json(['acc1'])
     if (u.includes('/workspaces/marks')) return json([{ tx_id: 't1', workspace_id: 'lab', badge: 'expense' }, { tx_id: 't2', workspace_id: 'lab', badge: 'sale' }])
@@ -67,8 +68,8 @@ describe('LabPage', () => {
 
   it('остальные части пока с подсказкой', async () => {
     const w = await mountLab()
-    await w.findAll('[role="tab"]')[2].trigger('click')
-    expect(w.text()).toContain('Партии появятся')
+    await w.findAll('[role="tab"]')[3].trigger('click')
+    expect(w.text()).toContain('Смета лаба появится')
     expect(w.text()).not.toContain('Счета дела')
     w.unmount()
   })
@@ -155,6 +156,85 @@ describe('LabPage', () => {
     await w.findAll('[role="tab"]')[1].trigger('click')
     await flushPromises()
     expect(w.text()).toContain('+ Товар')
+    w.unmount()
+  })
+
+  const setBy = async (el, v) => { el.value = v; el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input')); await flushPromises() }
+
+  it('Партии: форма считает себестоимость по цене грамма карточки и сохраняет партию с номером ГГММДД-N', async () => {
+    const w = await mountLab()
+    await w.findAll('[role="tab"]')[2].trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain('Партий пока нет')
+    await w.get('[data-testid="batch-new"]').trigger('click')
+    expect(document.querySelector('[data-field="code"]').value).toBe('261121-1')
+    await setBy(document.querySelector('[data-field="pieces"]'), '10')
+    await setBy(document.querySelector('[data-field="card"]'), 'wd_1')
+    await setBy(document.querySelector('[data-field="grams"]'), '200') // 200 г × 0,096
+    expect(norm(document.querySelector('[data-testid="batch-cost"]').textContent)).toContain('19,20')
+    expect(document.querySelector('[data-field="per"]').value).toBe('20') // 20 г на штуку
+    expect(norm(document.querySelector('[data-testid="batch-cost"]').textContent)).toContain('1,92') // штука
+    const save = [...document.querySelectorAll('[data-testid="batch-form"] button')].find((b) => b.textContent.includes('Создать'))
+    save.click()
+    await flushPromises()
+    const post = calls.find((c) => c[0] === 'POST' && c[1].includes('/workspaces/docs'))
+    expect(post[2].kind).toBe('batch')
+    expect(post[2].data).toEqual({ code: '261121-1', pieces: 10, note: '', lines: [{ card_id: 'wd_1', grams: 200 }] })
+    expect(norm(w.get('[data-testid="batch"]').text())).toContain('261121-1')
+    expect(norm(w.get('[data-testid="batch-piece"]').text())).toContain('1,92')
+    w.unmount()
+  })
+
+  it('Партии: нельзя взять больше остатка карточки, расход виден на Складе', async () => {
+    docs.push({ id: 'wd_b', kind: 'batch', day: '2026-11-15', data: { code: '261115-1', pieces: 0, note: '', lines: [{ card_id: 'wd_1', grams: 4900 }] } })
+    const w = await mountLab()
+    await w.findAll('[role="tab"]')[2].trigger('click')
+    await flushPromises()
+    await w.get('[data-testid="batch-new"]').trigger('click')
+    expect(document.querySelector('[data-field="code"]').value).toBe('261121-1')
+    await setBy(document.querySelector('[data-field="card"]'), 'wd_1')
+    await setBy(document.querySelector('[data-field="grams"]'), '200') // осталось 5000 − 4900 = 100 г
+    expect(document.querySelector('[data-testid="batch-over"]')).not.toBeNull()
+    const save = [...document.querySelectorAll('[data-testid="batch-form"] button')].find((b) => b.textContent.includes('Создать'))
+    expect(save.disabled).toBe(true)
+    await setBy(document.querySelector('[data-field="grams"]'), '100')
+    expect(save.disabled).toBe(false)
+    await w.findAll('[role="tab"]')[1].trigger('click')
+    await flushPromises()
+    expect(norm(w.get('[data-testid="stock-group"]').text())).toContain('100 г из 5000 г')
+    w.unmount()
+  })
+
+  it('Партии: состав раскрывается, удаление в два клика', async () => {
+    docs.push({ id: 'wd_b', kind: 'batch', day: '2026-11-15', data: { code: '261115-1', pieces: 10, note: 'тест', lines: [{ card_id: 'wd_1', grams: 200 }, { card_id: 'gone', grams: 5 }] } })
+    const w = await mountLab()
+    await w.findAll('[role="tab"]')[2].trigger('click')
+    await flushPromises()
+    await w.get('[data-testid="batch"] .group').trigger('click')
+    const lines = norm(w.get('[data-testid="batch-lines"]').text())
+    expect(lines).toContain('мальтодекстрин · Nutri · 1000 г')
+    expect(lines).toContain('20 г/шт')
+    expect(lines).toContain('карточка удалена')
+    await w.get('[data-testid="batch-remove"]').trigger('click')
+    expect(calls.some((c) => c[0] === 'DELETE')).toBe(false)
+    await w.get('[data-testid="batch-remove"]').trigger('click')
+    await flushPromises()
+    expect(calls.some((c) => c[0] === 'DELETE' && c[1].includes('doc=wd_b'))).toBe(true)
+    expect(w.find('[data-testid="batch"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('Партии: дробные граммы на штуку не теряются (16,667 г/шт — с точкой в поле)', async () => {
+    const w = await mountLab()
+    await w.findAll('[role="tab"]')[2].trigger('click')
+    await flushPromises()
+    await w.get('[data-testid="batch-new"]').trigger('click')
+    await setBy(document.querySelector('[data-field="pieces"]'), '6')
+    await setBy(document.querySelector('[data-field="card"]'), 'wd_1')
+    await setBy(document.querySelector('[data-field="grams"]'), '100.125')
+    expect(document.querySelector('[data-field="per"]').value).toBe('16.688')
+    await setBy(document.querySelector('[data-field="per"]'), '0.125')
+    expect(document.querySelector('[data-field="grams"]').value).toBe('0.75')
     w.unmount()
   })
 })

@@ -1,31 +1,24 @@
 <script setup>
-import { computed, onMounted, watch } from 'vue'
+import { computed } from 'vue'
 import UiEmpty from './ui/UiEmpty.vue'
-import UiLoadError from './ui/UiLoadError.vue'
-import { useWorkspaceDocs } from '../composables/useWorkspaceDocs.js'
-import { CARD_KIND, stockModel, cardPerGram } from '../utils/labLedger.js'
+import { stockModel, cardPerGram } from '../utils/labLedger.js'
 import { formatMoney } from '../utils/formatters.js'
 import { numText, dmy } from '../utils/numfmt.js'
 
 // Склад ХимЛаба: вещества и их карточки (конкретные закупки со своей ценой) с запасом от номинала до расчётного.
-// Карточки вносятся в «Учёте» под операциями «Расход»; расход со склада придёт вместе с партиями (used).
+// Карточки вносятся в «Учёте» под операциями «Расход»; расход со склада считается из партий (used).
 const props = defineProps({
-  workspaceId: { type: String, required: true },
-  used: { type: Object, default: () => new Map() } // Map(id карточки → израсходованные граммы)
+  cards: { type: Array, default: () => [] },
+  used: { type: Object, default: () => new Map() } // Map(id карточки → израсходованные граммы), считается из партий
 })
-const { docs, error, load } = useWorkspaceDocs(() => props.workspaceId, CARD_KIND)
-onMounted(load)
-watch(() => props.workspaceId, load)
 
-const model = computed(() => stockModel(docs.value, props.used))
-const grams = (g) => `${numText(g, 1)} г`
+const model = computed(() => stockModel(props.cards, props.used))
+const grams = (g) => `${numText(g, 3)} г`
 const barCls = (p) => (p > 0.5 ? 'bg-emerald-400/80' : p > 0.2 ? 'bg-amber-400/80' : 'bg-rose-400/80')
 </script>
 
 <template>
   <div class="space-y-4 font-mono select-none" data-testid="lab-stock">
-    <UiLoadError v-if="error" :message="error" @retry="load" />
-
     <div class="flex flex-wrap gap-2" data-testid="stock-totals">
       <div class="px-3 py-2 rounded border border-slate-800 bg-slate-900/60 min-w-[8.5rem]">
         <div class="text-[10px] uppercase tracking-wider font-bold text-slate-400">Веществ</div>
@@ -56,7 +49,7 @@ const barCls = (p) => (p > 0.5 ? 'bg-emerald-400/80' : p > 0.2 ? 'bg-amber-400/8
         <li v-for="r in g.rows" :key="r.card.id" class="px-3 py-2 border-b border-slate-800/60 last:border-b-0 space-y-1.5" data-testid="stock-card">
           <div class="flex flex-wrap items-baseline justify-between gap-x-4 text-[11px]">
             <div class="text-slate-300">
-              {{ r.card.maker || 'без производителя' }} · {{ numText(r.card.net_g, 1) }} г
+              {{ r.card.maker || 'без производителя' }} · {{ numText(r.card.net_g, 3) }} г
               <span class="text-slate-500">· {{ r.card.qty }} × {{ formatMoney(r.card.price) }}</span>
               <span v-if="r.card.note" class="text-slate-500"> · {{ r.card.note }}</span>
             </div>
