@@ -138,3 +138,53 @@ func TestWorkspacesAPI(t *testing.T) {
 		t.Fatalf("PATCH — 405, а не %d", w.Code)
 	}
 }
+
+func TestWorkspaceLedgerAPI(t *testing.T) {
+	h := newTestHandler(t)
+	do := func(method, path, body string) *httptest.ResponseRecorder {
+		rq := httptest.NewRequest(method, local+path, strings.NewReader(body))
+		rq.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, rq)
+		return w
+	}
+	if w := do("GET", "/api/workspaces/accounts?id=ws", ""); w.Code != 200 || strings.TrimSpace(w.Body.String()) != "[]" {
+		t.Fatalf("пустые счета: %d %q", w.Code, w.Body.String())
+	}
+	if w := do("PUT", "/api/workspaces/accounts", `{"workspace_id":"ws","accounts":["a1","a2"]}`); w.Code != 200 {
+		t.Fatalf("счета дела: %d %s", w.Code, w.Body.String())
+	}
+	if w := do("GET", "/api/workspaces/accounts?id=ws", ""); !strings.Contains(w.Body.String(), `"a1"`) || !strings.Contains(w.Body.String(), `"a2"`) {
+		t.Fatalf("список счетов: %s", w.Body.String())
+	}
+	if w := do("PUT", "/api/workspaces/accounts", `{"accounts":["a1"]}`); w.Code != 400 {
+		t.Fatalf("без дела — 400, а не %d", w.Code)
+	}
+	if w := do("PUT", "/api/workspaces/marks", `{"workspace_id":"ws","tx_id":"t1","badge":"income"}`); w.Code != 200 {
+		t.Fatalf("бейдж: %d %s", w.Code, w.Body.String())
+	}
+	if w := do("GET", "/api/workspaces/marks?id=ws", ""); !strings.Contains(w.Body.String(), `"badge":"income"`) {
+		t.Fatalf("список бейджей: %s", w.Body.String())
+	}
+	if w := do("PUT", "/api/workspaces/marks", `{"workspace_id":"ws","tx_id":"t1","badge":"Доход"}`); w.Code != 400 {
+		t.Fatalf("неверный бейдж — 400, а не %d", w.Code)
+	}
+	if w := do("PUT", "/api/workspaces/weeks", `{"workspace_id":"ws","week":"2026-11-16","nominal":2200}`); w.Code != 200 {
+		t.Fatalf("неделя: %d %s", w.Code, w.Body.String())
+	}
+	if w := do("PUT", "/api/workspaces/weeks", `{"workspace_id":"ws","week":"2026-11-17","nominal":1}`); w.Code != 400 {
+		t.Fatalf("не понедельник — 400, а не %d", w.Code)
+	}
+	if w := do("GET", "/api/workspaces/weeks?id=ws", ""); !strings.Contains(w.Body.String(), `"nominal":2200`) {
+		t.Fatalf("список недель: %s", w.Body.String())
+	}
+	if w := do("DELETE", "/api/workspaces/weeks?id=ws", ""); w.Code != 400 {
+		t.Fatalf("удаление без недели — 400, а не %d", w.Code)
+	}
+	if w := do("DELETE", "/api/workspaces/weeks?id=ws&week=2026-11-16", ""); w.Code != 200 {
+		t.Fatalf("удаление недели: %d", w.Code)
+	}
+	if w := do("POST", "/api/workspaces/marks", ""); w.Code != 405 {
+		t.Fatalf("метод не тот — 405, а не %d", w.Code)
+	}
+}

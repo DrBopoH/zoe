@@ -100,8 +100,23 @@ func (s *Storage) DeleteWorkspace(id string) error {
 	defer s.bump()
 	s.coreMu.Lock()
 	defer s.coreMu.Unlock()
-	_, err := s.coreDB.Exec(`DELETE FROM workspaces WHERE id = ?`, id)
-	return err
+	tx, err := s.coreDB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// вместе с делом уходит и его учёт: счета, пометки операций, недельные записи
+	for _, q := range []string{
+		`DELETE FROM workspace_accounts WHERE workspace_id = ?`,
+		`DELETE FROM workspace_marks WHERE workspace_id = ?`,
+		`DELETE FROM workspace_weeks WHERE workspace_id = ?`,
+		`DELETE FROM workspaces WHERE id = ?`,
+	} {
+		if _, err := tx.Exec(q, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // GetWorkspaces — все дела по порядку создания (старые первыми).

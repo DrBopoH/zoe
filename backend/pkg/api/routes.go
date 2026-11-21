@@ -58,7 +58,10 @@ func (s *Server) Handler() http.Handler {
 		{"/api/users", s.HandleUsers},
 		{"/api/users/alias", s.HandleAddAlias},
 		{"/api/users/link-account", s.HandleLinkAccount},
-		{"/api/workspaces", s.HandleWorkspaces}, // дела: рабочие пространства пользователя (имя и обложка)
+		{"/api/workspaces", s.HandleWorkspaces},                 // дела: рабочие пространства пользователя (имя и обложка)
+		{"/api/workspaces/accounts", s.HandleWorkspaceAccounts}, // учёт дела: счета дела
+		{"/api/workspaces/marks", s.HandleWorkspaceMarks},       // учёт дела: бейджи на операциях
+		{"/api/workspaces/weeks", s.HandleWorkspaceWeeks},       // учёт дела: понедельные записи номинального дохода
 		{"/api/alias-structures", s.HandleAliasStructures},
 		{"/api/iban-masks", s.HandleIBANMasks},
 	}

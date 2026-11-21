@@ -1,0 +1,163 @@
+package db
+
+import (
+	"fmt"
+	"math"
+	"regexp"
+	"sort"
+	"time"
+)
+
+// Учёт дела (Core DB): какие счета входят в дело, бейджи на операциях этих счетов и понедельные записи номинального дохода.
+// Операции и счета не копируются: дело хранит только ссылки (id счёта, id операции) и свои пометки.
+// Набор бейджей и их смысл задаёт страница дела на фронте; здесь проверяется только вид ключа.
+
+var workspaceBadge = regexp.MustCompile(`^[a-z][a-z0-9-]{0,15}$`)
+
+const maxWeeklyNominal = 10_000_000
+
+// WorkspaceMark — бейдж на одной операции. Операция принадлежит ровно одному делу: повторная пометка из другого дела переносит её.
+type WorkspaceMark struct {
+	TxID        string `json:"tx_id"`
+	WorkspaceID string `json:"workspace_id"`
+	Badge       string `json:"badge"`
+}
+
+// WorkspaceWeek — запись «за неделю (с понедельника week) Glovo записал столько номинального дохода».
+type WorkspaceWeek struct {
+	Week    string  `json:"week"`    // понедельник недели, YYYY-MM-DD
+	Nominal float64 `json:"nominal"` // сумма до налога и вычетов
+}
+
+// SetWorkspaceAccounts заменяет список счетов дела целиком (повторы и пустые id отбрасываются).
+func (s *Storage) SetWorkspaceAccounts(wsID string, ids []string) error {
+	if wsID == "" {
+		return fmt.Errorf("%w: workspace id is required", ErrWorkspace)
+	}
+	defer s.bump()
+	s.coreMu.Lock()
+	defer s.coreMu.Unlock()
+	tx, err := s.coreDB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM workspace_accounts WHERE workspace_id = ?`, wsID); err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		if _, err := tx.Exec(`INSERT INTO workspace_accounts(workspace_id, account_id) VALUES(?,?)`, wsID, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// GetWorkspaceAccounts — id счетов дела (по порядку id; пусто — []).
+func (s *Storage) GetWorkspaceAccounts(wsID string) ([]string, error) {
+	rows, err := s.coreDB.Query(`SELECT account_id FROM workspace_accounts WHERE workspace_id = ? ORDER BY account_id`, wsID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// SetWorkspaceMark ставит бейдж на операцию; пустой бейдж снимает пометку. Операция одна на всё приложение: из другого дела она переезжает.
+func (s *Storage) SetWorkspaceMark(wsID, txID, badge string) error {
+	if wsID == "" || txID == "" {
+		return fmt.Errorf("%w: workspace id and tx id are required", ErrWorkspace)
+	}
+	if badge != "" && !workspaceBadge.MatchString(badge) {
+		return fmt.Errorf("%w: badge must be a lowercase latin key up to 16 chars", ErrWorkspace)
+	}
+	defer s.bump()
+	s.coreMu.Lock()
+	defer s.coreMu.Unlock()
+	if badge == "" {
+		_, err := s.coreDB.Exec(`DELETE FROM workspace_marks WHERE tx_id = ? AND workspace_id = ?`, txID, wsID)
+		return err
+	}
+	_, err := s.coreDB.Exec(`INSERT INTO workspace_marks(tx_id, workspace_id, badge) VALUES(?,?,?)
+		ON CONFLICT(tx_id) DO UPDATE SET workspace_id = excluded.workspace_id, badge = excluded.badge`, txID, wsID, badge)
+	return err
+}
+
+// GetWorkspaceMarks — все пометки дела.
+func (s *Storage) GetWorkspaceMarks(wsID string) ([]WorkspaceMark, error) {
+	rows, err := s.coreDB.Query(`SELECT tx_id, workspace_id, badge FROM workspace_marks WHERE workspace_id = ? ORDER BY tx_id`, wsID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []WorkspaceMark{}
+	for rows.Next() {
+		var m WorkspaceMark
+		if err := rows.Scan(&m.TxID, &m.WorkspaceID, &m.Badge); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// SetWorkspaceWeek записывает номинальный доход за неделю (повтор той же недели заменяет значение).
+func (s *Storage) SetWorkspaceWeek(wsID string, w WorkspaceWeek) error {
+	if wsID == "" {
+		return fmt.Errorf("%w: workspace id is required", ErrWorkspace)
+	}
+	d, err := time.Parse("2006-01-02", w.Week)
+	if err != nil || d.Weekday() != time.Monday {
+		return fmt.Errorf("%w: week must be a Monday as YYYY-MM-DD", ErrWorkspace)
+	}
+	if math.IsNaN(w.Nominal) || math.IsInf(w.Nominal, 0) || w.Nominal < 0 || w.Nominal > maxWeeklyNominal {
+		return fmt.Errorf("%w: nominal must be between 0 and %d", ErrWorkspace, maxWeeklyNominal)
+	}
+	defer s.bump()
+	s.coreMu.Lock()
+	defer s.coreMu.Unlock()
+	_, err = s.coreDB.Exec(`INSERT INTO workspace_weeks(workspace_id, week, nominal) VALUES(?,?,?)
+		ON CONFLICT(workspace_id, week) DO UPDATE SET nominal = excluded.nominal`, wsID, w.Week, w.Nominal)
+	return err
+}
+
+// DeleteWorkspaceWeek удаляет запись недели (нет такой — не ошибка).
+func (s *Storage) DeleteWorkspaceWeek(wsID, week string) error {
+	defer s.bump()
+	s.coreMu.Lock()
+	defer s.coreMu.Unlock()
+	_, err := s.coreDB.Exec(`DELETE FROM workspace_weeks WHERE workspace_id = ? AND week = ?`, wsID, week)
+	return err
+}
+
+// GetWorkspaceWeeks — записи недель по возрастанию даты.
+func (s *Storage) GetWorkspaceWeeks(wsID string) ([]WorkspaceWeek, error) {
+	rows, err := s.coreDB.Query(`SELECT week, nominal FROM workspace_weeks WHERE workspace_id = ? ORDER BY week`, wsID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []WorkspaceWeek{}
+	for rows.Next() {
+		var w WorkspaceWeek
+		if err := rows.Scan(&w.Week, &w.Nominal); err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Week < out[j].Week })
+	return out, rows.Err()
+}
