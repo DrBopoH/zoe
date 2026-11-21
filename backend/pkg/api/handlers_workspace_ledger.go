@@ -6,7 +6,7 @@ import (
 	"economic/pkg/db"
 )
 
-// Учёт дела: /api/workspaces/accounts, /marks, /weeks. Во всех GET и DELETE дело задаётся ?id=, в PUT — полем workspace_id.
+// Учёт дела: /api/workspaces/accounts, /marks, /weeks, /params. Во всех GET и DELETE дело задаётся ?id=, в PUT — полем workspace_id.
 
 // GET ?id= → ["acc", …]; PUT {workspace_id, accounts: […]} заменяет список целиком.
 func (s *Server) HandleWorkspaceAccounts(w http.ResponseWriter, r *http.Request) {
@@ -88,6 +88,44 @@ func (s *Server) HandleWorkspaceWeeks(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.storage.DeleteWorkspaceWeek(q.Get("id"), q.Get("week")); err != nil {
+			failErr(w, err)
+			return
+		}
+		writeOK(w)
+	default:
+		fail(w, http.StatusMethodNotAllowed, "Method not allowed")
+	}
+}
+
+// GET ?id= → [{key, value}]; PUT {workspace_id, key, value}; DELETE ?id=&key=.
+func (s *Server) HandleWorkspaceParams(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		list, err := s.storage.GetWorkspaceParams(r.URL.Query().Get("id"))
+		if err != nil {
+			failErr(w, err)
+			return
+		}
+		writeJSON(w, list)
+	case http.MethodPut:
+		var in struct {
+			WorkspaceID string `json:"workspace_id"`
+			db.WorkspaceParam
+		}
+		if !readJSON(w, r, &in) {
+			return
+		}
+		if workspaceFail(w, s.storage.SetWorkspaceParam(in.WorkspaceID, in.WorkspaceParam)) {
+			return
+		}
+		writeOK(w)
+	case http.MethodDelete:
+		q := r.URL.Query()
+		if q.Get("id") == "" || q.Get("key") == "" {
+			fail(w, http.StatusBadRequest, "Missing id or key")
+			return
+		}
+		if err := s.storage.DeleteWorkspaceParam(q.Get("id"), q.Get("key")); err != nil {
 			failErr(w, err)
 			return
 		}
