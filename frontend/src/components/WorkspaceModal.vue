@@ -4,6 +4,7 @@ import UiModal from './ui/UiModal.vue'
 import UiButton from './ui/UiButton.vue'
 import UiIconButton from './ui/UiIconButton.vue'
 import WorkspaceCard from './WorkspaceCard.vue'
+import { WORKSPACE_PAGES } from '../utils/workspacePages.js'
 import { PALETTE, NAME_MAX, cleanName, nameOk, validColor, imageOk } from '../utils/workspaceCover.js'
 
 // Окно создания и правки дела: название, цвет обложки (палитра или свой) и необязательная ссылка на картинку. Сверху живой предпросмотр той же карточки, что будет в «Делах».
@@ -17,6 +18,7 @@ const emit = defineEmits(['close', 'submit'])
 const name = ref('')
 const color = ref(PALETTE[0])
 const image = ref('')
+const page = ref('')
 const nameInput = ref(null)
 
 watch(() => props.isOpen, (v) => {
@@ -24,6 +26,7 @@ watch(() => props.isOpen, (v) => {
   name.value = props.workspace?.name || ''
   color.value = validColor(props.workspace?.color) || PALETTE[0]
   image.value = props.workspace?.image || ''
+  page.value = props.workspace?.page || ''
   nextTick(() => nameInput.value?.focus())
 })
 
@@ -36,7 +39,7 @@ const onColor = (e) => { color.value = validColor(e.target.value) || color.value
 
 const submit = () => {
   if (!can.value) return
-  emit('submit', { name: cleanName(name.value), color: color.value, image: image.value })
+  emit('submit', { name: cleanName(name.value), color: color.value, image: image.value, page: page.value })
 }
 </script>
 
@@ -84,6 +87,14 @@ const submit = () => {
       <input v-model="imageText" type="text" class="ui-input" placeholder="Ссылка на картинку (https://…)" @keydown.enter.prevent="submit" />
       <p v-if="linkBad" class="text-[10px] text-rose-400">Нужна ссылка вида https://… без пробелов и скобок</p>
     </div>
+
+    <label class="block space-y-1">
+      <span class="ui-label">Страница</span>
+      <select v-model="page" class="ui-input">
+        <option value="">Пока без страницы</option>
+        <option v-for="p in WORKSPACE_PAGES" :key="p.key" :value="p.key">{{ p.label }}</option>
+      </select>
+    </label>
 
     <div class="flex justify-end gap-2 pt-1">
       <UiButton variant="cancel" @click="emit('close')">Отмена</UiButton>

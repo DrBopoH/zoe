@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import WorkspaceCard from '../../src/components/WorkspaceCard.vue'
 import WorkspaceModal from '../../src/components/WorkspaceModal.vue'
 import CasesView from '../../src/views/CasesView.vue'
+import WorkspaceView from '../../src/views/WorkspaceView.vue'
 
 describe('WorkspaceCard', () => {
   it('название и обложка своего цвета', () => {
@@ -74,7 +75,60 @@ describe('WorkspaceModal: правка', () => {
     expect(document.body.textContent).toContain('Правка дела')
     const btn = [...document.body.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Сохранить')
     btn.click()
-    expect(w.emitted('submit')[0][0]).toEqual({ name: 'Glovo', color: '#0ea5e9', image: 'https://e.com/a.png' })
+    expect(w.emitted('submit')[0][0]).toEqual({ name: 'Glovo', color: '#0ea5e9', image: 'https://e.com/a.png', page: '' })
+    w.unmount()
+  })
+})
+
+describe('WorkspaceCard: открытие', () => {
+  const ws = { id: 'a', name: 'Glovo', color: '#10b981', image: '' }
+
+  it('клик по карточке открывает дело, клик по иконкам — нет', async () => {
+    const w = mount(WorkspaceCard, { props: { workspace: ws, editable: true } })
+    await w.get('button[title="Редактировать дело"]').trigger('click')
+    expect(w.emitted('open')).toBeUndefined()
+    await w.get('article').trigger('click')
+    expect(w.emitted('open')[0][0]).toEqual(ws)
+  })
+
+  it('в предпросмотре (без editable) карточка не открывается', async () => {
+    const w = mount(WorkspaceCard, { props: { workspace: ws } })
+    await w.get('article').trigger('click')
+    expect(w.emitted('open')).toBeUndefined()
+  })
+})
+
+describe('WorkspaceView', () => {
+  it('шапка из данных дела; без страницы — заглушка; «Дела» отдаёт back', async () => {
+    const w = mount(WorkspaceView, { props: { workspace: { id: 'a', name: 'Семейный бюджет', color: '#6366f1', image: '', page: '' } } })
+    expect(w.get('[data-testid="ws-head"]').text()).toContain('Семейный бюджет')
+    expect(w.text()).toContain('нет страницы')
+    await w.get('button[aria-label="Ко всем делам"]').trigger('click')
+    expect(w.emitted('back')).toHaveLength(1)
+  })
+
+  it('страница из реестра по ключу дела', async () => {
+    const w = mount(WorkspaceView, { props: { workspace: { id: 'g', name: 'Glovo', color: '', image: '', page: 'glovo' } } })
+    await vi.waitFor(() => expect(w.text()).toContain('Страница Glovo'))
+  })
+})
+
+describe('WorkspaceModal: страница', () => {
+  it('выбранный ключ страницы уходит в submit', async () => {
+    const w = mount(WorkspaceModal, { props: { isOpen: false }, attachTo: document.body })
+    await w.setProps({ isOpen: true })
+    await w.vm.$nextTick()
+    const input = document.body.querySelector('input[type="text"]')
+    input.value = 'Glovo'
+    input.dispatchEvent(new Event('input'))
+    await w.vm.$nextTick()
+    const sel = document.body.querySelector('select')
+    expect([...sel.options].map((o) => o.value)).toEqual(['', 'glovo'])
+    sel.value = 'glovo'
+    sel.dispatchEvent(new Event('change'))
+    await w.vm.$nextTick()
+    ;[...document.body.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Создать').click()
+    expect(w.emitted('submit')[0][0]).toMatchObject({ name: 'Glovo', page: 'glovo' })
     w.unmount()
   })
 })

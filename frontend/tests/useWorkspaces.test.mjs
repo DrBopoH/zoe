@@ -14,7 +14,7 @@ test('update: PUT с id и правка в списке', async () => {
   const { ws, calls } = mk([{ id: 'a', name: 'Старое', color: '', image: '' }, { id: 'b', name: 'Другое', color: '', image: '' }])
   await ws.load()
   await ws.update('a', { name: 'Новое', color: '#10b981' })
-  assert.deepEqual(calls[0], ['PUT', '/workspaces', { id: 'a', name: 'Новое', color: '#10b981', image: '' }])
+  assert.deepEqual(calls[0], ['PUT', '/workspaces', { id: 'a', name: 'Новое', color: '#10b981', image: '', page: '' }])
   assert.equal(ws.list.value[0].name, 'Новое')
   assert.equal(ws.list.value[1].name, 'Другое')
 })
@@ -33,4 +33,14 @@ test('remove: ошибка сервера оставляет дело в спи�
   await ws.load()
   await assert.rejects(() => ws.remove('a'), /boom/)
   assert.equal(ws.list.value.length, 1)
+})
+
+test('create и update передают ключ страницы', async () => {
+  const { ws, calls } = mk([{ id: 'a', name: 'x', color: '', image: '', page: '' }])
+  await ws.load()
+  await ws.create({ name: 'Glovo', page: 'glovo' })
+  assert.deepEqual(calls[0], ['POST', '/workspaces', { name: 'Glovo', color: '', image: '', page: 'glovo' }])
+  await ws.update('a', { name: 'x', page: 'glovo' })
+  assert.deepEqual(calls[1], ['PUT', '/workspaces', { id: 'a', name: 'x', color: '', image: '', page: 'glovo' }])
+  assert.equal(ws.list.value[0].page, 'glovo')
 })

@@ -1,7 +1,8 @@
 <script setup>
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import WorkspaceCard from '../components/WorkspaceCard.vue'
 import WorkspaceModal from '../components/WorkspaceModal.vue'
+import WorkspaceView from './WorkspaceView.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiLoadError from '../components/ui/UiLoadError.vue'
@@ -9,13 +10,15 @@ import { useWorkspaces } from '../composables/useWorkspaces.js'
 import { pushRequestError } from '../composables/useToasts.js'
 
 // Раздел «Дела»: рабочие пространства — сферы жизни и проектов (Glovo, семейный бюджет, айти-проект) карточками-полотнами.
-// Справа внизу кнопка «+» открывает окно создания; на карточке по наведению — карандаш (правка) и урна (удаление в два клика). Пока полотно — только обложка и название; содержимое дел строится следующими шагами.
+// Справа внизу кнопка «+» открывает окно создания; на карточке по наведению — карандаш (правка) и урна (удаление в два клика). Клик по карточке открывает страницу дела (шапка из данных карточки, страница по ключу из реестра workspacePages).
 const props = defineProps({
   dataVersion: { type: Number, default: null } // версия данных бэкенда: растёт при любой записи — список перечитывается
 })
 
 const { list, error, load, create, update, remove } = useWorkspaces()
 const open = ref(false)
+const openId = ref(null) // id открытого дела; null — список карточек
+const current = computed(() => list.value.find((w) => w.id === openId.value) || null) // удалённое дело само возвращает к списку
 const editing = ref(null) // дело в окне правки; null — окно создаёт новое
 const busy = ref(false)
 
@@ -42,6 +45,7 @@ const onSubmit = async (payload) => {
 const onRemove = async (w) => {
   try {
     await remove(w.id)
+    if (openId.value === w.id) openId.value = null
   } catch (e) {
     pushRequestError('Не удалось удалить дело', e)
   }
@@ -52,13 +56,15 @@ const onRemove = async (w) => {
   <div class="flex flex-col min-h-[calc(100vh-9rem)]">
     <UiLoadError v-if="error" :message="error" class="mb-3" @retry="load" />
 
-    <div v-if="list.length" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-      <WorkspaceCard v-for="w in list" :key="w.id" :workspace="w" editable @edit="openEdit" @remove="onRemove" />
+    <WorkspaceView v-if="current" :workspace="current" @back="openId = null" />
+
+    <div v-else-if="list.length" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      <WorkspaceCard v-for="w in list" :key="w.id" :workspace="w" editable @open="(x) => (openId = x.id)" @edit="openEdit" @remove="onRemove" />
     </div>
     <UiEmpty v-else-if="!error">Пока нет дел. Нажми «+», чтобы создать первое</UiEmpty>
 
     <!-- кнопка прилипает к низу экрана и держится у правого края страницы -->
-    <div class="sticky bottom-6 mt-auto pt-6 flex justify-end pointer-events-none">
+    <div v-if="!current" class="sticky bottom-6 mt-auto pt-6 flex justify-end pointer-events-none">
       <button type="button" class="ws-fab pointer-events-auto" title="Новое дело" aria-label="Новое дело" @click="openCreate">
         <UiIcon name="plus" size="xl" />
       </button>

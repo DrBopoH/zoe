@@ -23,16 +23,16 @@ export function useWorkspaces(get = apiGetJson, send = apiJson, sendRaw = apiSen
   }
 
   // Создаёт дело и добавляет в конец списка; ошибку пробрасывает наружу — окно создания остаётся открытым и показывает тост
-  const create = async ({ name, color = '', image = '' }) => {
-    const ws = await send('POST', '/workspaces', { name, color, image })
+  const create = async ({ name, color = '', image = '', page = '' }) => {
+    const ws = await send('POST', '/workspaces', { name, color, image, page })
     list.value = [...list.value, ws]
     return ws
   }
 
-  // Правит дело (имя, цвет, обложка) и обновляет его в списке; ошибку пробрасывает наружу
-  const update = async (id, { name, color = '', image = '' }) => {
-    await send('PUT', '/workspaces', { id, name, color, image })
-    list.value = list.value.map((w) => (w.id === id ? { ...w, name, color, image } : w))
+  // Правит дело (имя, цвет, обложка, страница) и обновляет его в списке; ошибку пробрасывает наружу
+  const update = async (id, { name, color = '', image = '', page = '' }) => {
+    await send('PUT', '/workspaces', { id, name, color, image, page })
+    list.value = list.value.map((w) => (w.id === id ? { ...w, name, color, image, page } : w))
   }
 
   // Удаляет дело; из списка убирается после ответа сервера
