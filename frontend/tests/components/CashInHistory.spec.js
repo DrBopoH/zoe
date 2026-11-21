@@ -96,4 +96,11 @@ describe('наличные записи в истории', () => {
     expect(norm(w.get('[data-testid="badge-totals"]').text())).toContain('-3 400,00') // Убыток: −2500 с карты −900 наличными
     w.unmount()
   })
+
+  it('операции с бейджем подсвечены, без бейджа — нет', async () => {
+    const w = await mountLedger()
+    expect(parentRow(w, 'Rose Scarlet').classes()).toContain('row-marked') // t1 помечен «Убыток»
+    expect(parentRow(w, 'Glovo Ukraine').classes()).not.toContain('row-marked')
+    w.unmount()
+  })
 })

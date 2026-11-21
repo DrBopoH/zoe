@@ -238,7 +238,7 @@ const editingCash = (t, e) => cashForm.value && cashForm.value.txId === t.id && 
           <template v-for="t in shown" :key="t.id">
             <tr
               class="border-b border-slate-800/60 hover:bg-slate-800/40 cursor-pointer transition-colors"
-              :class="[openId === t.id && 'bg-slate-800/30', inGroup(t) && 'cash-group']"
+              :class="[openId === t.id && 'bg-slate-800/30', inGroup(t) && 'cash-group', badgeDef(t) && 'row-marked']"
               @click="toggleRow(t.id)"
             >
               <td class="p-3 whitespace-nowrap text-slate-400">
@@ -364,8 +364,8 @@ const editingCash = (t, e) => cashForm.value && cashForm.value.txId === t.id && 
 </template>
 
 <style scoped>
-.cash-group > td:first-child { box-shadow: inset 2px 0 0 rgb(56 189 248 / 0.45); }
-.cash-group > td { background-color: rgb(56 189 248 / 0.04); }
+.cash-group > td:first-child, .row-marked > td:first-child { box-shadow: inset 2px 0 0 rgb(56 189 248 / 0.45); }
+.cash-group > td, .row-marked > td { background-color: rgb(56 189 248 / 0.04); }
 /* линия-связка от операции к записям: вертикаль с коленом к бейджу */
 .cash-tree { position: relative; }
 .cash-tree::before { content: ''; position: absolute; left: 22px; top: 0; bottom: 0; width: 1px; background: rgb(100 116 139 / 0.55); }
