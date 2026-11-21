@@ -43,8 +43,8 @@ const money = (v, d = 2) => (v === null ? '—' : fixedText(v, d))
 
     <UiCard class="p-3 text-xs">
       <div v-if="ask && bid" class="flex flex-wrap items-baseline gap-x-6 gap-y-1">
-        <span class="text-slate-400">Купить USDT <b class="text-rose-400 tabular-nums">{{ money(ask.v) }} ₴</b></span>
-        <span class="text-slate-400">Продать USDT <b class="text-emerald-400 tabular-nums">{{ money(bid.v) }} ₴</b></span>
+        <span class="text-slate-400">Купить USDT <b class="text-emerald-400 tabular-nums">{{ money(ask.v) }} ₴</b></span>
+        <span class="text-slate-400">Продать USDT <b class="text-rose-400 tabular-nums">{{ money(bid.v) }} ₴</b></span>
         <span v-if="spread" class="text-slate-400" title="Разница цен покупки и продажи от середины: столько теряется на круге «купил и сразу продал»">Спред <b class="text-amber-300 tabular-nums">{{ plainPct(spread.v) }}</b></span>
         <span v-if="prem" class="text-slate-400" title="Насколько покупка USDT дороже официального курса доллара НБУ">К курсу НБУ <b class="tabular-nums" :class="prem.v > 3 ? 'text-rose-400' : 'text-slate-100'">{{ signedPct(prem.v) }}</b></span>
       </div>
