@@ -263,6 +263,24 @@ CREATE TABLE IF NOT EXISTS workspaces (
 	page       TEXT NOT NULL DEFAULT '',
 	created_at INTEGER NOT NULL
 );
+-- Учёт дела: счета дела, бейджи на операциях (операция принадлежит одному делу) и понедельные записи номинального дохода.
+CREATE TABLE IF NOT EXISTS workspace_accounts (
+	workspace_id TEXT NOT NULL,
+	account_id   TEXT NOT NULL,
+	PRIMARY KEY (workspace_id, account_id)
+);
+CREATE TABLE IF NOT EXISTS workspace_marks (
+	tx_id        TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL,
+	badge        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_workspace_marks_ws ON workspace_marks(workspace_id);
+CREATE TABLE IF NOT EXISTS workspace_weeks (
+	workspace_id TEXT NOT NULL,
+	week         TEXT NOT NULL,
+	nominal      REAL NOT NULL,
+	PRIMARY KEY (workspace_id, week)
+);
 -- Ручные правки счёта (лимит, IBAN, PAN) — это пользовательские данные, им не место в кеше.
 CREATE TABLE IF NOT EXISTS account_overrides (
 	account_id TEXT PRIMARY KEY,

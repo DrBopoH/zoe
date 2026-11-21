@@ -23,9 +23,18 @@ const props = defineProps({
   // лица (id, name, avatar_url): алиас контрагента в строке подменяется на привязанное Лицо
   users: { type: Array, default: () => [] },
   // все наши счета { id, label, theme }: чтобы перевод на свой счёт показывал банк этого счёта
-  own: { type: Array, default: () => [] }
+  own: { type: Array, default: () => [] },
+  // бейджи дела: markable включает выбор бейджа в раскрытой строке, marks — Map(id операции → ключ бейджа), badges — их описания { key, label, cls }
+  markable: { type: Boolean, default: false },
+  marks: { type: Object, default: () => new Map() },
+  badges: { type: Array, default: () => [] },
+  // «Снять выбор» (в деле счета выбираются в своём блоке) и подсказка пустой таблицы
+  clearable: { type: Boolean, default: true },
+  emptyHint: { type: String, default: 'Выберите карту (клик по плитке, можно несколько) или свечу на графике' }
 })
-const emit = defineEmits(['clear', 'clear-range'])
+const emit = defineEmits(['clear', 'clear-range', 'mark'])
+
+const badgeDef = (t) => props.badges.find((b) => b.key === props.marks.get(t.id)) || null
 
 const openId = ref(null)
 
@@ -172,7 +181,7 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
         <span class="text-slate-500">Приход <span class="text-emerald-400 font-bold">{{ formatMoney(totals.income) }}</span></span>
         <span class="text-slate-500">Расход <span class="text-rose-400 font-bold">{{ formatMoney(Math.abs(totals.expense)) }}</span></span>
         <span class="text-slate-500">Итого <span class="font-bold" :class="tone(totals.net)">{{ formatMoney(totals.net) }}</span></span>
-        <UiButton v-if="!allScope" variant="outline" size="sm" @click="emit('clear')">Снять выбор</UiButton>
+        <UiButton v-if="!allScope && clearable" variant="outline" size="sm" @click="emit('clear')">Снять выбор</UiButton>
       </div>
     </div>
 
@@ -204,6 +213,7 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
               </td>
               <td class="p-3 max-w-[360px]">
                 <div class="font-bold text-slate-200 truncate">
+                  <span v-if="badgeDef(t)" class="mr-1.5 text-[9px] px-1.5 py-0.5 rounded border font-bold" :class="badgeDef(t).cls" data-testid="row-badge">{{ badgeDef(t).label }}</span>
                   <template v-for="(g, i) in tagsFor(t)" :key="i"><span v-if="g.sep" class="mr-1.5 text-[10px] text-slate-500 font-normal">{{ g.label }}</span><span v-else class="mr-1.5 text-[9px] px-1.5 py-0.5 rounded border font-normal" :class="g.cls">{{ g.label }}</span></template>
                   <template v-if="who(t)">
                     <span class="inline-flex w-5 h-5 mr-1.5 align-middle rounded-full bg-slate-800 border border-slate-700 overflow-hidden items-center justify-center text-[9px] font-bold text-slate-400">
@@ -229,6 +239,18 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
 
             <tr v-if="openId === t.id" class="border-b border-slate-800/60 bg-slate-950/50">
               <td :colspan="selected.length > 1 ? 5 : 4" class="p-3">
+                <div v-if="markable" class="flex flex-wrap items-center gap-1.5 pb-2 select-none">
+                  <span class="text-[10px] uppercase tracking-wider text-slate-500 mr-1">Бейдж</span>
+                  <button
+                    v-for="b in badges"
+                    :key="b.key"
+                    type="button"
+                    class="text-[10px] px-2 py-0.5 rounded border font-bold cursor-pointer transition-opacity"
+                    :class="[b.cls, marks.get(t.id) === b.key ? 'ring-1 ring-white/60' : 'opacity-60 hover:opacity-100']"
+                    :title="marks.get(t.id) === b.key ? 'Снять бейдж' : 'Поставить бейдж'"
+                    @click.stop="emit('mark', t.id, b.key)"
+                  >{{ b.label }}</button>
+                </div>
                 <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[11px] select-text">
                   <template v-for="[k, v] in details(t)" :key="k">
                     <dt class="text-slate-500 uppercase text-[10px] tracking-wider">{{ k }}</dt>
@@ -241,7 +263,7 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
 
           <tr v-if="!selected.length">
             <td colspan="5" class="p-8 text-center text-slate-600 text-xs uppercase">
-              Выберите карту (клик по плитке, можно несколько) или свечу на графике
+              {{ emptyHint }}
             </td>
           </tr>
           <tr v-else-if="rows.length === 0">

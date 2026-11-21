@@ -108,8 +108,10 @@ describe('WorkspaceView', () => {
   })
 
   it('страница из реестра по ключу дела', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } })))
     const w = mount(WorkspaceView, { props: { workspace: { id: 'g', name: 'Glovo', color: '', image: '', page: 'glovo' } } })
-    await vi.waitFor(() => expect(w.text()).toContain('Страница Glovo'))
+    await vi.waitFor(() => expect(w.text()).toContain('Учёт'))
+    expect(w.text()).toContain('Смета')
   })
 })
 

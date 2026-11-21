@@ -208,7 +208,7 @@ onUnmounted(() => {
       </div>
 
       <KeepAlive><HomeView v-if="activeTab === 'home'" :accounts="accounts" :transactions="transactions" /></KeepAlive>
-      <KeepAlive><CasesView v-if="activeTab === 'cases'" :data-version="dataVersion" /></KeepAlive>
+      <KeepAlive><CasesView v-if="activeTab === 'cases'" :accounts="accounts" :transactions="transactions" :users="users" :data-version="dataVersion" /></KeepAlive>
       <KeepAlive><SmetaView v-if="activeTab === 'dashboard'" :accounts="accounts" :transactions="transactions" /></KeepAlive>
       <KeepAlive><MarketView v-if="activeTab === 'market'" :accounts="accounts" :data-version="dataVersion" :running="!!market?.running" /></KeepAlive>
       <KeepAlive><DataView v-if="activeTab === 'data'" :accounts="accounts" :transactions="transactions" :users="users" :data-version="dataVersion" :persons-count="personsCount" @refresh="fetchData" /></KeepAlive>
