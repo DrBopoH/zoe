@@ -44,6 +44,12 @@ describe('WorkspaceEstimate', () => {
     expect(row('net')).toContain('3 597,66') // 6000 − 200 − налоги 2202,34
   })
 
+  it('каскад: столбец на каждый шаг и итог «В кармане»', async () => {
+    const w = await mountIt()
+    const cols = w.findAll('[data-testid="waterfall"] [data-col]').map((c) => c.attributes('data-col'))
+    expect(cols).toEqual(['taxable', 'tips', 'expense', 'loss', 'ep', 'vz', 'esv', 'net'])
+  })
+
   it('график недель: по колонке на неделю от первой помеченной операции', async () => {
     const w = await mountIt()
     expect(w.findAll('[data-testid="flow-week"]').length).toBe(2)
