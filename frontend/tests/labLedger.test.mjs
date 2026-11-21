@@ -87,3 +87,37 @@ test('stockModel: группы по веществу без учёта реги�
   assert.equal(u.groups[0].left, 2500 + 1000)
   assert.deepEqual(stockModel([]), { groups: [], cards: 0, valueTotal: 0, valueLeft: 0 })
 })
+
+import { batchCode, cleanBatch, batchUsage, batchCost } from '../src/utils/labLedger.js'
+test('batchCode: ГГММДД-N, счёт по партиям того же дня', () => {
+  assert.equal(batchCode('2026-11-21', []), '261121-1')
+  assert.equal(batchCode('2026-11-21', [{ code: '261121-1' }, { code: '261121-2' }, { code: '261120-1' }]), '261121-3')
+})
+test('cleanBatch: номер, дата, строки с карточкой и граммами', () => {
+  const ok = { day: '2026-11-21', code: ' 261121-1 ', pieces: '10', note: '', lines: [{ card_id: 'a', grams: '20,5' }] }
+  assert.deepEqual(cleanBatch(ok), { day: '2026-11-21', code: '261121-1', pieces: 10, note: '', lines: [{ card_id: 'a', grams: 20.5 }] })
+  assert.equal(cleanBatch({ ...ok, pieces: '' }).pieces, 0)
+  assert.equal(cleanBatch({ ...ok, code: '' }), null)
+  assert.equal(cleanBatch({ ...ok, day: '21.11.2026' }), null)
+  assert.equal(cleanBatch({ ...ok, lines: [] }), null)
+  assert.equal(cleanBatch({ ...ok, lines: [{ card_id: '', grams: 5 }] }), null)
+  assert.equal(cleanBatch({ ...ok, lines: [{ card_id: 'a', grams: 0 }] }), null)
+  assert.equal(cleanBatch({ ...ok, pieces: '2.5' }), null)
+})
+test('себестоимость партии: каждая строка по цене грамма своей карточки, расход считается по партиям', () => {
+  const cards = [
+    { id: 'a', substance: 'мальтодекстрин', net_g: 1000, price: 96, qty: 5 },
+    { id: 'b', substance: 'мальтодекстрин', net_g: 500, price: 60, qty: 2 }
+  ]
+  const b = { id: 'p1', pieces: 10, lines: [{ card_id: 'a', grams: 100 }, { card_id: 'b', grams: 50 }, { card_id: 'gone', grams: 5 }] }
+  const c = batchCost(b, cards)
+  assert.deepEqual(c.lines.map((l) => l.cost), [9.6, 6, 0]) // 100×0,096; 50×0,12
+  assert.equal(c.lines[2].missing, true)
+  assert.equal(c.cost, 15.6)
+  assert.equal(c.perPiece, 1.56)
+  assert.equal(c.gramsPerPiece, 15.5)
+  assert.equal(batchCost({ pieces: 0, lines: [{ card_id: 'a', grams: 1 }] }, cards).perPiece, null)
+  const u = batchUsage([b, { id: 'p2', lines: [{ card_id: 'a', grams: 50 }] }])
+  assert.equal(u.get('a'), 150)
+  assert.equal(batchUsage([b], 'p1').size, 0) // править партию: её строки не считаются
+})
