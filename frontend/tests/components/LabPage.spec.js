@@ -14,8 +14,10 @@ const TX = [
 let docs
 let calls
 let failEntries
+let noMarks
 beforeEach(() => {
   failEntries = false
+  noMarks = false
   docs = [{ id: 'wd_1', kind: 'card', day: '2026-11-10', data: { tx_id: 't1', substance: 'мальтодекстрин', maker: 'Nutri', net_g: 1000, price: 96, qty: 5, note: '' } }]
   calls = []
   vi.useFakeTimers({ toFake: ['Date'] })
@@ -33,7 +35,7 @@ beforeEach(() => {
     if (/\/workspaces(\?|$)/.test(u)) return json([{ id: 'lab', name: 'ХимЛаб', color: '' }, { id: 'glovo', name: 'Glovo', color: '#00aa00' }])
     if (u.includes('/workspaces/entries') && init.method === 'POST') return failEntries ? new Response('{"error":"boom"}', { status: 500, headers: { 'Content-Type': 'application/json' } }) : json({ id: 'we_1', ...body })
     if (u.includes('/workspaces/accounts')) return json(['acc1'])
-    if (u.includes('/workspaces/marks')) return json([{ tx_id: 't1', workspace_id: 'lab', badge: 'expense' }, { tx_id: 't2', workspace_id: 'lab', badge: 'sale' }])
+    if (u.includes('/workspaces/marks')) return json(noMarks ? [] : [{ tx_id: 't1', workspace_id: 'lab', badge: 'expense' }, { tx_id: 't2', workspace_id: 'lab', badge: 'sale' }])
     return json([])
   }))
 })
@@ -70,11 +72,43 @@ describe('LabPage', () => {
     w.unmount()
   })
 
-  it('остальные части пока с подсказкой', async () => {
+  it('Смета: деньги, склад, партии с продажами и сжиганием, сверка', async () => {
+    docs.push(
+      { id: 'wd_b', kind: 'batch', day: '2026-11-15', data: { code: '261115-1', pieces: 10, note: '', lines: [{ card_id: 'wd_1', grams: 200 }] } }, // 19,20 ₴
+      { id: 'wd_s', kind: 'move', day: '2026-11-16', data: { type: 'sale', batch_id: 'wd_b', pieces: 4, price: 15, note: '' } },
+      { id: 'wd_k', kind: 'move', day: '2026-11-17', data: { type: 'burn', batch_id: 'wd_b', pieces: 2, target_ws: 'glovo', target_name: 'Glovo', note: '' } },
+      { id: 'wd_w', kind: 'writeoff', day: '2026-11-18', data: { card_id: 'wd_1', grams: 100 } } // 9,60 ₴
+    )
     const w = await mountLab()
     await w.findAll('[role="tab"]')[3].trigger('click')
-    expect(w.text()).toContain('Смета лаба появится')
-    expect(w.text()).not.toContain('Счета дела')
+    await flushPromises()
+    expect(w.text()).toContain('Деньги лаба')
+    const step = (k) => norm(w.get(`[data-step="${k}"]`).text())
+    expect(step('cash')).toContain('-220,00') // продажа 500 − расход 720
+    expect(step('sale')).toContain('500,00')
+    expect(step('expense')).toContain('-720,00')
+    expect(step('raw')).toContain('451,20') // 480 − 19,20 − 9,60
+    expect(step('finished')).toContain('7,68') // 4 шт по 1,92
+    expect(step('comp')).toContain('3,84')
+    expect(step('equity')).toContain('242,72') // −220 + 3,84 + 451,20 + 7,68
+    expect(step('split-written')).toContain('9,60')
+    expect(w.find('[data-testid="stock-gap"]').exists()).toBe(false)
+    const row = norm(w.get('[data-batch="261115-1"]').text())
+    expect(row).toContain('4 шт · 60,00')
+    expect(row).toContain('52,32') // наценка
+    expect(row).toContain('2 шт · 3,84')
+    expect(row).toContain('4 шт · 7,68')
+    expect(step('diff')).toContain('440,00') // продано на 60, пришло 500 по бейджу
+    w.unmount()
+  })
+
+  it('Смета пустого лаба подсказывает, с чего начать', async () => {
+    docs.length = 0
+    noMarks = true
+    const w = await mountLab()
+    await w.findAll('[role="tab"]')[3].trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain('Смета заполнится сама')
     w.unmount()
   })
 
@@ -319,6 +353,69 @@ describe('LabPage', () => {
     const del = calls.filter((c) => c[0] === 'DELETE').map((c) => c[1])
     expect(del.findIndex((u) => u.includes('doc=wd_m'))).toBeGreaterThanOrEqual(0)
     expect(del.findIndex((u) => u.includes('doc=wd_m'))).toBeLessThan(del.findIndex((u) => u.includes('doc=wd_b')))
+    w.unmount()
+  })
+
+  const dust = () => docs.push({ id: 'wd_b', kind: 'batch', day: '2026-11-15', data: { code: '261115-1', pieces: 0, note: '', lines: [{ card_id: 'wd_1', grams: 4900 }] } }) // осталось 100 г по 0,096 = 9,60 ₴
+  const openStock = async (w) => {
+    await w.findAll('[role="tab"]')[1].trigger('click')
+    await flushPromises()
+  }
+
+  it('Списать остаток: пыль карточки уходит в убыток лаба, на складе остаток обнуляется', async () => {
+    dust()
+    const w = await mountLab()
+    await openStock(w)
+    await w.get('[data-testid="writeoff-start"]').trigger('click')
+    expect(norm(w.get('[data-testid="writeoff-confirm"]').text())).toContain('Списать 100 г (9,60 ₴) в убыток?')
+    await w.get('[data-testid="writeoff-yes"]').trigger('click')
+    await flushPromises()
+    const doc = calls.find((c) => c[0] === 'POST' && c[1].includes('/workspaces/docs') && c[2].kind === 'writeoff')
+    expect(doc[2].data).toEqual({ card_id: 'wd_1', grams: 100 })
+    const entry = calls.find((c) => c[0] === 'POST' && c[1].includes('/workspaces/entries'))
+    expect(entry[2]).toEqual({ workspace_id: 'lab', day: '2026-11-21', badge: 'loss', amount: 9.6, note: 'Списание остатка · мальтодекстрин · Nutri', tx_id: '', src: 'wd_9' })
+    const card = norm(w.get('[data-testid="stock-card"]').text())
+    expect(card).toContain('0 г из 5000 г')
+    expect(card).toContain('100 г в убыток')
+    expect(w.find('[data-testid="writeoff-start"]').exists()).toBe(false) // списывать больше нечего
+    w.unmount()
+  })
+
+  it('Списание откатывается, если убыток не записался; отмена списания возвращает остаток', async () => {
+    dust()
+    const w = await mountLab()
+    await openStock(w)
+    failEntries = true
+    await w.get('[data-testid="writeoff-start"]').trigger('click')
+    await w.get('[data-testid="writeoff-yes"]').trigger('click')
+    await flushPromises()
+    expect(calls.some((c) => c[0] === 'DELETE' && c[1].includes('doc=wd_9'))).toBe(true)
+    expect(w.find('[data-testid="writeoff-row"]').exists()).toBe(false)
+    expect(norm(w.get('[data-testid="stock-card"]').text())).toContain('100 г из 5000 г')
+    failEntries = false
+    expect(w.find('[data-testid="writeoff-confirm"]').exists()).toBe(true) // вопрос остаётся, можно повторить
+    await w.get('[data-testid="writeoff-yes"]').trigger('click')
+    await flushPromises()
+    const id = w.get('[data-testid="writeoff-row"]').exists() && docs.length // запись есть
+    expect(id).toBeTruthy()
+    await w.get('[data-testid="writeoff-remove"]').trigger('click')
+    await w.get('[data-testid="writeoff-remove"]').trigger('click')
+    await flushPromises()
+    expect(w.find('[data-testid="writeoff-row"]').exists()).toBe(false)
+    expect(norm(w.get('[data-testid="stock-card"]').text())).toContain('100 г из 5000 г')
+    w.unmount()
+  })
+
+  it('Списанное не берётся в партию: остаток карточки в форме партии нулевой', async () => {
+    docs.push({ id: 'wd_b', kind: 'batch', day: '2026-11-15', data: { code: '261115-1', pieces: 0, note: '', lines: [{ card_id: 'wd_1', grams: 4900 }] } })
+    docs.push({ id: 'wd_w', kind: 'writeoff', day: '2026-11-20', data: { card_id: 'wd_1', grams: 100 } })
+    const w = await mountLab()
+    await w.findAll('[role="tab"]')[2].trigger('click')
+    await flushPromises()
+    await w.get('[data-testid="batch-new"]').trigger('click')
+    const opt = [...document.querySelectorAll('[data-testid="batch-form"] [data-field="card"] option')].find((o) => o.value === 'wd_1')
+    expect(opt.disabled).toBe(true)
+    expect(opt.textContent).toContain('ост. 0 г')
     w.unmount()
   })
 })

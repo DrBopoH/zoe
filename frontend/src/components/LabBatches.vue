@@ -19,7 +19,8 @@ const props = defineProps({
   moves: { type: Array, default: () => [] },
   workspaces: { type: Array, default: () => [] },
   saveMove: { type: Function, default: null }, // (движение) → true/false
-  removeMove: { type: Function, default: null }
+  removeMove: { type: Function, default: null },
+  written: { type: Object, default: () => new Map() }
 })
 
 const form = ref(null) // 'new' | id партии
@@ -62,12 +63,12 @@ const cardName = (l) => (l.card ? `${l.card.substance} · ${l.card.maker || 'б�
       <UiButton v-if="form !== 'new'" variant="primary" size="sm" data-testid="batch-new" @click="form = 'new'">+ Партия</UiButton>
     </div>
 
-    <LabBatchForm v-if="form === 'new'" :cards="cards" :batches="batches" :busy="busy" @save="onSave" @cancel="form = null" />
+    <LabBatchForm v-if="form === 'new'" :cards="cards" :batches="batches" :written="written" :busy="busy" @save="onSave" @cancel="form = null" />
 
     <UiEmpty v-if="!list.length && form !== 'new'">Партий пока нет. Партия списывает граммы с конкретных карточек склада и считает себестоимость.</UiEmpty>
 
     <div v-for="{ b, c, p, mv } in list" :key="b.id" class="rounded border border-slate-800 bg-slate-900/60" data-testid="batch">
-      <LabBatchForm v-if="form === b.id" :batch="b" :cards="cards" :batches="batches" :busy="busy" @save="onSave" @cancel="form = null" />
+      <LabBatchForm v-if="form === b.id" :batch="b" :cards="cards" :batches="batches" :written="written" :busy="busy" @save="onSave" @cancel="form = null" />
       <template v-else>
         <div class="group flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 cursor-pointer hover:bg-slate-800/40" @click="open = open === b.id ? '' : b.id">
           <span class="text-sm font-bold text-slate-200 tabular-nums">{{ b.code }}</span>
