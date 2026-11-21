@@ -17,6 +17,11 @@ test('спред и переплата к курсу НБУ по датам, г�
   assert.deepEqual(r.p2p_prem_bid, [{ d: '2026-11-16', v: 10.71 }])
 })
 
+test('спред со знаком: продажа дороже покупки даёт минус', () => {
+  const r = p2pDerived({ p2p_ask: [{ d: '2026-11-21', v: 47.27 }], p2p_bid: [{ d: '2026-11-21', v: 48.95 }] })
+  assert.deepEqual(r.p2p_spread, [{ d: '2026-11-21', v: -3.49 }])
+})
+
 test('нет рядов — пустые производные', () => {
   assert.deepEqual(p2pDerived({}), { p2p_spread: [], p2p_prem_ask: [], p2p_prem_bid: [] })
   assert.deepEqual(p2pDerived({ p2p_ask: [{ d: '2026-11-16', v: 47 }] }).p2p_prem_ask, [])

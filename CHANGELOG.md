@@ -8,6 +8,7 @@ Versions: `R.sB.C+T.hash`. On `dev` there is no state letter (`v1.1.C+T`), the l
 
 Polishing the user-friendly design and finishing QoL, builder and reference features.
 
+- **v1.3.20** — P2P charts and header: buying USDT is now green and selling red (was the other way round, which read counter-intuitively); the P2P spread is signed now: negative when selling is priced above buying
 - **v1.3.19** — Cases: a pencil (edit in the creation window) and a trash (delete in two presses) on a card, shown on hover
 - **v1.3.18** — Cases: the cover picture is set only by a link; picking a local file (with compression and drag-and-drop) is removed along with data-URL covers in the backend; the creation window lost its extra captions
 - **v1.3.17** — Cases: the button moved from the side menu to the header, cards are smaller (about five per row), the list caption is removed, the cover can be set by a link (http/https) as well as by a file; the backend accepts such links
