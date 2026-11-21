@@ -39,3 +39,80 @@ test('воскресенье недели и сумма номинала', () =>
   assert.equal(nominalTotal([{ nominal: 1500.1 }, { nominal: 700.2 }]), 2200.3)
   assert.equal(nominalTotal([]), 0)
 })
+
+import { timelineWeeks, timelineSummary, txDate, addDays, PAYOUT_BADGES } from '../src/utils/glovoLedger.js'
+
+// время без «Z»: разбирается в локальном поясе, дата операции не уезжает на соседний день
+const tx = (id, date, amount) => ({ id, time: `${date}T12:00:00`, amount })
+
+test('addDays и txDate: через границу месяца, локальная дата', () => {
+  assert.equal(addDays('2026-11-30', 1), '2026-12-01')
+  assert.equal(addDays('2026-01-01', -1), '2025-12-31')
+  assert.equal(txDate({ time: '2026-11-18T12:00:00' }), '2026-11-18')
+  assert.equal(txDate({ time: 'мусор' }), '')
+  assert.deepEqual(PAYOUT_BADGES, ['income', 'payout'])
+})
+
+test('таймлайн: номинал недели N сверяется с приходом недели N+1 (через 2–4 дня после отчёта)', () => {
+  const rows = timelineWeeks({
+    weeks: [{ week: '2026-11-09', nominal: 2200 }],
+    transactions: [tx('a', '2026-11-18', 1500), tx('b', '2026-11-20', 400), tx('c', '2026-11-25', 999), tx('t', '2026-11-19', 300)],
+    marks: new Map([['a', 'income'], ['b', 'payout'], ['t', 'tips'], ['c', 'income']]),
+    today: '2026-11-21'
+  })
+  assert.equal(rows.length, 12) // лента не короче 12 недель
+  assert.equal(rows.at(-1).week, '2026-11-16')
+  const w = rows.find((r) => r.week === '2026-11-09')
+  assert.equal(w.nominal, 2200)
+  assert.equal(w.received, 1900) // 1500 + 400 в неделю 16–22.11; чай и чужая неделя не считаются
+  assert.equal(w.count, 2)
+  assert.equal(w.firstDate, '2026-11-18')
+  assert.equal(w.lagDays, 3) // с воскресенья 15.11 до среды 18.11
+  assert.equal(w.delta, -300)
+  assert.equal(w.deltaPct, 13.64)
+  assert.equal(w.status, 'paid')
+})
+
+test('статусы: ждём, пока идёт неделя прихода; «нет денег», когда она прошла; без номинала — none', () => {
+  const base = { transactions: [], marks: new Map() }
+  const pending = timelineWeeks({ ...base, weeks: [{ week: '2026-11-16', nominal: 1000 }], today: '2026-11-21' })
+  assert.equal(pending.find((r) => r.week === '2026-11-16').status, 'pending')
+  const missing = timelineWeeks({ ...base, weeks: [{ week: '2026-11-02', nominal: 1000 }], today: '2026-11-21' })
+  assert.equal(missing.find((r) => r.week === '2026-11-02').status, 'missing') // неделя прихода 09–15.11 прошла
+  assert.equal(missing.find((r) => r.week === '2026-11-09').status, 'none')
+})
+
+test('таймлайн начинается с прихода, у которого нет номинала; пусто без данных; доходит до текущей недели', () => {
+  const rows = timelineWeeks({ weeks: [], transactions: [tx('a', '2026-11-04', 700)], marks: new Map([['a', 'payout']]), today: '2026-11-21', minWeeks: 1 })
+  assert.equal(rows[0].week, '2026-10-26') // неделя прихода 02–08.11 → номинал за 26.10–01.11
+  assert.equal(rows[0].received, 700)
+  assert.equal(rows[0].status, 'none')
+  assert.equal(rows[0].delta, null)
+  assert.equal(rows.at(-1).week, '2026-11-16')
+  // без данных всё равно есть куда вносить: последние 12 недель, и их можно продлить назад
+  const empty = timelineWeeks({ weeks: [], transactions: [], marks: new Map(), today: '2026-11-21' })
+  assert.equal(empty.length, 12)
+  assert.equal(empty.at(-1).week, '2026-11-16')
+  assert.equal(empty[0].week, '2026-08-31')
+  assert.ok(empty.every((r) => r.status === 'none' && r.nominal === null))
+  const older = timelineWeeks({ weeks: [], transactions: [], marks: new Map(), today: '2026-11-21', back: 8 })
+  assert.equal(older.length, 20)
+  assert.equal(older[0].week, '2026-07-06')
+})
+
+test('номинал в будущей неделе не рисуется после текущей, а старый хвост ограничен', () => {
+  const rows = timelineWeeks({ weeks: [{ week: '2030-01-07', nominal: 1 }, { week: '2010-01-04', nominal: 1 }], transactions: [], marks: new Map(), today: '2026-11-21' })
+  assert.equal(rows.at(-1).week, '2026-11-16')
+  assert.ok(rows.length <= 261)
+})
+
+test('сводка: только недели с номиналом и пришедшими деньгами', () => {
+  const rows = [
+    { status: 'paid', nominal: 2200, received: 1900 },
+    { status: 'paid', nominal: 1000, received: 800.5 },
+    { status: 'pending', nominal: 3000, received: 0 },
+    { status: 'none', nominal: null, received: 500 }
+  ]
+  assert.deepEqual(timelineSummary(rows), { weeks: 2, nominal: 3200, received: 2700.5, withheld: 499.5, withheldPct: 15.61 })
+  assert.deepEqual(timelineSummary([]), { weeks: 0, nominal: 0, received: 0, withheld: 0, withheldPct: null })
+})

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import GlovoPage from '../../src/views/workspaces/GlovoPage.vue'
 import WorkspaceLedger from '../../src/components/WorkspaceLedger.vue'
@@ -16,6 +16,8 @@ const TX = [
 let calls
 let server
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-11-21T12:00:00'))
   calls = []
   server = { accounts: ['acc1'], marks: [{ tx_id: 't2', workspace_id: 'ws1', badge: 'expense' }], weeks: [{ week: '2026-11-16', nominal: 2200 }] }
   vi.stubGlobal('fetch', vi.fn(async (url, init = {}) => {
@@ -27,6 +29,8 @@ beforeEach(() => {
     return json([])
   }))
 })
+
+afterEach(() => { vi.useRealTimers() })
 
 const mountLedger = async () => {
   const w = mount(WorkspaceLedger, { props: { workspaceId: 'ws1', accounts: ACCOUNTS, transactions: TX, users: [] }, attachTo: document.body })
@@ -78,23 +82,18 @@ describe('WorkspaceLedger', () => {
     w.unmount()
   })
 
-  it('неделя: дата любого дня ложится на понедельник, сумма уходит на бэкенд, список обновляется', async () => {
+  it('таймлайн: номинал вносится в карточке недели и уходит на бэкенд', async () => {
     const w = await mountLedger()
-    expect(w.get('[data-testid="weeks"]').text()).toContain('16.11 — 22.11')
-    await w.get('input[type="date"]').setValue('2026-11-26') // четверг
-    await w.get('input[aria-label="Номинальный доход"]').setValue('1500,5')
-    await w.findAll('button').find((b) => b.text() === 'Записать').trigger('click')
+    const card = w.get('[data-week="2026-11-16"]')
+    expect(card.text().replace(/\s/g, ' ')).toContain('2 200,00')
+    await w.get('[data-week="2026-11-09"] .tl-add').trigger('click')
+    const input = w.get('[data-week="2026-11-09"] input')
+    await input.setValue('1500,5')
+    await input.trigger('keydown.enter')
     await flushPromises()
     const put = calls.find(([m, u]) => m === 'PUT' && u.includes('/workspaces/weeks'))
-    expect(put[2]).toEqual({ workspace_id: 'ws1', week: '2026-11-23', nominal: 1500.5 })
-    expect(w.get('[data-testid="weeks"]').text()).toContain('23.11 — 29.11')
-    w.unmount()
-  })
-
-  it('«Записать» недоступна без суммы', async () => {
-    const w = await mountLedger()
-    const btn = w.findAll('button').find((b) => b.text() === 'Записать')
-    expect(btn.attributes('disabled')).toBeDefined()
+    expect(put[2]).toEqual({ workspace_id: 'ws1', week: '2026-11-09', nominal: 1500.5 })
+    expect(w.get('[data-week="2026-11-09"]').text().replace(/\s/g, ' ')).toContain('1 500,50')
     w.unmount()
   })
 })

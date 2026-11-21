@@ -2,11 +2,10 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import AccountPanel from './AccountPanel.vue'
 import AccountHistoryTable from './AccountHistoryTable.vue'
-import UiButton from './ui/UiButton.vue'
-import UiIconButton from './ui/UiIconButton.vue'
+import WeekTimeline from './WeekTimeline.vue'
 import UiLoadError from './ui/UiLoadError.vue'
 import { prepareAccount } from '../utils/accountView.js'
-import { BADGES, badgeTotals, weekMonday, weekSunday, nominalTotal } from '../utils/glovoLedger.js'
+import { BADGES, badgeTotals, weekMonday, timelineWeeks } from '../utils/glovoLedger.js'
 import { useWorkspaceLedger } from '../composables/useWorkspaceLedger.js'
 import { pushRequestError } from '../composables/useToasts.js'
 import { formatMoney, toLocalDateStr } from '../utils/formatters.js'
@@ -29,6 +28,7 @@ const guard = (title, fn) => async (...args) => {
 }
 const onToggleAccount = guard('Не удалось изменить счета дела', toggleAccount)
 const onMark = guard('Не удалось поставить бейдж', setMark)
+const onSaveWeek = guard('Не удалось записать неделю', setWeek)
 const onRemoveWeek = guard('Не удалось удалить неделю', removeWeek)
 
 const cards = computed(() => props.accounts.map(prepareAccount))
@@ -40,19 +40,11 @@ const linkedRows = computed(() => cards.value.filter(isLinked).map(toRow))
 
 const totals = computed(() => badgeTotals(props.transactions, marks.value))
 
-// Недельные записи: дата любого дня недели → её понедельник
-const weekDate = ref(toLocalDateStr(new Date()))
-const weekNominal = ref('')
-const monday = computed(() => weekMonday(weekDate.value))
-const nominalNum = computed(() => Number(String(weekNominal.value).replace(',', '.')))
-const canAddWeek = computed(() => !!monday.value && weekNominal.value !== '' && Number.isFinite(nominalNum.value) && nominalNum.value >= 0)
-const addWeek = guard('Не удалось записать неделю', async () => {
-  if (!canAddWeek.value) return
-  await setWeek(monday.value, nominalNum.value)
-  weekNominal.value = ''
-})
-const fmtDay = (iso) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`
-const weekLabel = (w) => `${fmtDay(w)} — ${fmtDay(weekSunday(w))}`
+// Таймлайн номинального дохода: номинал недели сверяется с приходом следующей недели
+const today = computed(() => toLocalDateStr(new Date()))
+const currentWeek = computed(() => weekMonday(today.value))
+const back = ref(0) // на сколько недель продлена лента назад («Раньше»)
+const timeline = computed(() => timelineWeeks({ weeks: weeks.value, transactions: props.transactions, marks: marks.value, today: today.value, back: back.value }))
 const tone = (v) => (v > 0 ? 'text-emerald-400' : v < 0 ? 'text-rose-400' : 'text-slate-400')
 </script>
 
@@ -92,26 +84,9 @@ const tone = (v) => (v > 0 ? 'text-emerald-400' : v < 0 ? 'text-rose-400' : 'tex
     </section>
 
     <section class="space-y-3">
-      <div class="flex items-baseline gap-3">
-        <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Номинальный доход по неделям</div>
-        <div v-if="weeks.length" class="text-[11px] text-slate-500">всего <span class="text-slate-200 font-bold">{{ formatMoney(nominalTotal(weeks)) }}</span></div>
-      </div>
-      <p class="text-[11px] text-slate-500">Сколько Glovo записал за неделю до налога и вычетов. Выбери любой день недели и сумму, запись ляжет на её понедельник; та же неделя перезаписывается.</p>
-      <div class="flex flex-wrap items-center gap-2">
-        <input v-model="weekDate" type="date" class="ui-input !w-auto" aria-label="День недели" />
-        <span v-if="monday" class="text-[11px] text-slate-500">неделя {{ weekLabel(monday) }}</span>
-        <input v-model="weekNominal" type="text" inputmode="decimal" class="ui-input !w-32" placeholder="Сумма, ₴" aria-label="Номинальный доход" @keydown.enter.prevent="addWeek" />
-        <UiButton variant="primary" size="sm" :disabled="!canAddWeek" @click="addWeek">Записать</UiButton>
-      </div>
-      <div v-if="weeks.length" class="bg-slate-900/60 border border-slate-800 rounded divide-y divide-slate-800/60" data-testid="weeks">
-        <div v-for="w in [...weeks].reverse()" :key="w.week" class="flex items-center justify-between gap-3 px-3 py-1.5 text-xs">
-          <span class="text-slate-400">{{ weekLabel(w.week) }}</span>
-          <span class="flex items-center gap-2">
-            <span class="font-bold text-slate-200 tabular-nums">{{ formatMoney(w.nominal) }}</span>
-            <UiIconButton icon="trash" tone="danger" size="sm" title="Удалить запись недели" @click="onRemoveWeek(w.week)" />
-          </span>
-        </div>
-      </div>
+      <div class="text-xs font-bold text-slate-400 uppercase tracking-wider">Номинальный доход по неделям</div>
+      <p class="text-[11px] text-slate-500">Номинал — то, что Glovo записал за неделю до налога и вычетов. Деньги приходят на карту через 2–4 дня после отчёта, то есть на следующей неделе (бейджи «Доход» и «Выплата»); разница показывается как удержанное.</p>
+      <WeekTimeline :rows="timeline" :current-week="currentWeek" @save="onSaveWeek" @remove="onRemoveWeek" @older="back += 8" />
     </section>
 
     <AccountHistoryTable
