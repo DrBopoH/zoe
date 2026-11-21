@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import UiButton from './ui/UiButton.vue'
-import { cleanBatch, batchCost, batchCode, cardPerGram, cardGrams, batchUsage } from '../utils/labLedger.js'
+import { cleanBatch, batchCost, batchCode, cardPerGram, cardGrams, batchUsage, mergeUsage } from '../utils/labLedger.js'
 import { formatMoney, toLocalDateStr } from '../utils/formatters.js'
 import { numText } from '../utils/numfmt.js'
 
@@ -10,7 +10,9 @@ const props = defineProps({
   batch: { type: Object, default: null },
   cards: { type: Array, default: () => [] },
   batches: { type: Array, default: () => [] },
-  busy: { type: Boolean, default: false }
+  busy: { type: Boolean, default: false },
+  // граммы карточек, уже списанные в убыток: Map(id карточки → граммы); в партию списанное не берётся
+  written: { type: Object, default: () => new Map() }
 })
 const emit = defineEmits(['save', 'cancel'])
 
@@ -28,7 +30,7 @@ watch(() => [f.value.day, props.batches.length], () => {
   if (!codeTouched.value) f.value.code = batchCode(f.value.day, props.batches)
 }, { immediate: true })
 
-const used = computed(() => batchUsage(props.batches, props.batch?.id || ''))
+const used = computed(() => mergeUsage(batchUsage(props.batches, props.batch?.id || ''), props.written))
 const options = computed(() => [...props.cards]
   .sort((a, b) => a.substance.localeCompare(b.substance, 'ru') || (a.day < b.day ? -1 : 1))
   .map((c) => ({ card: c, left: Math.max(0, cardGrams(c) - (used.value.get(c.id) || 0)) })))

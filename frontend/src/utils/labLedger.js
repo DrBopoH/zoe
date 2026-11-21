@@ -1,5 +1,7 @@
 // Бейджи страницы «ХимЛаб»: расход (весы, посуда, химматериал — к химматериалу потом цепляются карточки товаров), убыток (ошибки, потери),
 // продажа (приход от покупателей). Ключи уходят на бэкенд как есть. Итоги и наличные записи общие со страницей Glovo (utils/glovoLedger.js).
+import { withCash, badgeTotals } from './glovoLedger.js'
+
 export const LAB_BADGES = [
   { key: 'expense', label: 'Расход', side: 'out', cls: 'bg-orange-500/15 text-orange-300 border-orange-500/30' },
   { key: 'loss', label: 'Убыток', side: 'out', cls: 'bg-rose-500/15 text-rose-300 border-rose-500/30' },
@@ -158,4 +160,75 @@ export function moveAmounts(move, batch, cards) {
   if (move.type === 'burn') return { cost, revenue: 0, margin: 0 }
   const revenue = r2(move.price * move.pieces)
   return { cost, revenue, margin: r2(revenue - cost) }
+}
+
+// Списание остатка: когда карточка физически кончилась, а в расчёте осталась «пыль» (5–7 %), остаток списывается в убыток лаба.
+// Документ вида writeoff: { card_id, grams } на дату списания; убыток — граммы по цене грамма этой карточки.
+export const WRITEOFF_KIND = 'writeoff'
+
+export const writeoffAmount = (w, card) => (card ? r2(w.grams * cardPerGram(card)) : 0)
+
+// сложить расход граммов по карточкам из нескольких источников (партии, списания)
+export function mergeUsage(...maps) {
+  const m = new Map()
+  for (const x of maps) for (const [id, g] of x) m.set(id, r3((m.get(id) || 0) + g))
+  return m
+}
+
+export const writeoffUsage = (writeoffs) => {
+  const m = new Map()
+  for (const w of writeoffs) m.set(w.card_id, r3((m.get(w.card_id) || 0) + w.grams))
+  return m
+}
+
+// Смета ХимЛаба: сведение денег и склада.
+// Деньги — то, что реально прошло через счета и наличные: приход «Продажа» минус «Расход» и «Убыток». Записи с источником (списание остатка
+// в убыток — не деньги, сырьё уже оплачено закупкой) в деньги не входят, они видны в разборе склада.
+// Склад: закуплено = осталось + ушло в партии + списано. Партии: себестоимость штуки, продано, сожжено (компенсация по себестоимости без наценки),
+// осталось штук. Итог с запасами оценивает всё по себестоимости: деньги + компенсации + сырьё на складе + готовая продукция в наличии.
+export function labEstimate({ transactions = [], marks = new Map(), entries = [], cards = [], batches = [], moves = [], writeoffs = [] }) {
+  const manual = entries.filter((e) => !e.src)
+  const merged = withCash(transactions, marks, manual, LAB_BADGES)
+  const t = badgeTotals(merged.transactions, merged.marks, LAB_BADGES)
+  const cash = r2(t.sale.sum + t.expense.sum + t.loss.sum)
+
+  const used = mergeUsage(batchUsage(batches), writeoffUsage(writeoffs))
+  const stock = stockModel(cards, used)
+  const byCard = new Map(cards.map((c) => [c.id, c]))
+  const writtenOff = r2(writeoffs.reduce((s, w) => s + writeoffAmount(w, byCard.get(w.card_id)), 0))
+
+  const rows = [...batches].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : a.code < b.code ? -1 : 1)).map((b) => {
+    const c = batchCost(b, cards)
+    const unit = b.pieces ? c.cost / b.pieces : 0
+    const mine = moves.filter((m) => m.batch_id === b.id)
+    const sales = mine.filter((m) => m.type === 'sale')
+    const burns = mine.filter((m) => m.type === 'burn')
+    const soldPieces = sales.reduce((s, m) => s + m.pieces, 0)
+    const burnedPieces = burns.reduce((s, m) => s + m.pieces, 0)
+    const revenue = r2(sales.reduce((s, m) => s + m.pieces * m.price, 0))
+    const left = b.pieces ? Math.max(0, b.pieces - soldPieces - burnedPieces) : 0
+    return {
+      id: b.id, code: b.code, day: b.day, pieces: b.pieces || 0, cost: c.cost, unit: b.pieces ? r2(unit) : null,
+      soldPieces, revenue, soldCost: r2(unit * soldPieces), margin: r2(revenue - unit * soldPieces),
+      burnedPieces, compensation: r2(unit * burnedPieces), left, leftValue: r2(unit * left)
+    }
+  })
+  const sum = (k) => r2(rows.reduce((s, r) => s + r[k], 0))
+  const stockLeft = stock.valueLeft
+  const inBatches = r2(rows.reduce((s, r) => s + r.cost, 0))
+  const finished = sum('leftValue')
+  const compensation = sum('compensation')
+  return {
+    bank: t,
+    cash,
+    stock: { purchased: stock.valueTotal, left: stockLeft, inBatches, writtenOff, gap: r2(stock.valueTotal - stockLeft - inBatches - writtenOff), cards: stock.cards, substances: stock.groups.length },
+    batches: rows,
+    production: { count: rows.length, pieces: rows.reduce((s, r) => s + r.pieces, 0), cost: inBatches },
+    sales: { pieces: rows.reduce((s, r) => s + r.soldPieces, 0), revenue: sum('revenue'), cost: sum('soldCost'), margin: sum('margin') },
+    burns: { pieces: rows.reduce((s, r) => s + r.burnedPieces, 0), compensation },
+    finished,
+    // сверка: продано по движениям и пришло по бейджу «Продажа» (разница — ещё не пришло или пришло сверх)
+    recon: { sold: sum('revenue'), received: t.sale.sum, diff: r2(t.sale.sum - sum('revenue')) },
+    equity: r2(cash + compensation + stockLeft + finished)
+  }
 }

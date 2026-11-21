@@ -156,3 +156,49 @@ test('штуки партии и деньги движений: сжигание
   assert.deepEqual(moveAmounts(moves[0], batch, cards), { cost: 7.68, revenue: 60, margin: 52.32 })
   assert.deepEqual(moveAmounts(moves[1], batch, cards), { cost: 3.84, revenue: 0, margin: 0 })
 })
+
+import { writeoffAmount, mergeUsage, writeoffUsage } from '../src/utils/labLedger.js'
+test('списание остатка: убыток по цене грамма карточки, расход складывается из партий и списаний', () => {
+  const card = { id: 'a', substance: 'x', net_g: 1000, price: 96, qty: 5 }
+  assert.equal(writeoffAmount({ card_id: 'a', grams: 100 }, card), 9.6)
+  assert.equal(writeoffAmount({ card_id: 'gone', grams: 100 }, undefined), 0)
+  const u = mergeUsage(new Map([['a', 4900.1]]), writeoffUsage([{ card_id: 'a', grams: 99.9 }, { card_id: 'b', grams: 1 }]))
+  assert.equal(u.get('a'), 5000)
+  assert.equal(u.get('b'), 1)
+  assert.equal(stockModel([card], u).groups[0].left, 0)
+})
+
+import { labEstimate } from '../src/utils/labLedger.js'
+test('Смета лаба: деньги отдельно от склада, закуплено = осталось + в партиях + списано', () => {
+  const cards = [{ id: 'a', day: '2026-11-10', substance: 'x', net_g: 1000, price: 96, qty: 5 }] // 480 ₴, 0,096 ₴/г
+  const batches = [{ id: 'p', day: '2026-11-15', code: '261115-1', pieces: 10, lines: [{ card_id: 'a', grams: 200 }] }] // 19,2 ₴, 1,92 за штуку
+  const moves = [
+    { id: 'm1', batch_id: 'p', type: 'sale', pieces: 4, price: 15 },
+    { id: 'm2', batch_id: 'p', type: 'burn', pieces: 2 },
+    { id: 'm3', batch_id: 'gone', type: 'sale', pieces: 9, price: 1 }
+  ]
+  const writeoffs = [{ id: 'w', card_id: 'a', grams: 100 }] // 9,6 ₴
+  const tx = [
+    { id: 't1', time: '2026-11-10T10:00:00', amount: -500 },
+    { id: 't2', time: '2026-11-11T10:00:00', amount: -40 },
+    { id: 't3', time: '2026-11-16T10:00:00', amount: 50 }
+  ]
+  const marks = new Map([['t1', 'expense'], ['t2', 'loss'], ['t3', 'sale']])
+  const entries = [{ id: 'e1', day: '2026-11-12', badge: 'expense', amount: 10 }, { id: 'e2', day: '2026-11-20', badge: 'loss', amount: 9.6, src: 'w' }]
+  const m = labEstimate({ transactions: tx, marks, entries, cards, batches, moves, writeoffs })
+  assert.equal(m.bank.expense.sum, -510) // 500 + наличные 10
+  assert.equal(m.bank.loss.sum, -40) // убыток от списания — не деньги
+  assert.equal(m.cash, -500) // 50 − 510 − 40
+  assert.deepEqual(m.stock, { purchased: 480, left: 451.2, inBatches: 19.2, writtenOff: 9.6, gap: 0, cards: 1, substances: 1 })
+  const b = m.batches[0]
+  assert.deepEqual([b.unit, b.soldPieces, b.revenue, b.soldCost, b.margin, b.burnedPieces, b.compensation, b.left, b.leftValue], [1.92, 4, 60, 7.68, 52.32, 2, 3.84, 4, 7.68])
+  assert.deepEqual(m.sales, { pieces: 4, revenue: 60, cost: 7.68, margin: 52.32 })
+  assert.deepEqual(m.burns, { pieces: 2, compensation: 3.84 })
+  assert.equal(m.finished, 7.68)
+  assert.deepEqual(m.recon, { sold: 60, received: 50, diff: -10 })
+  assert.equal(m.equity, r2eq(-500 + 3.84 + 451.2 + 7.68))
+  const empty = labEstimate({})
+  assert.equal(empty.cash, 0)
+  assert.equal(empty.batches.length, 0)
+})
+const r2eq = (v) => Math.round(v * 100) / 100
