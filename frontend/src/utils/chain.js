@@ -2,7 +2,7 @@ import { valueAt, lastPoint } from './macro.js'
 
 // Крипто-контур «банк → P2P USDT → торговля → вывод»: производные ряды P2P и стоимость переводов. Чистые функции, без интерфейса.
 
-// Спред покупки и продажи USDT (% от середины) и переплата к официальному курсу НБУ: по датам, где есть и покупка, и продажа.
+// Спред покупки и продажи USDT со знаком (% от середины): покупка дороже продажи — плюс (обычный рынок), продажа дороже покупки — минус (перевёрнутый) и переплата к официальному курсу НБУ: по датам, где есть и покупка, и продажа.
 // ask — сколько гривен стоит купить USDT, bid — сколько дают за USDT при продаже.
 export function p2pDerived(series) {
   const ask = series?.p2p_ask || []
@@ -15,7 +15,7 @@ export function p2pDerived(series) {
   for (const a of ask) {
     const b = bidAt.get(a.d)
     const r = valueAt(nbu, a.d)
-    if (b > 0) spread.push({ d: a.d, v: round((Math.abs(a.v - b) / ((a.v + b) / 2)) * 100) })
+    if (b > 0) spread.push({ d: a.d, v: round(((a.v - b) / ((a.v + b) / 2)) * 100) })
     if (r > 0) premAsk.push({ d: a.d, v: round((a.v / r - 1) * 100) })
     if (r > 0 && b > 0) premBid.push({ d: a.d, v: round((b / r - 1) * 100) })
   }
