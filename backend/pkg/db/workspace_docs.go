@@ -76,13 +76,24 @@ func (s *Storage) UpdateWorkspaceDoc(wsID string, d WorkspaceDoc) (bool, error) 
 	return n > 0, nil
 }
 
-// DeleteWorkspaceDoc удаляет документ своего дела (нет такого — не ошибка).
+// DeleteWorkspaceDoc удаляет документ своего дела (нет такого — не ошибка) вместе с записями других дел, которые он породил.
 func (s *Storage) DeleteWorkspaceDoc(wsID, id string) error {
 	defer s.bump()
 	s.coreMu.Lock()
 	defer s.coreMu.Unlock()
-	_, err := s.coreDB.Exec(`DELETE FROM workspace_docs WHERE id = ? AND workspace_id = ?`, id, wsID)
-	return err
+	tx, err := s.coreDB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// записи других дел, возникшие из этого документа (сжигание партии), уходят вместе с ним
+	if _, err := tx.Exec(`DELETE FROM workspace_entries WHERE src = ? AND ? IN (SELECT workspace_id FROM workspace_docs WHERE id = ?)`, id, wsID, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM workspace_docs WHERE id = ? AND workspace_id = ?`, id, wsID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // GetWorkspaceDocs — документы дела (kind пустой — все виды) по дате, внутри даты по порядку добавления.

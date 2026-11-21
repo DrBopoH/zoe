@@ -239,16 +239,24 @@ type WorkspaceEntry struct {
 	Amount float64 `json:"amount"`
 	Note   string  `json:"note"`
 	TxID   string  `json:"tx_id"`
+	// Src — id документа другого дела, из которого запись возникла (сжигание партии ХимЛаба); пусто — ручная запись.
+	// Запись с источником правке и удалению напрямую не поддаётся, она уходит вместе с документом.
+	Src string `json:"src"`
 }
 
 const (
 	maxEntryNote = 200
 	maxEntryTxID = 128
+	maxEntrySrc  = 64
 )
 
 func (e WorkspaceEntry) clean() (WorkspaceEntry, error) {
 	e.Note = strings.TrimSpace(e.Note)
 	e.TxID = strings.TrimSpace(e.TxID)
+	e.Src = strings.TrimSpace(e.Src)
+	if len(e.Src) > maxEntrySrc {
+		return e, fmt.Errorf("%w: src is longer than %d characters", ErrWorkspace, maxEntrySrc)
+	}
 	if len(e.TxID) > maxEntryTxID {
 		return e, fmt.Errorf("%w: tx id is longer than %d characters", ErrWorkspace, maxEntryTxID)
 	}
@@ -281,11 +289,11 @@ func (s *Storage) CreateWorkspaceEntry(wsID string, e WorkspaceEntry) (Workspace
 	defer s.bump()
 	s.coreMu.Lock()
 	defer s.coreMu.Unlock()
-	_, err = s.coreDB.Exec(`INSERT INTO workspace_entries(id, workspace_id, day, badge, amount, note, tx_id) VALUES(?,?,?,?,?,?,?)`, e.ID, wsID, e.Day, e.Badge, e.Amount, e.Note, e.TxID)
+	_, err = s.coreDB.Exec(`INSERT INTO workspace_entries(id, workspace_id, day, badge, amount, note, tx_id, src) VALUES(?,?,?,?,?,?,?,?)`, e.ID, wsID, e.Day, e.Badge, e.Amount, e.Note, e.TxID, e.Src)
 	return e, err
 }
 
-// UpdateWorkspaceEntry правит запись своего дела; false — такой записи нет.
+// UpdateWorkspaceEntry правит ручную запись своего дела; false — такой записи нет (запись с источником тоже не правится).
 func (s *Storage) UpdateWorkspaceEntry(wsID string, e WorkspaceEntry) (bool, error) {
 	e, err := e.clean()
 	if err != nil {
@@ -294,7 +302,7 @@ func (s *Storage) UpdateWorkspaceEntry(wsID string, e WorkspaceEntry) (bool, err
 	defer s.bump()
 	s.coreMu.Lock()
 	defer s.coreMu.Unlock()
-	res, err := s.coreDB.Exec(`UPDATE workspace_entries SET day=?, badge=?, amount=?, note=?, tx_id=? WHERE id=? AND workspace_id=?`, e.Day, e.Badge, e.Amount, e.Note, e.TxID, e.ID, wsID)
+	res, err := s.coreDB.Exec(`UPDATE workspace_entries SET day=?, badge=?, amount=?, note=?, tx_id=? WHERE id=? AND workspace_id=? AND src=''`, e.Day, e.Badge, e.Amount, e.Note, e.TxID, e.ID, wsID)
 	if err != nil {
 		return false, err
 	}
@@ -302,18 +310,18 @@ func (s *Storage) UpdateWorkspaceEntry(wsID string, e WorkspaceEntry) (bool, err
 	return n > 0, nil
 }
 
-// DeleteWorkspaceEntry удаляет запись своего дела (нет такой — не ошибка).
+// DeleteWorkspaceEntry удаляет ручную запись своего дела (нет такой — не ошибка; запись с источником удаляется вместе с документом).
 func (s *Storage) DeleteWorkspaceEntry(wsID, id string) error {
 	defer s.bump()
 	s.coreMu.Lock()
 	defer s.coreMu.Unlock()
-	_, err := s.coreDB.Exec(`DELETE FROM workspace_entries WHERE id = ? AND workspace_id = ?`, id, wsID)
+	_, err := s.coreDB.Exec(`DELETE FROM workspace_entries WHERE id = ? AND workspace_id = ? AND src = ''`, id, wsID)
 	return err
 }
 
 // GetWorkspaceEntries — записи дела по дате (внутри даты по порядку добавления).
 func (s *Storage) GetWorkspaceEntries(wsID string) ([]WorkspaceEntry, error) {
-	rows, err := s.coreDB.Query(`SELECT id, day, badge, amount, note, tx_id FROM workspace_entries WHERE workspace_id = ? ORDER BY day, id`, wsID)
+	rows, err := s.coreDB.Query(`SELECT id, day, badge, amount, note, tx_id, src FROM workspace_entries WHERE workspace_id = ? ORDER BY day, id`, wsID)
 	if err != nil {
 		return nil, err
 	}
@@ -321,7 +329,7 @@ func (s *Storage) GetWorkspaceEntries(wsID string) ([]WorkspaceEntry, error) {
 	out := []WorkspaceEntry{}
 	for rows.Next() {
 		var e WorkspaceEntry
-		if err := rows.Scan(&e.ID, &e.Day, &e.Badge, &e.Amount, &e.Note, &e.TxID); err != nil {
+		if err := rows.Scan(&e.ID, &e.Day, &e.Badge, &e.Amount, &e.Note, &e.TxID, &e.Src); err != nil {
 			return nil, err
 		}
 		out = append(out, e)

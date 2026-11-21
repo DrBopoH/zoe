@@ -88,3 +88,64 @@ func TestWorkspaceDocs(t *testing.T) {
 		t.Fatalf("чужие документы целы: %+v", l)
 	}
 }
+
+func TestWorkspaceEntrySourceFromDoc(t *testing.T) {
+	s, _, _ := newS(t)
+	defer s.Close()
+	lab, _ := s.CreateWorkspace(Workspace{Name: "ХимЛаб"})
+	glovo, _ := s.CreateWorkspace(Workspace{Name: "Glovo"})
+
+	burn, err := s.CreateWorkspaceDoc(lab.ID, WorkspaceDoc{Kind: "move", Day: "2026-11-21", Data: json.RawMessage(`{"type":"burn","pieces":2}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := s.CreateWorkspaceEntry(glovo.ID, WorkspaceEntry{Day: "2026-11-21", Badge: "expense", Amount: 24, Note: "ХимЛаб, партия 261121-1", Src: burn.ID})
+	if err != nil || e.Src != burn.ID {
+		t.Fatalf("запись с источником: %+v %v", e, err)
+	}
+	manual, _ := s.CreateWorkspaceEntry(glovo.ID, WorkspaceEntry{Day: "2026-11-21", Badge: "expense", Amount: 5})
+
+	// запись с источником только для чтения: ни правка, ни прямое удаление
+	e.Amount = 1
+	if ok, err := s.UpdateWorkspaceEntry(glovo.ID, e); err != nil || ok {
+		t.Fatalf("правка записи с источником: %v %v", ok, err)
+	}
+	if err := s.DeleteWorkspaceEntry(glovo.ID, e.ID); err != nil {
+		t.Fatal(err)
+	}
+	if es, _ := s.GetWorkspaceEntries(glovo.ID); len(es) != 2 || es[0].Src != burn.ID && es[1].Src != burn.ID {
+		t.Fatalf("запись с источником цела: %+v", es)
+	}
+	if ok, err := s.UpdateWorkspaceEntry(glovo.ID, WorkspaceEntry{ID: manual.ID, Day: "2026-11-21", Badge: "expense", Amount: 6}); err != nil || !ok {
+		t.Fatalf("ручная запись правится: %v %v", ok, err)
+	}
+	if _, err := s.CreateWorkspaceEntry(glovo.ID, WorkspaceEntry{Day: "2026-11-21", Badge: "expense", Amount: 1, Src: strings.Repeat("x", 65)}); !errors.Is(err, ErrWorkspace) {
+		t.Fatalf("длинный источник: %v", err)
+	}
+
+	// удаление документа уносит порождённую запись другого дела, ручную не трогает
+	if err := s.DeleteWorkspaceDoc(glovo.ID, burn.ID); err != nil { // чужое дело — ничего не удаляет
+		t.Fatal(err)
+	}
+	if es, _ := s.GetWorkspaceEntries(glovo.ID); len(es) != 2 {
+		t.Fatalf("чужое удаление не трогает: %+v", es)
+	}
+	if err := s.DeleteWorkspaceDoc(lab.ID, burn.ID); err != nil {
+		t.Fatal(err)
+	}
+	if es, _ := s.GetWorkspaceEntries(glovo.ID); len(es) != 1 || es[0].ID != manual.ID {
+		t.Fatalf("осталась только ручная: %+v", es)
+	}
+
+	// удаление дела-источника тоже уносит записи в соседних делах
+	b2, _ := s.CreateWorkspaceDoc(lab.ID, WorkspaceDoc{Kind: "move", Data: json.RawMessage(`{"type":"burn"}`)})
+	if _, err := s.CreateWorkspaceEntry(glovo.ID, WorkspaceEntry{Day: "2026-11-22", Badge: "expense", Amount: 9, Src: b2.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteWorkspace(lab.ID); err != nil {
+		t.Fatal(err)
+	}
+	if es, _ := s.GetWorkspaceEntries(glovo.ID); len(es) != 1 || es[0].ID != manual.ID {
+		t.Fatalf("записи удалённого дела-источника ушли: %+v", es)
+	}
+}
