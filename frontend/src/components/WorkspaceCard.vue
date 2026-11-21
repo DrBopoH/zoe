@@ -8,7 +8,7 @@ const props = defineProps({
   workspace: { type: Object, required: true }, // { name, color, image }
   editable: { type: Boolean, default: false } // показывать карандаш и урну (в предпросмотре окна создания их нет)
 })
-const emit = defineEmits(['edit', 'remove'])
+const emit = defineEmits(['open', 'edit', 'remove'])
 const cover = computed(() => coverStyle(props.workspace))
 
 // Удаление в два клика: первый «взводит» урну на 4 секунды, второй удаляет
@@ -23,7 +23,15 @@ onBeforeUnmount(() => clearTimeout(timer))
 </script>
 
 <template>
-  <article class="ws-card" :title="workspace.name">
+  <article
+    class="ws-card"
+    :class="editable && 'ws-card--open'"
+    :title="workspace.name"
+    :tabindex="editable ? 0 : undefined"
+    :role="editable ? 'link' : undefined"
+    @click="editable && emit('open', workspace)"
+    @keydown.enter.self="editable && emit('open', workspace)"
+  >
     <div class="ws-cover" :style="cover" data-testid="ws-cover"></div>
     <div class="ws-shade"></div>
     <div v-if="editable" class="ws-tools" :class="armed && 'ws-tools--armed'" @click.stop>
@@ -45,6 +53,7 @@ onBeforeUnmount(() => clearTimeout(timer))
   box-shadow: 0 6px 18px rgb(0 0 0 / 0.35);
   transition: border-color 0.2s, transform 0.2s;
 }
+.ws-card--open { cursor: pointer; }
 .ws-card:hover { border-color: rgb(16 185 129 / 0.45); transform: translateY(-2px); }
 .ws-cover { position: absolute; inset: 0; }
 /* карандаш и урна: появляются при наведении (и всегда, пока урна взведена или на карточке фокус) */

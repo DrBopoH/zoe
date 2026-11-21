@@ -12,7 +12,7 @@ func TestWorkspacesCreateListUpdateDelete(t *testing.T) {
 	if list, err := s.GetWorkspaces(); err != nil || len(list) != 0 || list == nil {
 		t.Fatalf("пустой список должен быть [], а не nil: %v %v", list, err)
 	}
-	a, err := s.CreateWorkspace(Workspace{Name: "  Glovo   курьер ", Color: "#10B981"})
+	a, err := s.CreateWorkspace(Workspace{Name: "  Glovo   курьер ", Color: "#10B981", Page: "glovo"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,12 +24,15 @@ func TestWorkspacesCreateListUpdateDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	list, _ := s.GetWorkspaces()
+	if list[0].Page != "glovo" || list[1].Page != "" {
+		t.Fatalf("ключ страницы хранится и читается: %+v", list)
+	}
 	if len(list) != 2 || list[0].ID != a.ID || list[1].ID != b.ID {
 		t.Fatalf("порядок — по созданию: %+v", list)
 	}
 
 	ver := s.ver.Load()
-	ok, err := s.UpdateWorkspace(Workspace{ID: a.ID, Name: "Glovo", Color: ""})
+	ok, err := s.UpdateWorkspace(Workspace{ID: a.ID, Name: "Glovo", Color: "", Page: ""})
 	if err != nil || !ok {
 		t.Fatalf("правка: %v %v", ok, err)
 	}
@@ -40,7 +43,7 @@ func TestWorkspacesCreateListUpdateDelete(t *testing.T) {
 		t.Fatal("правка несуществующего дела не должна проходить")
 	}
 	list, _ = s.GetWorkspaces()
-	if list[0].Name != "Glovo" || list[0].Color != "" {
+	if list[0].Name != "Glovo" || list[0].Color != "" || list[0].Page != "" {
 		t.Fatalf("после правки: %+v", list[0])
 	}
 
@@ -58,16 +61,19 @@ func TestWorkspacesCreateListUpdateDelete(t *testing.T) {
 func TestWorkspaceValidation(t *testing.T) {
 	img := "https://example.com/cover.png"
 	bad := map[string]Workspace{
-		"пустое имя":     {Name: "   "},
-		"длинное имя":    {Name: strings.Repeat("я", maxWorkspaceName+1)},
-		"цвет не hex":    {Name: "x", Color: "red"},
-		"цвет короткий":  {Name: "x", Color: "#fff"},
-		"картинка data":  {Name: "x", Image: "data:image/png;base64,iVBORw0KGgo="},
-		"картинка js":    {Name: "x", Image: "javascript:alert(1)"},
-		"картинка ftp":   {Name: "x", Image: "ftp://example.com/a.png"},
-		"url с кавычкой": {Name: "x", Image: "https://e.com/a\".png"},
-		"url со скобкой": {Name: "x", Image: "https://e.com/a).png"},
-		"url длинный":    {Name: "x", Image: "https://e.com/" + strings.Repeat("a", maxWorkspaceImageURL)},
+		"пустое имя":          {Name: "   "},
+		"длинное имя":         {Name: strings.Repeat("я", maxWorkspaceName+1)},
+		"цвет не hex":         {Name: "x", Color: "red"},
+		"цвет короткий":       {Name: "x", Color: "#fff"},
+		"картинка data":       {Name: "x", Image: "data:image/png;base64,iVBORw0KGgo="},
+		"картинка js":         {Name: "x", Image: "javascript:alert(1)"},
+		"страница заглавными": {Name: "x", Page: "Glovo"},
+		"страница с пробелом": {Name: "x", Page: "glovo page"},
+		"страница длинная":    {Name: "x", Page: strings.Repeat("a", 33)},
+		"картинка ftp":        {Name: "x", Image: "ftp://example.com/a.png"},
+		"url с кавычкой":      {Name: "x", Image: "https://e.com/a\".png"},
+		"url со скобкой":      {Name: "x", Image: "https://e.com/a).png"},
+		"url длинный":         {Name: "x", Image: "https://e.com/" + strings.Repeat("a", maxWorkspaceImageURL)},
 	}
 	for name, w := range bad {
 		if _, err := w.Clean(); !errors.Is(err, ErrWorkspace) {
@@ -79,5 +85,29 @@ func TestWorkspaceValidation(t *testing.T) {
 		if _, err := w.Clean(); err != nil {
 			t.Errorf("%+v: %v", w, err)
 		}
+	}
+}
+
+func TestWorkspacePageColumnMigration(t *testing.T) {
+	s, _, _ := newS(t)
+	defer s.Close()
+	// база, созданная до появления ключа страницы: таблица без столбца page
+	for _, q := range []string{
+		`DROP TABLE workspaces`,
+		`CREATE TABLE workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, color TEXT NOT NULL DEFAULT '', image TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL)`,
+		`INSERT INTO workspaces(id, name, created_at) VALUES('ws_old', 'Старое', 1)`,
+	} {
+		if _, err := s.coreDB.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 2; i++ { // повторный запуск ничего не ломает
+		if err := s.ensureWorkspacePageColumn(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list, err := s.GetWorkspaces()
+	if err != nil || len(list) != 1 || list[0].Name != "Старое" || list[0].Page != "" {
+		t.Fatalf("старое дело читается с пустой страницей: %+v %v", list, err)
 	}
 }
