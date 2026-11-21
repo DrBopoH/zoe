@@ -11,6 +11,7 @@ test('реестр: ключи уникальны, латиницей строч
 
 test('pageOf: известный ключ — запись, пустой и незнакомый — null', () => {
   assert.equal(pageOf('glovo')?.key, 'glovo')
+  assert.equal(pageOf('lab')?.key, 'lab')
   assert.equal(pageOf(''), null)
   assert.equal(pageOf(undefined), null)
   assert.equal(pageOf('нет-такой'), null)

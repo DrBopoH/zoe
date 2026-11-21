@@ -1,7 +1,6 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import UiButton from './ui/UiButton.vue'
-import { BADGES } from '../utils/glovoLedger.js'
 
 // Форма наличной записи прямо в истории (как форма справочника облигаций): бейдж, сумма и пометка. Дата и операция заданы родителем.
 // Сумма всегда положительная, приход это или уход решает бейдж.
@@ -9,7 +8,8 @@ const props = defineProps({
   entry: { type: Object, default: null }, // запись для правки; без неё форма добавляет новую
   txId: { type: String, required: true },
   day: { type: String, required: true }, // дата операции, к которой запись прикреплена
-  busy: { type: Boolean, default: false }
+  busy: { type: Boolean, default: false },
+  badges: { type: Array, required: true } // набор бейджей страницы
 })
 const emit = defineEmits(['save', 'cancel'])
 
@@ -17,14 +17,14 @@ const badge = ref('expense')
 const amount = ref('')
 const note = ref('')
 watch(() => props.entry, (e) => {
-  badge.value = e?.badge || 'expense'
+  badge.value = e?.badge || props.badges[0]?.key || ''
   amount.value = e ? String(e.amount) : ''
   note.value = e?.note || ''
 }, { immediate: true })
 
 const num = computed(() => Number(String(amount.value).replace(',', '.')))
 const can = computed(() => Number.isFinite(num.value) && num.value > 0 && !props.busy)
-const side = computed(() => BADGES.find((b) => b.key === badge.value)?.side)
+const side = computed(() => props.badges.find((b) => b.key === badge.value)?.side)
 
 const submit = () => {
   if (!can.value) return
@@ -36,7 +36,7 @@ const submit = () => {
   <div class="space-y-2 rounded-md border border-slate-700/60 bg-slate-900/70 p-3 select-none" data-testid="cash-form" @click.stop>
     <div class="flex flex-wrap gap-1.5" data-testid="cash-badges">
       <button
-        v-for="b in BADGES"
+        v-for="b in badges"
         :key="b.key"
         type="button"
         class="px-2 py-0.5 rounded border text-[10px] font-bold cursor-pointer transition-opacity"
