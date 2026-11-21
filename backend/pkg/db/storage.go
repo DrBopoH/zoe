@@ -287,6 +287,16 @@ CREATE TABLE IF NOT EXISTS workspace_params (
 	value        REAL NOT NULL,
 	PRIMARY KEY (workspace_id, key)
 );
+CREATE TABLE IF NOT EXISTS workspace_entries (
+	id           TEXT PRIMARY KEY,
+	workspace_id TEXT NOT NULL,
+	day          TEXT NOT NULL,
+	badge        TEXT NOT NULL,
+	amount       REAL NOT NULL,
+	note         TEXT NOT NULL DEFAULT '',
+	tx_id        TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_workspace_entries_ws ON workspace_entries(workspace_id);
 -- Ручные правки счёта (лимит, IBAN, PAN) — это пользовательские данные, им не место в кеше.
 CREATE TABLE IF NOT EXISTS account_overrides (
 	account_id TEXT PRIMARY KEY,
@@ -475,6 +485,15 @@ func (s *Storage) ensureWorkspacePageColumn() error {
 	return err
 }
 
+// ensureWorkspaceEntryTxColumn добавляет ручным записям дела привязку к операции (tx_id; пусто — запись без операции).
+func (s *Storage) ensureWorkspaceEntryTxColumn() error {
+	if hasColumn(s.coreDB, "workspace_entries", "tx_id") {
+		return nil
+	}
+	_, err := s.coreDB.Exec(`ALTER TABLE workspace_entries ADD COLUMN tx_id TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
 func (s *Storage) initCore() error {
 	s.coreMu.Lock()
 	defer s.coreMu.Unlock()
@@ -493,6 +512,9 @@ func (s *Storage) initCore() error {
 		return fmt.Errorf("drop legacy binance tables: %w", err)
 	}
 	if err := s.ensureWorkspacePageColumn(); err != nil {
+		return err
+	}
+	if err := s.ensureWorkspaceEntryTxColumn(); err != nil {
 		return err
 	}
 	if err := s.ensureAccountLifeColumns(); err != nil {

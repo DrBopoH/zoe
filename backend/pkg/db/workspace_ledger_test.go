@@ -2,6 +2,7 @@ package db
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -118,6 +119,44 @@ func TestWorkspaceLedgerAccountsMarksWeeks(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// ручные записи: проверка полей, правка и удаление только в своём деле
+	e, err := s.CreateWorkspaceEntry(a.ID, WorkspaceEntry{Day: "2026-11-10", Badge: "expense", Amount: 600.004, Note: " парафин ", TxID: " tx1 "})
+	if err != nil || e.ID == "" || e.Amount != 600 || e.Note != "парафин" || e.TxID != "tx1" {
+		t.Fatalf("запись: %+v %v", e, err)
+	}
+	for _, bad := range []WorkspaceEntry{
+		{Day: "10.11.2026", Badge: "loss", Amount: 1},
+		{Day: "2026-11-10", Badge: "Loss", Amount: 1},
+		{Day: "2026-11-10", Badge: "loss", Amount: 0},
+		{Day: "2026-11-10", Badge: "loss", Amount: -5},
+		{Day: "2026-11-10", Badge: "loss", Amount: 1, Note: strings.Repeat("я", 201)},
+		{Day: "2026-11-10", Badge: "loss", Amount: 1, TxID: strings.Repeat("x", 129)},
+	} {
+		if _, err := s.CreateWorkspaceEntry(a.ID, bad); !errors.Is(err, ErrWorkspace) {
+			t.Fatalf("должна быть ошибка для %+v: %v", bad, err)
+		}
+	}
+	e2 := e
+	e2.Badge, e2.Amount = "loss", 900
+	if ok, err := s.UpdateWorkspaceEntry(b.ID, e2); err != nil || ok {
+		t.Fatalf("чужое дело не правит запись: %v %v", ok, err)
+	}
+	if ok, err := s.UpdateWorkspaceEntry(a.ID, e2); err != nil || !ok {
+		t.Fatalf("правка записи: %v %v", ok, err)
+	}
+	if es, _ := s.GetWorkspaceEntries(a.ID); len(es) != 1 || es[0].Badge != "loss" || es[0].Amount != 900 || es[0].TxID != "tx1" {
+		t.Fatalf("записи дела: %+v", es)
+	}
+	if err := s.DeleteWorkspaceEntry(b.ID, e.ID); err != nil {
+		t.Fatal(err)
+	}
+	if es, _ := s.GetWorkspaceEntries(a.ID); len(es) != 1 {
+		t.Fatalf("чужое удаление не трогает запись: %+v", es)
+	}
+	if _, err := s.CreateWorkspaceEntry(b.ID, WorkspaceEntry{Day: "2026-11-11", Badge: "tips", Amount: 100}); err != nil {
+		t.Fatal(err)
+	}
+
 	// удаление дела уносит его учёт, чужое не трогает
 	if err := s.SetWorkspaceMark(a.ID, "tx9", "tips"); err != nil {
 		t.Fatal(err)
@@ -142,6 +181,12 @@ func TestWorkspaceLedgerAccountsMarksWeeks(t *testing.T) {
 	}
 	if ms, _ := s.GetWorkspaceMarks(b.ID); len(ms) != 1 {
 		t.Fatalf("чужое дело не тронуто: %v", ms)
+	}
+	if es, _ := s.GetWorkspaceEntries(a.ID); len(es) != 0 {
+		t.Fatalf("записи ушли с делом: %v", es)
+	}
+	if es, _ := s.GetWorkspaceEntries(b.ID); len(es) != 1 {
+		t.Fatalf("чужие записи не тронуты: %v", es)
 	}
 	if ps, _ := s.GetWorkspaceParams(b.ID); len(ps) != 1 {
 		t.Fatalf("чужие параметры не тронуты: %v", ps)

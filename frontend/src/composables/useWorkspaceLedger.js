@@ -8,6 +8,7 @@ export function useWorkspaceLedger(wsId, get = apiGetJson, send = apiJson, sendR
   const accountIds = ref([])
   const marks = ref(new Map()) // id операции → ключ бейджа
   const weeks = ref([])
+  const entries = ref([]) // ручные (наличные) записи дела
   const params = ref(new Map()) // числовые параметры дела (ключ → значение), чего нет — страница берёт по умолчанию
   const error = ref('')
   let seq = 0
@@ -16,16 +17,18 @@ export function useWorkspaceLedger(wsId, get = apiGetJson, send = apiJson, sendR
     const my = ++seq
     const id = q(wsId())
     try {
-      const [a, m, w, pr] = await Promise.all([
+      const [a, m, w, pr, en] = await Promise.all([
         get(`/workspaces/accounts?id=${id}`),
         get(`/workspaces/marks?id=${id}`),
         get(`/workspaces/weeks?id=${id}`),
-        get(`/workspaces/params?id=${id}`)
+        get(`/workspaces/params?id=${id}`),
+        get(`/workspaces/entries?id=${id}`)
       ])
       if (my !== seq) return
       accountIds.value = Array.isArray(a) ? a : []
       marks.value = new Map((Array.isArray(m) ? m : []).map((x) => [x.tx_id, x.badge]))
       weeks.value = Array.isArray(w) ? w : []
+      entries.value = Array.isArray(en) ? en : []
       params.value = new Map((Array.isArray(pr) ? pr : []).map((x) => [x.key, x.value]))
       error.value = ''
     } catch (e) {
@@ -78,5 +81,20 @@ export function useWorkspaceLedger(wsId, get = apiGetJson, send = apiJson, sendR
     params.value = m
   }
 
-  return { accountIds, linked, marks, weeks, params, error, load, toggleAccount, setMark, setWeek, removeWeek, setParam, resetParam }
+  // ручные записи: добавить (id даёт сервер), поправить, удалить
+  const sortEntries = (l) => [...l].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : a.id < b.id ? -1 : 1))
+  const addEntry = async (e) => {
+    const out = await send('POST', '/workspaces/entries', { workspace_id: wsId(), day: e.day, badge: e.badge, amount: e.amount, note: e.note, tx_id: e.tx_id || '' })
+    entries.value = sortEntries([...entries.value, out])
+  }
+  const updateEntry = async (e) => {
+    await sendRaw('PUT', '/workspaces/entries', { workspace_id: wsId(), id: e.id, day: e.day, badge: e.badge, amount: e.amount, note: e.note, tx_id: e.tx_id || '' })
+    entries.value = sortEntries(entries.value.map((x) => (x.id === e.id ? { ...e } : x)))
+  }
+  const removeEntry = async (id) => {
+    await sendRaw('DELETE', `/workspaces/entries?id=${q(wsId())}&entry=${q(id)}`)
+    entries.value = entries.value.filter((x) => x.id !== id)
+  }
+
+  return { accountIds, linked, marks, weeks, params, entries, error, load, toggleAccount, setMark, setWeek, removeWeek, setParam, resetParam, addEntry, updateEntry, removeEntry }
 }

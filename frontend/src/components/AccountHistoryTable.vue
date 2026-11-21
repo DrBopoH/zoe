@@ -4,6 +4,9 @@ import { formatMoney, formatMaskedIBAN, money as fmtMoney, moneySigned, curSym, 
 import { usePaged } from '../composables/usePaged.js'
 import { counterpartyName, isPersonTransaction } from '../utils/personLayout.js'
 import UiButton from './ui/UiButton.vue'
+import UiIconButton from './ui/UiIconButton.vue'
+import CashEntryForm from './CashEntryForm.vue'
+import { entrySigned, txDate } from '../utils/glovoLedger.js'
 import { effectiveTimes, isDateOnly } from '../utils/historyOrder.js'
 import { tagsFor, cleanTitle } from '../utils/txTags.js'
 import { usersById, personOf, swapAlias } from '../utils/personName.js'
@@ -30,9 +33,14 @@ const props = defineProps({
   badges: { type: Array, default: () => [] },
   // «Снять выбор» (в деле счета выбираются в своём блоке) и подсказка пустой таблицы
   clearable: { type: Boolean, default: true },
-  emptyHint: { type: String, default: 'Выберите карту (клик по плитке, можно несколько) или свечу на графике' }
+  emptyHint: { type: String, default: 'Выберите карту (клик по плитке, можно несколько) или свечу на графике' },
+  // наличные записи дела, прикреплённые к операциям: Map(id операции → записи), рисуются под строкой операции.
+  // saveCash(запись) сохраняет (true — удалось); cashable включает «+ Наличные» в раскрытой строке
+  cash: { type: Object, default: () => new Map() },
+  cashable: { type: Boolean, default: false },
+  saveCash: { type: Function, default: null }
 })
-const emit = defineEmits(['clear', 'clear-range', 'mark'])
+const emit = defineEmits(['clear', 'clear-range', 'mark', 'remove-cash'])
 
 const badgeDef = (t) => props.badges.find((b) => b.key === props.marks.get(t.id)) || null
 
@@ -67,6 +75,7 @@ const { shown, rest, more, reset: resetPage, page } = usePaged(rows, 100)
 watch(() => props.selected.map(a => a.id).join('|') + '|' + (props.range ? props.range.key : ''), () => {
   resetPage()
   openId.value = null
+  cashForm.value = null
 })
 
 
@@ -154,6 +163,35 @@ const details = (t) => {
 }
 
 const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
+
+// Наличные записи под операцией: список, форма добавления внизу и правка записи на месте
+const cashOf = (t) => props.cash.get(t.id) || []
+const withCashTotal = (t) => {
+  const list = cashOf(t)
+  if (!list.length) return null
+  return Math.round((t.amount + list.reduce((s, e) => s + entrySigned(e), 0)) * 100) / 100 + 0
+}
+const cols = computed(() => (props.selected.length > 1 ? 5 : 4))
+const inGroup = (t) => cashOf(t).length > 0 || (props.cashable && openId.value === t.id && !!cashForm.value && cashForm.value.txId === t.id)
+const cashForm = ref(null) // { txId, entry|null }
+const cashBusy = ref(false)
+const armedCash = ref('')
+let armTimer
+const openCashForm = (t, entry = null) => { cashForm.value = { txId: t.id, entry } }
+const onCashSave = async (e) => {
+  if (!props.saveCash) return
+  cashBusy.value = true
+  try { if (await props.saveCash(e)) cashForm.value = null } finally { cashBusy.value = false }
+}
+const onCashTrash = (e) => {
+  if (armedCash.value === e.id) { clearTimeout(armTimer); armedCash.value = ''; emit('remove-cash', e.id); return }
+  armedCash.value = e.id
+  clearTimeout(armTimer)
+  armTimer = setTimeout(() => { armedCash.value = '' }, 4000)
+}
+const cashChip = (e) => props.badges.find((b) => b.key === e.badge) || null
+const dayOfTx = (t) => txDate(t)
+const editingCash = (t, e) => cashForm.value && cashForm.value.txId === t.id && cashForm.value.entry?.id === e.id
 </script>
 
 <template>
@@ -200,7 +238,7 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
           <template v-for="t in shown" :key="t.id">
             <tr
               class="border-b border-slate-800/60 hover:bg-slate-800/40 cursor-pointer transition-colors"
-              :class="openId === t.id && 'bg-slate-800/30'"
+              :class="[openId === t.id && 'bg-slate-800/30', inGroup(t) && 'cash-group']"
               @click="toggleRow(t.id)"
             >
               <td class="p-3 whitespace-nowrap text-slate-400">
@@ -259,6 +297,48 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
                 </dl>
               </td>
             </tr>
+
+            <!-- Наличные записи связки: те же колонки, что у таблицы, сумма стоит под суммой операции -->
+            <template v-for="(e, i) in cashOf(t)" :key="e.id">
+              <tr v-if="editingCash(t, e)" class="cash-group" data-testid="cash-row">
+                <td :colspan="cols" class="px-3 py-2 pl-10">
+                  <CashEntryForm :entry="e" :tx-id="t.id" :day="dayOfTx(t)" :busy="cashBusy" @save="onCashSave" @cancel="cashForm = null" />
+                </td>
+              </tr>
+              <tr v-else class="cash-group cash-line group" data-testid="cash-row">
+                <td class="p-0" />
+                <td v-if="selected.length > 1" class="p-0" />
+                <td class="cash-tree py-2 pr-3" :class="i === cashOf(t).length - 1 && 'cash-tree--last'">
+                  <div class="pl-10 flex items-center gap-2 min-w-0">
+                    <span v-if="cashChip(e)" class="text-[9px] px-1.5 py-0.5 rounded border font-bold shrink-0" :class="cashChip(e).cls">{{ cashChip(e).label }}</span>
+                    <span class="text-slate-300 truncate">{{ e.note || 'Наличные' }}</span>
+                    <span class="text-[9px] uppercase tracking-wider text-slate-600 shrink-0">нал.</span>
+                  </div>
+                </td>
+                <td class="p-0" />
+                <td class="py-2 px-3 text-right whitespace-nowrap">
+                  <span v-if="cashable" class="inline-flex items-center gap-0.5 mr-2 align-middle transition-opacity" :class="armedCash === e.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'">
+                    <span v-if="armedCash === e.id" class="text-[10px] font-bold uppercase tracking-wider text-rose-300 mr-1">Удалить?</span>
+                    <UiIconButton v-else icon="edit" tone="accent" size="sm" title="Править запись" data-testid="cash-edit" @click.stop="openCashForm(t, e)" />
+                    <UiIconButton icon="trash" tone="danger" size="sm" :title="armedCash === e.id ? 'Нажми ещё раз — удалить' : 'Удалить запись'" data-testid="cash-remove" @click.stop="onCashTrash(e)" />
+                  </span>
+                  <span class="font-bold" :class="tone(entrySigned(e))">{{ money(entrySigned(e), t) }}</span>
+                </td>
+              </tr>
+            </template>
+
+            <!-- Итог связки: операция плюс её наличные -->
+            <tr v-if="cashOf(t).length" class="cash-group" data-testid="cash-total">
+              <td :colspan="cols - 1" class="px-3 pb-2 pt-1 text-right text-[10px] uppercase tracking-wider text-slate-500">Итого с наличными</td>
+              <td class="px-3 pb-2 pt-1 text-right whitespace-nowrap font-bold border-t border-dashed border-slate-700" :class="tone(withCashTotal(t))" data-testid="with-cash">{{ money(withCashTotal(t), t) }}</td>
+            </tr>
+
+            <tr v-if="cashable && openId === t.id" class="cash-group">
+              <td :colspan="cols" class="px-3 pb-2 pl-10">
+                <CashEntryForm v-if="cashForm && cashForm.txId === t.id && !cashForm.entry" :tx-id="t.id" :day="dayOfTx(t)" :busy="cashBusy" @save="onCashSave" @cancel="cashForm = null" />
+                <button v-else type="button" class="text-[11px] font-bold text-slate-500 hover:text-sky-300 transition-colors cursor-pointer" data-testid="cash-add" @click.stop="openCashForm(t)">+ Наличные</button>
+              </td>
+            </tr>
           </template>
 
           <tr v-if="!selected.length">
@@ -282,3 +362,13 @@ const toggleRow = (id) => { openId.value = openId.value === id ? null : id }
     </div>
   </div>
 </template>
+
+<style scoped>
+.cash-group > td:first-child { box-shadow: inset 2px 0 0 rgb(56 189 248 / 0.45); }
+.cash-group > td { background-color: rgb(56 189 248 / 0.04); }
+/* линия-связка от операции к записям: вертикаль с коленом к бейджу */
+.cash-tree { position: relative; }
+.cash-tree::before { content: ''; position: absolute; left: 22px; top: 0; bottom: 0; width: 1px; background: rgb(100 116 139 / 0.55); }
+.cash-tree--last::before { bottom: 50%; }
+.cash-tree::after { content: ''; position: absolute; left: 22px; top: 50%; width: 12px; height: 1px; background: rgb(100 116 139 / 0.55); }
+</style>

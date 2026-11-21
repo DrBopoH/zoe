@@ -4,7 +4,7 @@ import FlowChart from './FlowChart.vue'
 import WaterfallChart from './WaterfallChart.vue'
 import UiLoadError from './ui/UiLoadError.vue'
 import UiEmpty from './ui/UiEmpty.vue'
-import { estimateModel, TAX_DEFAULTS } from '../utils/glovoLedger.js'
+import { estimateModel, withCash, TAX_DEFAULTS } from '../utils/glovoLedger.js'
 import { pushRequestError } from '../composables/useToasts.js'
 import { useWorkspaceLedger } from '../composables/useWorkspaceLedger.js'
 import { formatMoney, toLocalDateStr } from '../utils/formatters.js'
@@ -15,11 +15,12 @@ const props = defineProps({
   workspaceId: { type: String, required: true },
   transactions: { type: Array, default: () => [] }
 })
-const { marks, weeks, params, error, load, setParam, resetParam } = useWorkspaceLedger(() => props.workspaceId)
+const { marks, weeks, params, entries, error, load, setParam, resetParam } = useWorkspaceLedger(() => props.workspaceId)
 onMounted(load)
 watch(() => props.workspaceId, load)
 
-const m = computed(() => estimateModel({ transactions: props.transactions, marks: marks.value, weeks: weeks.value, params: params.value, today: toLocalDateStr(new Date()) }))
+const merged = computed(() => withCash(props.transactions, marks.value, entries.value))
+const m = computed(() => estimateModel({ transactions: merged.value.transactions, marks: merged.value.marks, weeks: weeks.value, params: params.value, today: toLocalDateStr(new Date()) }))
 const empty = computed(() => !m.value.flow.length && !m.value.nominal)
 const tone = (v) => (v > 0 ? 'text-emerald-400' : v < 0 ? 'text-rose-400' : 'text-slate-400')
 

@@ -111,3 +111,27 @@ func TestWorkspacePageColumnMigration(t *testing.T) {
 		t.Fatalf("старое дело читается с пустой страницей: %+v %v", list, err)
 	}
 }
+
+func TestWorkspaceEntryTxColumnMigration(t *testing.T) {
+	s, _, _ := newS(t)
+	defer s.Close()
+	// база с ручными записями, созданными до привязки к операции: таблица без столбца tx_id
+	for _, q := range []string{
+		`DROP TABLE workspace_entries`,
+		`CREATE TABLE workspace_entries (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, day TEXT NOT NULL, badge TEXT NOT NULL, amount REAL NOT NULL, note TEXT NOT NULL DEFAULT '')`,
+		`INSERT INTO workspace_entries(id, workspace_id, day, badge, amount, note) VALUES('we_old', 'ws', '2026-11-10', 'loss', 900, 'ремонт')`,
+	} {
+		if _, err := s.coreDB.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 2; i++ { // повторный запуск ничего не ломает
+		if err := s.ensureWorkspaceEntryTxColumn(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	es, err := s.GetWorkspaceEntries("ws")
+	if err != nil || len(es) != 1 || es[0].Note != "ремонт" || es[0].TxID != "" {
+		t.Fatalf("старая запись читается без операции: %+v %v", es, err)
+	}
+}
