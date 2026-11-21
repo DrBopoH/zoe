@@ -48,3 +48,30 @@ export function cardNames(cards, field) {
 
 // короткая подпись карточки: «мальтодекстрин · Nutrimax · 1000 г»
 export const cardTitle = (c) => [c.substance, c.maker, `${c.net_g} г`].filter(Boolean).join(' · ')
+
+// Склад: запас по карточкам от номинала до расчётного. Номинал карточки — нетто × штуки; расход по ней (граммы из партий и списания)
+// приходит в used: Map(id карточки → граммы). Пока партий нет, расчётный остаток равен номиналу. Цены карточек не усредняются:
+// у вещества стоимость остатка — сумма по его карточкам, каждая по своей цене грамма.
+export function stockModel(cards, used = new Map()) {
+  const groups = new Map()
+  for (const c of [...cards].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : a.id < b.id ? -1 : 1))) {
+    const key = String(c.substance).trim().toLowerCase()
+    const nominal = cardGrams(c)
+    const left = Math.min(nominal, Math.max(0, nominal - (used.get(c.id) || 0)))
+    const row = { card: c, nominal, left, pct: nominal > 0 ? left / nominal : 0, valueTotal: cardTotal(c), valueLeft: r2(left * cardPerGram(c)) }
+    if (!groups.has(key)) groups.set(key, { key, name: String(c.substance).trim(), rows: [], nominal: 0, left: 0, valueTotal: 0, valueLeft: 0 })
+    const g = groups.get(key)
+    g.rows.push(row)
+    g.nominal += nominal
+    g.left += left
+    g.valueTotal = r2(g.valueTotal + row.valueTotal)
+    g.valueLeft = r2(g.valueLeft + row.valueLeft)
+  }
+  const list = [...groups.values()].sort((a, b) => a.name.localeCompare(b.name, 'ru'))
+  return {
+    groups: list,
+    cards: cards.length,
+    valueTotal: r2(list.reduce((s, g) => s + g.valueTotal, 0)),
+    valueLeft: r2(list.reduce((s, g) => s + g.valueLeft, 0))
+  }
+}

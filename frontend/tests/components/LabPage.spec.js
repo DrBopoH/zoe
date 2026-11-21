@@ -67,8 +67,8 @@ describe('LabPage', () => {
 
   it('остальные части пока с подсказкой', async () => {
     const w = await mountLab()
-    await w.findAll('[role="tab"]')[1].trigger('click')
-    expect(w.text()).toContain('Склад появится')
+    await w.findAll('[role="tab"]')[2].trigger('click')
+    expect(w.text()).toContain('Партии появятся')
     expect(w.text()).not.toContain('Счета дела')
     w.unmount()
   })
@@ -122,6 +122,39 @@ describe('LabPage', () => {
     await flushPromises()
     expect(calls.some((c) => c[0] === 'DELETE' && c[1].includes('doc=wd_1'))).toBe(true)
     expect(w.find('[data-testid="card-row"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('Склад: вещества с карточками, запас от номинала, цены карточек раздельно', async () => {
+    docs.push(
+      { id: 'wd_2', kind: 'card', day: '2026-11-12', data: { tx_id: 't1', substance: 'Мальтодекстрин', maker: 'Другой', net_g: 500, price: 60, qty: 2, note: '' } },
+      { id: 'wd_3', kind: 'card', day: '2026-11-12', data: { tx_id: 't1', substance: 'фруктоза', maker: '', net_g: 1000, price: 120, qty: 2, note: '' } }
+    )
+    const w = await mountLab()
+    await w.findAll('[role="tab"]')[1].trigger('click')
+    await flushPromises()
+    const groups = w.findAll('[data-testid="stock-group"]')
+    expect(groups.map((g) => g.find('header div').text())).toEqual(['мальтодекстрин', 'фруктоза']) // «Мальтодекстрин» с большой буквы — то же вещество, группы по алфавиту
+    const malt = norm(groups[0].text())
+    expect(malt).toContain('6000 г из 6000 г') // 5×1000 + 2×500
+    expect(malt).toContain('600,00') // 480 + 2×60: цены карточек не усреднены
+    expect(malt).toContain('0,096 ₴/г')
+    expect(malt).toContain('0,12 ₴/г')
+    expect(groups[0].findAll('[data-testid="stock-card"]').length).toBe(2)
+    expect(w.findAll('[data-testid="stock-bar"]')[0].attributes('style')).toContain('100%')
+    const totals = norm(w.get('[data-testid="stock-totals"]').text())
+    expect(totals).toContain('Веществ2')
+    expect(totals).toContain('3 карточ.')
+    expect(totals).toContain('840,00') // 600 + 240
+    w.unmount()
+  })
+
+  it('Склад без карточек подсказывает, где их вносить', async () => {
+    docs.length = 0
+    const w = await mountLab()
+    await w.findAll('[role="tab"]')[1].trigger('click')
+    await flushPromises()
+    expect(w.text()).toContain('+ Товар')
     w.unmount()
   })
 })
