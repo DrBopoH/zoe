@@ -116,3 +116,70 @@ test('сводка: только недели с номиналом и приш�
   assert.deepEqual(timelineSummary(rows), { weeks: 2, nominal: 3200, received: 2700.5, withheld: 499.5, withheldPct: 15.61 })
   assert.deepEqual(timelineSummary([]), { weeks: 0, nominal: 0, received: 0, withheld: 0, withheldPct: null })
 })
+
+import { estimateModel } from '../src/utils/glovoLedger.js'
+
+test('смета: приход, уход, чистый результат и сверка номинала', () => {
+  const tx = [
+    { id: 'a', time: '2026-11-10T10:00:00', amount: 1000 }, // пн 09.11 — Доход
+    { id: 'b', time: '2026-11-12T10:00:00', amount: 300 }, // Чай
+    { id: 'c', time: '2026-11-13T10:00:00', amount: -200 }, // Расход
+    { id: 'd', time: '2026-11-24T10:00:00', amount: -50 }, // Убыток, через неделю пропуска
+    { id: 'z', time: '2026-11-11T10:00:00', amount: 99999 } // без бейджа — не считается
+  ]
+  const marks = new Map([['a', 'income'], ['b', 'tips'], ['c', 'expense'], ['d', 'loss']])
+  const m = estimateModel({ transactions: tx, marks, weeks: [{ week: '2026-11-02', nominal: 1500 }], today: '2026-11-25' })
+  assert.equal(m.inflow, 1300)
+  assert.equal(m.outflow, -250)
+  assert.equal(m.net, 1050)
+  assert.equal(m.taxable, 1000)
+  assert.equal(m.cash, 300)
+  assert.equal(m.nominal, 1500) // выплата 10.11 пришла на следующей неделе после 02.11
+  assert.equal(m.received, 1000)
+  assert.equal(m.withheld, 500)
+  assert.deepEqual(m.flow.map((r) => r.week), ['2026-11-09', '2026-11-16', '2026-11-23'])
+  assert.equal(m.flow[0].net, 1100)
+  assert.equal(m.flow[1].net, 0) // пустая неделя в ряду
+  assert.equal(m.flow[2].cum, 1050)
+})
+
+test('смета: без помеченных операций потока нет', () => {
+  const m = estimateModel({ transactions: [], marks: new Map(), weeks: [], today: '2026-11-25' })
+  assert.equal(m.net, 0)
+  assert.deepEqual(m.flow, [])
+})
+
+import { taxModel, TAX_DEFAULTS } from '../src/utils/glovoLedger.js'
+
+test('налоги ФОП: ЕП и ВС с выплат месяца, ЕСВ за каждый месяц подряд', () => {
+  const tx = [
+    { id: 'a', time: '2026-09-10T10:00:00', amount: 1000 },
+    { id: 'b', time: '2026-11-17T10:00:00', amount: 6721.61 },
+    { id: 'c', time: '2026-11-12T10:00:00', amount: 500 } // Доход — не облагается здесь
+  ]
+  const marks = new Map([['a', 'payout'], ['b', 'payout'], ['c', 'income']])
+  const t = taxModel({ transactions: tx, marks, params: new Map(), today: '2026-11-21' })
+  assert.deepEqual(t.months.map((m) => m.month), ['2026-09', '2026-10', '2026-11'])
+  assert.equal(t.months[0].tax, 50)
+  assert.equal(t.months[0].war, 10)
+  assert.equal(t.months[1].payout, 0)
+  assert.equal(t.months[1].total, TAX_DEFAULTS.esv) // пустой месяц — только ЕСВ
+  assert.equal(t.payout, 7721.61)
+  assert.equal(t.esv, 5707.02)
+  assert.equal(t.tax, 386.08)
+})
+
+test('налоги ФОП: свои параметры дела и пустой результат без выплат', () => {
+  const tx = [{ id: 'a', time: '2026-11-10T10:00:00', amount: 1000 }]
+  const t = taxModel({ transactions: tx, marks: new Map([['a', 'payout']]), params: new Map([['tax_rate', 3], ['war_rate', 0], ['esv', 100]]), today: '2026-11-21' })
+  assert.deepEqual(t.months.map((m) => [m.tax, m.war, m.esv]), [[30, 0, 100]])
+  assert.deepEqual(taxModel({ transactions: tx, marks: new Map([['a', 'income']]), params: new Map(), today: '2026-11-21' }).months, [])
+})
+
+test('смета: «в кармане» считается после налогов', () => {
+  const tx = [{ id: 'a', time: '2026-11-10T10:00:00', amount: 1000 }]
+  const m = estimateModel({ transactions: tx, marks: new Map([['a', 'payout']]), weeks: [], params: new Map(), today: '2026-11-21' })
+  assert.equal(m.net, 1000)
+  assert.equal(m.afterTax, r2like(1000 - 50 - 10 - 1902.34))
+})
+function r2like(v) { return Math.round(v * 100) / 100 }

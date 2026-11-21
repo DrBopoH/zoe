@@ -132,3 +132,82 @@ export function timelineSummary(rows) {
   const withheld = r2(nominal - received)
   return { weeks: paid.length, nominal, received, withheld, withheldPct: nominal > 0 ? r2((withheld / nominal) * 100) : null }
 }
+
+// ───────── Смета: сведение всех данных дела ─────────
+/**
+ * Модель сметы. Берёт только помеченные операции (marks) и записи номинала.
+ *  - totals: итоги по бейджам; inflow — приход (Чай + Доход + Выплата), outflow — уход (Расход + Убыток, число отрицательное), net — чистый результат;
+ *  - taxable — налогооблагаемый приход (Доход + Выплата), cash — чаевые наличными;
+ *  - nominal / received / withheld — сверка номинала с приходом (только недели, где пришла выплата), как на таймлайне;
+ *  - flow — по неделям (понедельник) от первой до последней помеченной операции подряд: суммы по бейджам, net и накопленный cum.
+ */
+export function estimateModel({ transactions, marks, weeks, params, today }) {
+  const totals = badgeTotals(transactions, marks)
+  const sum = (keys) => r2(keys.reduce((s, k) => s + totals[k].sum, 0))
+  const inflow = sum(['tips', 'income', 'payout'])
+  const outflow = sum(['expense', 'loss'])
+  const rows = timelineWeeks({ weeks, transactions, marks, today, minWeeks: 1 })
+  const rec = timelineSummary(rows)
+
+  const byWeek = new Map()
+  for (const t of transactions || []) {
+    const k = marks.get(t.id)
+    if (!k || !totals[k]) continue
+    const w = weekMonday(txDate(t))
+    if (!w) continue
+    const e = byWeek.get(w) || Object.fromEntries(BADGES.map((b) => [b.key, 0]))
+    e[k] += Number(t.amount) || 0
+    byWeek.set(w, e)
+  }
+  const flow = []
+  if (byWeek.size) {
+    const keys = [...byWeek.keys()].sort()
+    let cum = 0
+    for (let w = keys[0]; w <= keys[keys.length - 1]; w = addDays(w, 7)) {
+      const e = byWeek.get(w) || Object.fromEntries(BADGES.map((b) => [b.key, 0]))
+      const row = { week: w }
+      let net = 0
+      for (const b of BADGES) { row[b.key] = r2(e[b.key]); net += e[b.key] }
+      cum += net
+      flow.push({ ...row, net: r2(net), cum: r2(cum) })
+    }
+  }
+  const taxes = taxModel({ transactions, marks, params, today })
+  const net = r2(inflow + outflow)
+  return { totals, inflow, outflow, net, taxes, afterTax: r2(net - taxes.total), taxable: sum(['income', 'payout']), cash: totals.tips.sum, ...rec, flow }
+}
+// ───────── Налоги ФОП ─────────
+// Налог платится с «Выплат» (приход на счёт ФОП приходит целиком); «Доход» на сберкарту Glovo облагает сам, чай — наличные.
+// Значения по умолчанию — ФОП 3 группы 2026: единый налог 5% и военный сбор 1% от дохода, ЕСВ фиксированно за каждый месяц (22% от минималки 8647).
+// Любое значение дело может переопределить параметром (tax_rate, war_rate, esv).
+export const TAX_DEFAULTS = { tax_rate: 5, war_rate: 1, esv: 1902.34 }
+
+/**
+ * Налоги по месяцам: от месяца первой «Выплаты» до последнего месяца с выплатой или текущего (что позже).
+ * Единый налог и военный сбор — процент от суммы выплат месяца, ЕСВ — фиксированная сумма за каждый месяц, даже без дохода.
+ * params — Map(ключ → число) параметров дела. Без «Выплат» налогов нет.
+ */
+export function taxModel({ transactions, marks, params, today }) {
+  const p = { ...TAX_DEFAULTS }
+  for (const k of Object.keys(p)) if (params?.has(k)) p[k] = Number(params.get(k)) || 0
+  const byMonth = new Map()
+  for (const t of transactions || []) {
+    if (marks.get(t.id) !== 'payout') continue
+    const m = txDate(t).slice(0, 7)
+    if (m) byMonth.set(m, (byMonth.get(m) || 0) + (Number(t.amount) || 0))
+  }
+  const months = []
+  if (byMonth.size) {
+    const keys = [...byMonth.keys()].sort()
+    const last = [keys[keys.length - 1], (today || '').slice(0, 7)].sort().pop()
+    for (let [y, mo] = keys[0].split('-').map(Number); `${y}-${String(mo).padStart(2, '0')}` <= last; mo === 12 ? (y++, (mo = 1)) : mo++) {
+      const key = `${y}-${String(mo).padStart(2, '0')}`
+      const payout = r2(byMonth.get(key) || 0)
+      const tax = r2((payout * p.tax_rate) / 100)
+      const war = r2((payout * p.war_rate) / 100)
+      months.push({ month: key, payout, tax, war, esv: p.esv, total: r2(tax + war + p.esv) })
+    }
+  }
+  const sum = (k) => r2(months.reduce((s, m) => s + m[k], 0))
+  return { rates: p, months, payout: sum('payout'), tax: sum('tax'), war: sum('war'), esv: sum('esv'), total: sum('total') }
+}
