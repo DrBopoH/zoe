@@ -106,6 +106,15 @@ func TestWorkspacesAPI(t *testing.T) {
 	if w := do("POST", "/api/workspaces", `{"name":"x","color":"red"}`); w.Code != 400 {
 		t.Fatalf("неверный цвет — 400, а не %d", w.Code)
 	}
+	if w := do("POST", "/api/workspaces", `{"name":"x","page":"Не Ключ"}`); w.Code != 400 {
+		t.Fatalf("неверный ключ страницы — 400, а не %d", w.Code)
+	}
+	w2 := do("POST", "/api/workspaces", `{"name":"G","page":"glovo"}`)
+	if w2.Code != 200 || !strings.Contains(w2.Body.String(), `"page":"glovo"`) {
+		t.Fatalf("ключ страницы в ответе: %d %s", w2.Code, w2.Body.String())
+	}
+	var second struct{ ID string }
+	_ = json.Unmarshal(w2.Body.Bytes(), &second)
 	if w := do("PUT", "/api/workspaces", `{"id":"nope","name":"x"}`); w.Code != 404 {
 		t.Fatalf("правка чужого id — 404, а не %d", w.Code)
 	}
@@ -121,6 +130,7 @@ func TestWorkspacesAPI(t *testing.T) {
 	if w := do("DELETE", "/api/workspaces?id="+created.ID, ""); w.Code != 200 {
 		t.Fatalf("удаление: %d", w.Code)
 	}
+	do("DELETE", "/api/workspaces?id="+second.ID, "")
 	if w := do("GET", "/api/workspaces", ""); strings.TrimSpace(w.Body.String()) != "[]" {
 		t.Fatalf("после удаления: %s", w.Body.String())
 	}

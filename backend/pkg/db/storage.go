@@ -254,12 +254,13 @@ CREATE TABLE IF NOT EXISTS iban_masks (
 	custom INTEGER NOT NULL DEFAULT 0
 );
 -- Дела (рабочие пространства): сфера жизни или проекта пользователя — Glovo, семейный бюджет, айти-проект. Ссылаются на остальные данные,
--- а своё (имя, обложка и дальше локальные пометки) хранят здесь. Обложка — цвет #rrggbb и/или ссылка на картинку http(s).
+-- а своё (имя, обложка, ключ страницы и дальше локальные пометки) хранят здесь. Обложка — цвет #rrggbb и/или ссылка на картинку http(s).
 CREATE TABLE IF NOT EXISTS workspaces (
 	id         TEXT PRIMARY KEY,
 	name       TEXT NOT NULL,
 	color      TEXT NOT NULL DEFAULT '',
 	image      TEXT NOT NULL DEFAULT '',
+	page       TEXT NOT NULL DEFAULT '',
 	created_at INTEGER NOT NULL
 );
 -- Ручные правки счёта (лимит, IBAN, PAN) — это пользовательские данные, им не место в кеше.
@@ -441,6 +442,15 @@ func (s *Storage) ensureAccountLifeColumns() error {
 	return nil
 }
 
+// ensureWorkspacePageColumn добавляет делам ключ страницы (какая страница фронта открывается по карточке; пусто — заглушка).
+func (s *Storage) ensureWorkspacePageColumn() error {
+	if hasColumn(s.coreDB, "workspaces", "page") {
+		return nil
+	}
+	_, err := s.coreDB.Exec(`ALTER TABLE workspaces ADD COLUMN page TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
 func (s *Storage) initCore() error {
 	s.coreMu.Lock()
 	defer s.coreMu.Unlock()
@@ -457,6 +467,9 @@ func (s *Storage) initCore() error {
 	}
 	if err := s.dropLegacyBinanceCore(); err != nil {
 		return fmt.Errorf("drop legacy binance tables: %w", err)
+	}
+	if err := s.ensureWorkspacePageColumn(); err != nil {
+		return err
 	}
 	if err := s.ensureAccountLifeColumns(); err != nil {
 		return err
