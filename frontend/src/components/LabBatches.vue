@@ -33,7 +33,7 @@ const trash = (b) => {
   clearTimeout(timer)
   timer = setTimeout(() => { armed.value = '' }, 4000)
 }
-const cardName = (l) => (l.card ? `${l.card.substance} · ${l.card.maker || 'без производителя'} · ${numText(l.card.net_g, 1)} г` : 'карточка удалена')
+const cardName = (l) => (l.card ? `${l.card.substance} · ${l.card.maker || 'без производителя'} · ${numText(l.card.net_g, 3)} г` : 'карточка удалена')
 </script>
 
 <template>
@@ -69,7 +69,7 @@ const cardName = (l) => (l.card ? `${l.card.substance} · ${l.card.maker || 'б�
           <li v-for="(l, i) in c.lines" :key="i" class="flex flex-wrap justify-between gap-x-4">
             <span :class="l.missing ? 'text-rose-300' : 'text-slate-300'">{{ cardName(l) }}</span>
             <span class="text-slate-400 tabular-nums">
-              {{ numText(l.grams, 2) }} г<template v-if="b.pieces"> ({{ numText(l.grams / b.pieces, 2) }} г/шт)</template> · {{ formatMoney(l.cost) }}
+              {{ numText(l.grams, 3) }} г<template v-if="b.pieces"> ({{ numText(l.grams / b.pieces, 3) }} г/шт)</template> · {{ formatMoney(l.cost) }}
             </span>
           </li>
         </ul>

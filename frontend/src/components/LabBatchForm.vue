@@ -33,7 +33,7 @@ const options = computed(() => [...props.cards]
   .sort((a, b) => a.substance.localeCompare(b.substance, 'ru') || (a.day < b.day ? -1 : 1))
   .map((c) => ({ card: c, left: Math.max(0, cardGrams(c) - (used.value.get(c.id) || 0)) })))
 const optionOf = (id) => options.value.find((o) => o.card.id === id) || null
-const label = (o) => `${o.card.substance} · ${o.card.maker || 'без производителя'} · ${numText(o.card.net_g, 1)} г · ост. ${numText(o.left, 1)} г · ${numText(cardPerGram(o.card), 4)} ₴/г`
+const label = (o) => `${o.card.substance} · ${o.card.maker || 'без производителя'} · ${numText(o.card.net_g, 3)} г · ост. ${numText(o.left, 3)} г · ${numText(cardPerGram(o.card), 4)} ₴/г`
 
 const pieces = computed(() => Number(f.value.pieces) || 0)
 const clean = computed(() => cleanBatch(f.value))
@@ -42,15 +42,16 @@ const cost = computed(() => (clean.value ? batchCost(clean.value, props.cards) :
 const over = computed(() => {
   const sum = new Map()
   for (const l of f.value.lines) sum.set(l.card_id, (sum.get(l.card_id) || 0) + (Number(String(l.grams).replace(',', '.')) || 0))
-  return [...sum].filter(([id, g]) => id && optionOf(id) && g > optionOf(id).left + 1e-9).map(([id]) => optionOf(id).card.substance)
+  return [...sum].filter(([id, g]) => id && optionOf(id) && g > optionOf(id).left + 1e-6).map(([id]) => optionOf(id).card.substance)
 })
 const taken = (id, i) => f.value.lines.some((l, j) => j !== i && l.card_id === id)
 const can = computed(() => !!clean.value && !over.value.length && !props.busy)
 
 const addLine = () => f.value.lines.push({ card_id: '', grams: '' })
 const dropLine = (i) => { if (f.value.lines.length > 1) f.value.lines.splice(i, 1) }
-const perPiece = (l) => (pieces.value && Number(l.grams) > 0 ? numText(Number(String(l.grams).replace(',', '.')) / pieces.value, 2) : '')
-const setPer = (l, v) => { const n = Number(String(v).replace(',', '.')); l.grams = n > 0 && pieces.value ? String(Math.round(n * pieces.value * 100) / 100) : '' }
+// значение числового поля — с точкой, не с запятой: иначе браузер его отбросит
+const perPiece = (l) => { const g = Number(String(l.grams).replace(',', '.')); return pieces.value && g > 0 ? String(Math.round((g / pieces.value) * 1000) / 1000) : '' }
+const setPer = (l, v) => { const n = Number(String(v).replace(',', '.')); l.grams = n > 0 && pieces.value ? String(Math.round(n * pieces.value * 1000) / 1000) : '' }
 
 const submit = () => { if (can.value) emit('save', { ...(props.batch ? { id: props.batch.id } : {}), ...clean.value }) }
 </script>
@@ -95,7 +96,7 @@ const submit = () => { if (can.value) emit('save', { ...(props.batch ? { id: pro
     <div class="flex flex-wrap items-center justify-end gap-3">
       <span v-if="cost" class="text-[11px] text-slate-400 mr-auto tabular-nums" data-testid="batch-cost">
         Себестоимость <span class="text-slate-200 font-bold">{{ formatMoney(cost.cost) }}</span>
-        <template v-if="cost.perPiece !== null"> · штука <span class="text-emerald-400 font-bold">{{ formatMoney(cost.perPiece) }}</span> · {{ numText(cost.gramsPerPiece, 2) }} г/шт</template>
+        <template v-if="cost.perPiece !== null"> · штука <span class="text-emerald-400 font-bold">{{ formatMoney(cost.perPiece) }}</span> · {{ numText(cost.gramsPerPiece, 3) }} г/шт</template>
       </span>
       <UiButton variant="cancel" size="sm" @click="emit('cancel')">Отмена</UiButton>
       <UiButton variant="primary" size="sm" :disabled="!can" @click="submit">{{ busy ? 'Сохраняю…' : batch ? 'Сохранить' : 'Создать партию' }}</UiButton>

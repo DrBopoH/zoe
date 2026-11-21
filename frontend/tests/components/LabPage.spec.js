@@ -223,4 +223,18 @@ describe('LabPage', () => {
     expect(w.find('[data-testid="batch"]').exists()).toBe(false)
     w.unmount()
   })
+
+  it('Партии: дробные граммы на штуку не теряются (16,667 г/шт — с точкой в поле)', async () => {
+    const w = await mountLab()
+    await w.findAll('[role="tab"]')[2].trigger('click')
+    await flushPromises()
+    await w.get('[data-testid="batch-new"]').trigger('click')
+    await setBy(document.querySelector('[data-field="pieces"]'), '6')
+    await setBy(document.querySelector('[data-field="card"]'), 'wd_1')
+    await setBy(document.querySelector('[data-field="grams"]'), '100.125')
+    expect(document.querySelector('[data-field="per"]').value).toBe('16.688')
+    await setBy(document.querySelector('[data-field="per"]'), '0.125')
+    expect(document.querySelector('[data-field="grams"]').value).toBe('0.75')
+    w.unmount()
+  })
 })

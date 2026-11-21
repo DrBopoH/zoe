@@ -9,6 +9,8 @@ export const LAB_BADGES = [
 // Карточки товаров. Карточка — конкретная закупка: вещество, производитель (необязательно), фасовка (нетто, г), цена за штуку и число штук.
 // Цены не усредняются: одно вещество от двух производителей или в фасовках 100/500/1000 г остаётся разными карточками.
 const r2 = (v) => Math.round(v * 100) / 100 + 0
+// граммы считаем с точностью до миллиграмма: весы лаба точнее грамма, а ошибки float (0,1 + 0,2) не накапливаются
+const r3 = (v) => Math.round(v * 1000) / 1000 + 0
 
 export const CARD_KIND = 'card'
 
@@ -57,7 +59,7 @@ export function stockModel(cards, used = new Map()) {
   for (const c of [...cards].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : a.id < b.id ? -1 : 1))) {
     const key = String(c.substance).trim().toLowerCase()
     const nominal = cardGrams(c)
-    const left = Math.min(nominal, Math.max(0, nominal - (used.get(c.id) || 0)))
+    const left = Math.min(nominal, Math.max(0, r3(nominal - (used.get(c.id) || 0))))
     const row = { card: c, nominal, left, pct: nominal > 0 ? left / nominal : 0, valueTotal: cardTotal(c), valueLeft: r2(left * cardPerGram(c)) }
     if (!groups.has(key)) groups.set(key, { key, name: String(c.substance).trim(), rows: [], nominal: 0, left: 0, valueTotal: 0, valueLeft: 0 })
     const g = groups.get(key)
@@ -92,7 +94,7 @@ export function batchCode(day, batches) {
 export function cleanBatch(f) {
   const n = (v) => Number(String(v ?? '').replace(',', '.'))
   const code = String(f.code || '').trim()
-  const lines = (f.lines || []).map((l) => ({ card_id: String(l.card_id || ''), grams: r2(n(l.grams)) }))
+  const lines = (f.lines || []).map((l) => ({ card_id: String(l.card_id || ''), grams: r3(n(l.grams)) }))
   const pieces = f.pieces === '' || f.pieces == null ? 0 : n(f.pieces)
   if (!code || !/^\d{4}-\d{2}-\d{2}$/.test(f.day || '') || !lines.length) return null
   if (lines.some((l) => !l.card_id || !(l.grams > 0))) return null
@@ -105,7 +107,7 @@ export function batchUsage(batches, except = '') {
   const m = new Map()
   for (const b of batches) {
     if (b.id === except) continue
-    for (const l of b.lines || []) m.set(l.card_id, (m.get(l.card_id) || 0) + l.grams)
+    for (const l of b.lines || []) m.set(l.card_id, r3((m.get(l.card_id) || 0) + l.grams))
   }
   return m
 }
@@ -115,10 +117,11 @@ export function batchCost(batch, cards) {
   const byId = new Map(cards.map((c) => [c.id, c]))
   const lines = (batch.lines || []).map((l) => {
     const card = byId.get(l.card_id) || null
-    return { card, grams: l.grams, cost: card ? r2(l.grams * cardPerGram(card)) : 0, missing: !card }
+    return { card, grams: l.grams, raw: card ? l.grams * cardPerGram(card) : 0, cost: card ? r2(l.grams * cardPerGram(card)) : 0, missing: !card }
   })
-  const cost = r2(lines.reduce((s, l) => s + l.cost, 0))
-  const grams = lines.reduce((s, l) => s + l.grams, 0)
+  // итог — из нерокруглённых строк, чтобы копейки строк не набегали в сумму
+  const cost = r2(lines.reduce((s, l) => s + l.raw, 0))
+  const grams = r3(lines.reduce((s, l) => s + l.grams, 0))
   const pieces = batch.pieces || 0
-  return { lines, cost, grams, perPiece: pieces ? r2(cost / pieces) : null, gramsPerPiece: pieces ? Math.round((grams / pieces) * 100) / 100 : null }
+  return { lines, cost, grams, perPiece: pieces ? r2(cost / pieces) : null, gramsPerPiece: pieces ? r3(grams / pieces) : null }
 }

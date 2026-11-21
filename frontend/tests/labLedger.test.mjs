@@ -121,3 +121,14 @@ test('себестоимость партии: каждая строка по ц
   assert.equal(u.get('a'), 150)
   assert.equal(batchUsage([b], 'p1').size, 0) // править партию: её строки не считаются
 })
+
+test('граммы — до миллиграмма: 0,125 г не округляется до 0,13, суммы без хвостов float', () => {
+  const cards = [{ id: 'a', substance: 'x', net_g: 100, price: 135, qty: 1 }]
+  assert.equal(cleanBatch({ day: '2026-11-21', code: '1', lines: [{ card_id: 'a', grams: '0,125' }] }).lines[0].grams, 0.125)
+  assert.equal(cleanBatch({ day: '2026-11-21', code: '1', lines: [{ card_id: 'a', grams: '0.0004' }] }), null) // меньше миллиграмма — ноль
+  assert.equal(batchUsage([{ id: 'p', lines: [{ card_id: 'a', grams: 0.1 }] }, { id: 'q', lines: [{ card_id: 'a', grams: 0.2 }] }]).get('a'), 0.3)
+  const c = batchCost({ pieces: 3, lines: [{ card_id: 'a', grams: 0.125 }, { card_id: 'a', grams: 10 }] }, cards)
+  assert.equal(c.grams, 10.125)
+  assert.equal(c.gramsPerPiece, 3.375)
+  assert.equal(stockModel(cards, new Map([['a', 0.3]])).groups[0].rows[0].left, 99.7)
+})
