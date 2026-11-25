@@ -7,5 +7,4 @@
 *.db-shm
 
 .vscode
-.claude
-.commits/
+.sky/
